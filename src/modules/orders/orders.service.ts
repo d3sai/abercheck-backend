@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   type Manager,
   type Order,
+  OrderType,
   type OrderStatus,
   type Payment,
   Prisma,
@@ -13,9 +14,16 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Initiator } from '../refunds/refund.events';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { UpdateOrderDto } from './dto/update-order.dto';
-import { allocateShares, nextPartIndex, rollUp } from './order-group';
-import { groupNetPaid, lockGroup, lockOrderByNumber, syncGroupStatus } from './order-ledger';
+import { allocateShares, liveParts, nextPartIndex, rollUp } from './order-group';
 import {
+  groupNetPaid,
+  lockGroup,
+  lockOrderByNumber,
+  resolveBaseNumber,
+  syncGroupStatus,
+} from './order-ledger';
+import {
+  baseNumberOf,
   generateClosingOrderNumber,
   normalizeBaseNumber,
   normalizePartNumber,
@@ -33,6 +41,13 @@ export interface OrderFilter {
 export interface OrderWithPaid<T extends Order = Order> {
   order: T;
   amountPaid: Prisma.Decimal;
+  // Set for a whole number: every number of the group that is still alive.
+  orderNumbers?: string[];
+}
+
+export interface GroupOrderItem {
+  orderNumber: string;
+  amountDue: string;
 }
 
 export type OrderWithManager = Order & { manager: Manager };
@@ -124,6 +139,64 @@ export class OrdersService {
     return order;
   }
 
+  // Several different 1C numbers paid by one payment: each keeps its own number and amount, but
+  // they form one group under the first number, so a payment, a status and a refund cover them all.
+  async createGroup(
+    managerId: number,
+    items: GroupOrderItem[],
+    common: { clientName: string; exchangeRate?: string; comment?: string; requisites?: string },
+    options?: { notify?: boolean },
+  ): Promise<Order[]> {
+    const numbers = items.map((item) => baseNumberOf(normalizeBaseNumber(item.orderNumber)));
+    const baseNumber = numbers[0];
+    if (baseNumber === undefined || new Set(numbers).size !== numbers.length) {
+      throw new OrderNumberTakenError(baseNumber ?? '');
+    }
+
+    let orders: Order[];
+    try {
+      orders = await this.prisma.$transaction(async (tx) => {
+        const taken = await tx.order.findMany({
+          where: { OR: [{ orderNumber: { in: numbers } }, { baseNumber: { in: numbers } }] },
+          select: { orderNumber: true },
+        });
+        if (taken.length > 0) {
+          throw new OrderNumberTakenError(taken[0]!.orderNumber);
+        }
+        const created: Order[] = [];
+        for (const [index, item] of items.entries()) {
+          created.push(
+            await tx.order.create({
+              data: {
+                orderType: OrderType.REQUISITES,
+                orderNumber: numbers[index]!,
+                baseNumber,
+                clientName: common.clientName,
+                amountDue: item.amountDue,
+                exchangeRate: common.exchangeRate,
+                comment: index === 0 ? common.comment : `Оплата разом із № ${baseNumber}`,
+                requisites: index === 0 ? common.requisites : undefined,
+                managerId,
+              },
+            }),
+          );
+        }
+        return created;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new OrderNumberTakenError(baseNumber);
+      }
+      throw error;
+    }
+    if (options?.notify ?? false) {
+      for (const order of orders) {
+        this.events.emit(OrderEvents.Created, { order } satisfies OrderCreated);
+      }
+    }
+    return orders;
+  }
+
   // One entry per 1C number: an unpaid number is listed once, with the total of all its parts.
   async findUnpaid(
     limit: number,
@@ -144,9 +217,12 @@ export class OrdersService {
     return { items: await this.groupsWithBalance(page.map((head) => head.baseNumber)), nextCursor };
   }
 
-  // The whole number as one record: total due, everything paid against it.
+  // The whole number as one record: total due, everything paid against it. Any number of a group
+  // finds the group.
   async findWithBalance(orderNumber: string): Promise<OrderWithPaid<OrderWithManager> | null> {
-    const [group] = await this.groupsWithBalance([normalizeBaseNumber(orderNumber)]);
+    const [group] = await this.groupsWithBalance([
+      await resolveBaseNumber(this.prisma, orderNumber),
+    ]);
     return group ?? null;
   }
 
@@ -345,7 +421,15 @@ export class OrdersService {
     const groups = await this.loadGroups(baseNumbers);
     return baseNumbers.flatMap((baseNumber) => {
       const group = groups.get(baseNumber);
-      return group ? [{ order: rollUp(group.parts), amountPaid: group.paid }] : [];
+      return group
+        ? [
+            {
+              order: rollUp(group.parts),
+              amountPaid: group.paid,
+              orderNumbers: liveParts(group.parts).map((part) => part.orderNumber),
+            },
+          ]
+        : [];
     });
   }
 

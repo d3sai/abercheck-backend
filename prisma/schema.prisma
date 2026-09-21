@@ -22,6 +22,7 @@ enum OrderStatus {
 enum OrderType {
   REGULAR
   MINUS_CLOSING
+  REQUISITES
 
   @@map("order_type")
 }
@@ -80,6 +81,7 @@ model Order {
   amountDue     Decimal     @map("amount_due") @db.Decimal(14, 2)
   exchangeRate  Decimal?    @map("exchange_rate") @db.Decimal(8, 4)
   comment       String?
+  requisites    String?
   orderType     OrderType   @default(REGULAR) @map("order_type")
   status        OrderStatus @default(AWAITING_PAYMENT)
   managerId     Int         @map("manager_id")

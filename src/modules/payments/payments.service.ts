@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MatchType, type Order, type Payment, Prisma } from '../../generated/prisma/client';
 import { liveParts, pickAnchor, rollUp } from '../orders/order-group';
-import { groupNetPaid, lockGroup, syncGroupStatus } from '../orders/order-ledger';
+import {
+  groupNetPaid,
+  lockGroup,
+  resolveBaseNumber,
+  syncGroupStatus,
+} from '../orders/order-ledger';
 import { normalizeBaseNumber } from '../orders/order-number';
 import { OrderCancelledError, OrderNotFoundError } from '../orders/orders.errors';
 import { isUniqueViolation } from '../../common/prisma/prisma-errors';
@@ -65,7 +70,7 @@ export class PaymentsService {
       }
 
       const number = normalizeBaseNumber(orderNumber);
-      const parts = await lockGroup(tx, number);
+      const parts = await lockGroup(tx, await resolveBaseNumber(tx, orderNumber));
       if (parts.length === 0) {
         throw new OrderNotFoundError(number);
       }
@@ -136,7 +141,7 @@ export class PaymentsService {
   ): Promise<PaymentRecorded | PaymentUnmatched> {
     const reportedOrderNumber = dto.order_number ?? null;
     const parts = reportedOrderNumber
-      ? await lockGroup(tx, normalizeBaseNumber(reportedOrderNumber))
+      ? await lockGroup(tx, await resolveBaseNumber(tx, reportedOrderNumber))
       : [];
     const anchor = parts.length > 0 ? pickAnchor(parts) : null;
 

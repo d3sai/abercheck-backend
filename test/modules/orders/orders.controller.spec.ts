@@ -37,6 +37,7 @@ describe('OrdersController', () => {
       data: [
         {
           order_number: '0000-066717',
+          order_numbers: ['0000-066717'],
           client_name: 'Іваненко Іван',
           amount_due: '1250.50',
           amount_paid: '0.00',

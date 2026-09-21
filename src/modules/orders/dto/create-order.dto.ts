@@ -46,4 +46,10 @@ export class CreateOrderDto {
   @IsString()
   @MaxLength(2000)
   comment?: string;
+
+  // Payment details (cards, IBANs, recipients) of an order paid to other requisites.
+  @IsOptional()
+  @IsString()
+  @MaxLength(3000)
+  requisites?: string;
 }

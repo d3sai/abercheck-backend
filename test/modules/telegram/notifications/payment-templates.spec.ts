@@ -25,6 +25,7 @@ const order = (status: OrderStatus): Order => ({
   amountDue: d('6158.41'),
   exchangeRate: d('44.9'),
   comment: null,
+  requisites: null,
   orderType: OrderType.REGULAR,
   status,
   managerId: 1,

@@ -34,7 +34,7 @@ describe('PaymentsService', () => {
 
   const tx = {
     $queryRaw: jest.fn(),
-    order: { findMany: jest.fn(), update: jest.fn() },
+    order: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
     payment: { create: jest.fn(), aggregate: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     refund: { aggregate: jest.fn() },
   };
@@ -69,6 +69,7 @@ describe('PaymentsService', () => {
     prisma.payment.findUnique.mockResolvedValue(null);
     tx.$queryRaw.mockResolvedValue([{ id: order.id }]);
     withParts([order]);
+    tx.order.findUnique.mockResolvedValue(null);
     tx.payment.create.mockImplementation(({ data }: { data: object }) => ({ id: 1, ...data }));
     tx.order.update.mockImplementation(
       ({ where, data }: { where: { id: number }; data: object }) => ({
@@ -238,6 +239,33 @@ describe('PaymentsService', () => {
       const result = await service.ingest(dto);
 
       expect(result).toMatchObject({ order: { status: OrderStatus.PAID } });
+    });
+
+    it('should find the group through any of its different numbers', async () => {
+      tx.order.findUnique.mockResolvedValue({ baseNumber: '0000-000001' });
+      withParts([order, second]);
+      paidSoFar('7158.41');
+
+      const result = await service.ingest({ ...dto, order_number: '0000-000005' });
+
+      expect(tx.order.findUnique).toHaveBeenCalledWith({
+        where: { orderNumber: '0000-000005' },
+        select: { baseNumber: true },
+      });
+      expect(tx.$queryRaw.mock.calls[0]).toContain('0000-000001');
+      expect(result).toMatchObject({ kind: 'recorded', order: { status: OrderStatus.PAID } });
+    });
+
+    it('should attach a manual payment through any number of the group as well', async () => {
+      tx.payment.findUnique.mockResolvedValue({ id: 15, orderId: null });
+      tx.payment.update.mockImplementation(({ data }: { data: object }) => ({ id: 15, ...data }));
+      tx.order.findUnique.mockResolvedValue({ baseNumber: '0000-000001' });
+      withParts([order, second]);
+      paidSoFar('7158.41');
+
+      await service.attach(15, '0000-000005');
+
+      expect(tx.$queryRaw.mock.calls[1]).toContain('0000-000001');
     });
 
     it('should resolve a suffixed number to the group', async () => {

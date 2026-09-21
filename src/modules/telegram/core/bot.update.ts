@@ -9,6 +9,7 @@ import { ADMIN_HELP } from '../admin/admin.update';
 import { MENU_LABEL } from './menu';
 import { OrderListService } from '../orders-list/order-list.service';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
+import { RequisitesAction } from '../order-draft/requisites.messages';
 import { type CommandContext, edit, fullName, isPrivate, reply } from './telegram-context';
 import { TelegramSender } from './telegram-sender';
 
@@ -28,6 +29,7 @@ export class BotUpdate implements OnApplicationBootstrap {
       [
         { command: 'new', description: 'Формат нового замовлення' },
         { command: 'newminus', description: 'Формат закриття мінусу (без номера)' },
+        { command: 'requisites', description: 'Оплата на інші реквізити' },
         { command: 'list', description: 'Мої відкриті замовлення' },
         { command: 'cancel', description: 'Забути прикріплені файли' },
         { command: 'help', description: 'Що вміє бот' },
@@ -93,15 +95,27 @@ export class BotUpdate implements OnApplicationBootstrap {
 
   @Command('new')
   async newOrder(@Ctx() ctx: Context): Promise<void> {
-    if (await this.activeManager(ctx)) {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      this.drafts.leaveRequisites(manager.telegramId);
       await reply(ctx, this.drafts.hint(OrderType.REGULAR));
     }
   }
 
   @Command('newminus')
   async newMinusOrder(@Ctx() ctx: Context): Promise<void> {
-    if (await this.activeManager(ctx)) {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      this.drafts.leaveRequisites(manager.telegramId);
       await reply(ctx, this.drafts.hint(OrderType.MINUS_CLOSING));
+    }
+  }
+
+  @Command('requisites')
+  async requisites(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await reply(ctx, this.drafts.startRequisites(manager.telegramId));
     }
   }
 
@@ -118,6 +132,32 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (manager) {
       await ctx.answerCbQuery();
       await edit(ctx, await this.drafts.addPart(manager));
+    }
+  }
+
+  @Action(RequisitesAction.Send)
+  async sendRequisites(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      await edit(ctx, await this.drafts.confirmRequisites(manager));
+    }
+  }
+
+  @Action(RequisitesAction.Regular)
+  async regularOrder(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      await edit(ctx, await this.drafts.regularFromDraft(manager));
+    }
+  }
+
+  @Action(RequisitesAction.Edit)
+  async editRequisites(@Ctx() ctx: Context): Promise<void> {
+    if (isPrivate(ctx) && ctx.from) {
+      await ctx.answerCbQuery();
+      await edit(ctx, this.drafts.editRequisites(BigInt(ctx.from.id)));
     }
   }
 
@@ -139,6 +179,8 @@ export class BotUpdate implements OnApplicationBootstrap {
         return this.newOrder(ctx);
       case MENU_LABEL.NewMinus:
         return this.newMinusOrder(ctx);
+      case MENU_LABEL.Requisites:
+        return this.requisites(ctx);
       case MENU_LABEL.List:
         return this.list(ctx);
       case MENU_LABEL.Cancel:

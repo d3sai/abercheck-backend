@@ -10,6 +10,7 @@ import {
 import { AttachmentsService, type TelegramFileRef } from '../../attachments/attachments.service';
 import { type Manager, type Order, OrderType } from '../../../generated/prisma/client';
 import { CreateOrderDto } from '../../orders/dto/create-order.dto';
+import { normalizeBaseNumber } from '../../orders/order-number';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
 import {
   type OrderWithManager,
@@ -19,7 +20,7 @@ import {
 import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatMoney } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
-import { adminOrderCreatedMessage } from '../notifications/order-templates';
+import { adminOrderCreatedMessage, adminRequisitesMessage } from '../notifications/order-templates';
 import {
   parseExchangeRate,
   parseFreeform,
@@ -29,6 +30,18 @@ import {
   parseTemplate,
   parseText,
 } from './order-draft.parsers';
+import {
+  requisitesCreatedReply,
+  requisitesErrors,
+  requisitesHint,
+  requisitesPreview,
+} from './requisites.messages';
+import {
+  looksLikeRequisites,
+  parseRequisites,
+  type RequisitesPlan,
+  withoutNumbers,
+} from './requisites.parser';
 
 type DraftField = keyof CreateOrderDto;
 
@@ -60,6 +73,22 @@ interface PartOffer {
   expiresAt: number;
 }
 
+// How long the "payment to other requisites" mode waits for the message, and how long a preview
+// waits for the manager's answer.
+const REQUISITES_MODE_TTL_MS = 30 * 60_000;
+
+interface RequisitesDraft {
+  plan: RequisitesPlan;
+  text: string;
+  /** The single number already exists: the order becomes one more part of it. */
+  addPart: boolean;
+  /** The bot recognised the message on its own; the manager did not press the button. */
+  auto: boolean;
+  /** Numbers left out of a group because they already exist. */
+  skipped: string[];
+  expiresAt: number;
+}
+
 function pluralizeFiles(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -73,6 +102,8 @@ function pluralizeFiles(count: number): string {
 export class OrderDraftService {
   private readonly pendingFiles = new Map<bigint, TelegramFileRef[]>();
   private readonly partOffers = new Map<bigint, PartOffer>();
+  private readonly requisitesUntil = new Map<bigint, number>();
+  private readonly requisitesDrafts = new Map<bigint, RequisitesDraft>();
 
   constructor(
     private readonly orders: OrdersService,
@@ -113,6 +144,12 @@ export class OrderDraftService {
   }
 
   async handleText(manager: Manager, text: string): Promise<BotReply | null> {
+    if (this.inRequisites(manager.telegramId)) {
+      return this.handleRequisites(manager, text, false);
+    }
+    if (this.isRequisitesMessage(text)) {
+      return this.handleRequisites(manager, text, true);
+    }
     const raw = this.extractFields(text);
     if (!raw) {
       return this.nudge(manager.telegramId);
@@ -138,6 +175,12 @@ export class OrderDraftService {
 
     const files = this.bufferFile(manager.telegramId, file);
     const text = caption?.trim();
+    if (text && this.inRequisites(manager.telegramId)) {
+      return this.handleRequisites(manager, text, false);
+    }
+    if (text && this.isRequisitesMessage(text)) {
+      return this.handleRequisites(manager, text, true);
+    }
     const raw = text ? this.extractFields(text) : null;
     if (raw) {
       return this.process(manager, raw);
@@ -150,7 +193,178 @@ export class OrderDraftService {
   cancel(userId: bigint): BotReply {
     const hadFiles = this.pendingFiles.delete(userId);
     const hadOffer = this.partOffers.delete(userId);
-    return { html: hadFiles || hadOffer ? 'Скасовано.' : 'Нема чого скасовувати.' };
+    const hadRequisites = this.requisitesUntil.delete(userId);
+    this.requisitesDrafts.delete(userId);
+    return {
+      html: hadFiles || hadOffer || hadRequisites ? 'Скасовано.' : 'Нема чого скасовувати.',
+    };
+  }
+
+  startRequisites(userId: bigint): BotReply {
+    this.partOffers.delete(userId);
+    this.requisitesDrafts.delete(userId);
+    this.requisitesUntil.set(userId, Date.now() + REQUISITES_MODE_TTL_MS);
+    return requisitesHint();
+  }
+
+  // Another flow was started: the next message is no longer a payment to other requisites.
+  leaveRequisites(userId: bigint): void {
+    this.requisitesUntil.delete(userId);
+    this.requisitesDrafts.delete(userId);
+  }
+
+  editRequisites(userId: bigint): BotReply {
+    this.requisitesDrafts.delete(userId);
+    this.requisitesUntil.set(userId, Date.now() + REQUISITES_MODE_TTL_MS);
+    return { html: 'Гаразд. Надішліть виправлене повідомлення.' };
+  }
+
+  async confirmRequisites(manager: Manager): Promise<BotReply> {
+    const draft = this.requisitesDrafts.get(manager.telegramId);
+    this.requisitesDrafts.delete(manager.telegramId);
+    if (!draft || draft.expiresAt < Date.now()) {
+      return { html: '⚠️ Немає даних для відправки. Надішліть повідомлення ще раз.' };
+    }
+
+    try {
+      const orders = await this.createRequisiteOrders(manager, draft);
+      this.leaveRequisites(manager.telegramId);
+      return requisitesCreatedReply(orders, draft.skipped);
+    } catch (error) {
+      if (error instanceof OrderNumberTakenError) {
+        this.requisitesUntil.set(manager.telegramId, Date.now() + REQUISITES_MODE_TTL_MS);
+        return {
+          html: `⚠️ Номер ${escapeHtml(error.orderNumber)} щойно з'явився в системі. Надішліть повідомлення ще раз.`,
+        };
+      }
+      throw error;
+    }
+  }
+
+  private inRequisites(userId: bigint): boolean {
+    return (this.requisitesUntil.get(userId) ?? 0) > Date.now();
+  }
+
+  // A labelled regular template is always a regular order; otherwise several numbers, an IBAN, a
+  // card or several amounts can only be a payment to other requisites.
+  private isRequisitesMessage(text: string): boolean {
+    return Object.keys(parseTemplate(text, FIELDS)).length === 0 && looksLikeRequisites(text);
+  }
+
+  // "This is a regular order after all": the same text goes through the regular template.
+  async regularFromDraft(manager: Manager): Promise<BotReply> {
+    const draft = this.requisitesDrafts.get(manager.telegramId);
+    this.leaveRequisites(manager.telegramId);
+    if (!draft) {
+      return { html: '⚠️ Немає даних. Надішліть замовлення ще раз.' };
+    }
+    const raw = this.extractFields(draft.text);
+    if (!raw) {
+      return { html: 'Не вдалося розпізнати як звичайне замовлення. Формат — /new.' };
+    }
+    return this.process(manager, raw);
+  }
+
+  private async handleRequisites(manager: Manager, text: string, auto: boolean): Promise<BotReply> {
+    const original = text.trim();
+    const parsed = parseRequisites(original);
+    if (!parsed.ok) {
+      return requisitesErrors(parsed.errors);
+    }
+
+    let { plan } = parsed;
+    let addPart = false;
+    let skipped: string[] = [];
+
+    if (plan.kind === 'single') {
+      const number = plan.items[0]!.number;
+      const existing = await this.orders.findWithBalance(number);
+      if (existing) {
+        if (existing.order.orderNumber !== normalizeBaseNumber(number)) {
+          return {
+            html: `⚠️ Номер ${escapeHtml(number)} уже є в системі у складі № ${escapeHtml(existing.order.orderNumber)} — додати до нього не можна.`,
+          };
+        }
+        addPart = true;
+      }
+    } else if (plan.kind === 'group') {
+      const found = await Promise.all(
+        plan.items.map((item) => this.orders.findWithBalance(item.number)),
+      );
+      skipped = plan.items.filter((_, index) => found[index]).map((item) => item.number);
+      if (skipped.length === plan.items.length) {
+        return {
+          html: `⚠️ Усі ці номери вже є в системі: ${skipped.join(', ')}. Немає що додавати.`,
+        };
+      }
+      if (skipped.length > 0) {
+        const rest = parseRequisites(withoutNumbers(original, skipped));
+        if (!rest.ok) {
+          return requisitesErrors(rest.errors);
+        }
+        plan = rest.plan;
+      }
+    }
+
+    this.requisitesDrafts.set(manager.telegramId, {
+      plan,
+      text: original,
+      addPart,
+      auto,
+      skipped,
+      expiresAt: Date.now() + PART_OFFER_TTL_MS,
+    });
+    return requisitesPreview(plan, {
+      addsPart: addPart,
+      skipped,
+      files: this.pendingFiles.get(manager.telegramId)?.length ?? 0,
+      auto,
+    });
+  }
+
+  private async createRequisiteOrders(manager: Manager, draft: RequisitesDraft): Promise<Order[]> {
+    const { plan } = draft;
+    const common = {
+      clientName: plan.label,
+      exchangeRate: plan.rate ?? undefined,
+      comment: plan.comment ?? undefined,
+      requisites: plan.requisites || undefined,
+    };
+
+    let orders: Order[];
+    if (plan.kind === 'group') {
+      orders = await this.orders.createGroup(
+        manager.id,
+        plan.items.map((item) => ({ orderNumber: item.number, amountDue: item.amount.toFixed(2) })),
+        common,
+      );
+    } else {
+      orders = [
+        await this.orders.create(
+          manager.id,
+          {
+            ...common,
+            orderType: plan.kind === 'minus' ? OrderType.MINUS_CLOSING : OrderType.REQUISITES,
+            orderNumber: plan.items[0]?.number,
+            amountDue: plan.total.toFixed(2),
+          },
+          { notify: false, addPart: draft.addPart },
+        ),
+      ];
+    }
+
+    const files = this.pendingFiles.get(manager.telegramId) ?? [];
+    this.pendingFiles.delete(manager.telegramId);
+    const notes = Object.fromEntries(
+      plan.items.flatMap((item) => (item.note ? [[item.number, item.note]] : [])),
+    );
+    const notice = adminRequisitesMessage(orders, manager, { skipped: draft.skipped, notes });
+    if (files.length > 0) {
+      await this.notifyWithAttachment(orders[0]!, manager, files, notice);
+    } else {
+      await this.sender.sendToAdmins(notice);
+    }
+    return orders;
   }
 
   async addPart(manager: Manager): Promise<BotReply> {
@@ -289,8 +503,8 @@ export class OrderDraftService {
     order: Order,
     manager: Manager,
     files: TelegramFileRef[],
+    notice = adminOrderCreatedMessage(order, manager),
   ): Promise<void> {
-    const notice = adminOrderCreatedMessage(order, manager);
     const canMergeCaption = notice.length <= TELEGRAM_CAPTION_LIMIT;
     let merged = false;
     try {

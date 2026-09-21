@@ -20,10 +20,11 @@ const part = (
   orderNumber: string,
   amountDue: string,
   status: OrderStatus = OrderStatus.PAID,
+  baseNumber = orderNumber.replace(/\(\d+\)$/, ''),
 ) => ({
   id,
   orderNumber,
-  baseNumber: orderNumber.replace(/\(\d+\)$/, ''),
+  baseNumber,
   clientName: `ФОП ${id}`,
   amountDue: d(amountDue),
   status,
@@ -231,6 +232,100 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('createGroup', () => {
+    const items = [
+      { orderNumber: '0000-068772', amountDue: '335.58' },
+      { orderNumber: '№ 0000-068773', amountDue: '971.83' },
+      { orderNumber: '0000-068774', amountDue: '605.41' },
+    ];
+    const common = {
+      clientName: 'Гук Віктор Степанович ФОП',
+      exchangeRate: '44.9',
+      comment: 'весь текст',
+      requisites: 'реквізити',
+    };
+
+    it('should create each number as its own order under the first number', async () => {
+      const created = await service.createGroup(7, items, common);
+
+      expect(created).toHaveLength(3);
+      expect(tx.order.create).toHaveBeenNthCalledWith(1, {
+        data: {
+          orderType: 'REQUISITES',
+          orderNumber: '0000-068772',
+          baseNumber: '0000-068772',
+          clientName: 'Гук Віктор Степанович ФОП',
+          amountDue: '335.58',
+          exchangeRate: '44.9',
+          comment: 'весь текст',
+          requisites: 'реквізити',
+          managerId: 7,
+        },
+      });
+      expect(tx.order.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          orderNumber: '0000-068773',
+          baseNumber: '0000-068772',
+          amountDue: '971.83',
+          comment: 'Оплата разом із № 0000-068772',
+          requisites: undefined,
+        }) as unknown,
+      });
+      expect(tx.order.create).toHaveBeenNthCalledWith(3, {
+        data: expect.objectContaining({
+          orderNumber: '0000-068774',
+          baseNumber: '0000-068772',
+        }) as unknown,
+      });
+    });
+
+    it('should create nothing when one of the numbers is already taken', async () => {
+      tx.order.findMany.mockResolvedValue([{ orderNumber: '0000-068773' }]);
+
+      await expect(service.createGroup(7, items, common)).rejects.toEqual(
+        expect.objectContaining({ orderNumber: '0000-068773' }),
+      );
+      expect(tx.order.create).not.toHaveBeenCalled();
+    });
+
+    it('should look for numbers that are taken as a number or as a group', async () => {
+      await service.createGroup(7, items, common);
+
+      expect(tx.order.findMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { orderNumber: { in: ['0000-068772', '0000-068773', '0000-068774'] } },
+            { baseNumber: { in: ['0000-068772', '0000-068773', '0000-068774'] } },
+          ],
+        },
+        select: { orderNumber: true },
+      });
+    });
+
+    it('should refuse the same number listed twice', async () => {
+      await expect(
+        service.createGroup(7, [items[0]!, { ...items[0]! }], common),
+      ).rejects.toBeInstanceOf(OrderNumberTakenError);
+      expect(tx.order.create).not.toHaveBeenCalled();
+    });
+
+    it('should turn a race on a unique number into OrderNumberTakenError', async () => {
+      tx.order.create.mockRejectedValue(prismaError('P2002'));
+
+      await expect(service.createGroup(7, items, common)).rejects.toBeInstanceOf(
+        OrderNumberTakenError,
+      );
+    });
+
+    it('should stay silent unless asked, and then announce every order', async () => {
+      await service.createGroup(7, items, common);
+      expect(events.emit).not.toHaveBeenCalled();
+
+      await service.createGroup(7, items, common, { notify: true });
+      expect(events.emit).toHaveBeenCalledTimes(3);
+    });
+  });
+
   describe('list', () => {
     it('should filter by manager and statuses, newest first, with the total count', async () => {
       order.findMany.mockResolvedValue([]);
@@ -282,6 +377,27 @@ describe('OrdersService', () => {
         orderBy: { id: 'asc' },
       });
       expect(result?.amountPaid.toFixed(2)).toBe('6158.41');
+    });
+
+    it('should find the group through any of its different numbers and list them all', async () => {
+      order.findUnique.mockResolvedValue({ baseNumber: '0000-000001' });
+      order.findMany.mockResolvedValue([
+        part(1, '0000-000001', '10'),
+        part(2, '0000-000005', '20', OrderStatus.PAID, '0000-000001'),
+        part(3, '0000-000009', '30', OrderStatus.CANCELLED, '0000-000001'),
+      ]);
+
+      const result = await service.findWithBalance('0000-000005');
+
+      expect(order.findUnique).toHaveBeenCalledWith({
+        where: { orderNumber: '0000-000005' },
+        select: { baseNumber: true },
+      });
+      expect(order.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { baseNumber: { in: ['0000-000001'] } } }),
+      );
+      expect(result?.order).toMatchObject({ orderNumber: '0000-000001', amountDue: d('30') });
+      expect(result?.orderNumbers).toEqual(['0000-000001', '0000-000005']);
     });
 
     it('should describe a number with several orders as one order for the total', async () => {
@@ -395,6 +511,7 @@ describe('OrdersService', () => {
         amountDue: d('4000'),
       });
       expect(result.items[0]!.amountPaid.toFixed(2)).toBe('3614.32');
+      expect(result.items[0]!.orderNumbers).toEqual(['0000-066717', '0000-066717(1)']);
       expect(result.nextCursor).toBeNull();
     });
 

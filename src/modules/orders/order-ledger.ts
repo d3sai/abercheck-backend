@@ -1,5 +1,6 @@
 import { type Order, OrderStatus, Prisma } from '../../generated/prisma/client';
 import { type GroupSummary, summarizeGroup } from './order-group';
+import { normalizeBaseNumber, normalizePartNumber } from './order-number';
 
 export async function lockOrderByNumber(
   tx: Prisma.TransactionClient,
@@ -18,6 +19,19 @@ export async function lockOrderById(
   const rows = await tx.$queryRaw<{ id: number }[]>`
     SELECT id FROM orders WHERE id = ${id} FOR UPDATE`;
   return rows.length === 0 ? null : tx.order.findUnique({ where: { id } });
+}
+
+// Any number that belongs to a group (its first number, a "(n)" part, or one of several different
+// numbers paid together) resolves to the group's base number; an unknown number resolves to itself.
+export async function resolveBaseNumber(
+  db: Pick<Prisma.TransactionClient, 'order'>,
+  raw: string,
+): Promise<string> {
+  const found = await db.order.findUnique({
+    where: { orderNumber: normalizePartNumber(raw) },
+    select: { baseNumber: true },
+  });
+  return found?.baseNumber ?? normalizeBaseNumber(raw);
 }
 
 // Locks every order of one 1C number, in creation order.

@@ -39,6 +39,7 @@ describe('PaymentNotifier', () => {
       amountDue: new Prisma.Decimal('3000'),
       exchangeRate: null,
       comment: null,
+      requisites: null,
       orderType: OrderType.REGULAR,
       status,
       managerId: 7,
