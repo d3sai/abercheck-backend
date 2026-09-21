@@ -16,6 +16,7 @@ const item = (
   ({
     order: {
       orderNumber,
+      baseNumber: orderNumber,
       status,
       amountDue: d(amountDue),
       clientName: 'Петренко',

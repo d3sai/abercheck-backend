@@ -32,6 +32,7 @@ const report = (overrides: Partial<DailyReport> = {}): DailyReport => ({
 const underpaidOrder = {
   order: {
     orderNumber: '0000-066717',
+    baseNumber: '0000-066717',
     clientName: 'Петренко',
     amountDue: d('6158.41'),
     status: OrderStatus.UNDERPAID,

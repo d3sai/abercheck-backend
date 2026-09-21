@@ -24,6 +24,7 @@ describe('AdminFlowService', () => {
     order: {
       id: 3,
       orderNumber: '0000-066717',
+      baseNumber: '0000-066717',
       clientName: 'Петренко',
       amountDue: d('6158.41'),
       status,
@@ -223,6 +224,17 @@ describe('AdminFlowService', () => {
       expect(result.html).toContain(
         '✅ Повернення 50 грн за № <b>0000-066717</b> оформлено · Уляна',
       );
+    });
+  });
+
+  describe('cancel', () => {
+    it('should cancel the whole number, not just its first order', async () => {
+      refunds.cancelUnpaid.mockResolvedValue({ order: { orderNumber: '0000-066717' } });
+
+      const result = await flow.cancel(3, admin);
+
+      expect(refunds.cancelUnpaid).toHaveBeenCalledWith(3, admin, { wholeNumber: true });
+      expect(result.html).toContain('❌ Замовлення № <b>0000-066717</b> скасовано · Уляна');
     });
   });
 });

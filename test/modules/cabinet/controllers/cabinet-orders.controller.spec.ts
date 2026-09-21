@@ -29,10 +29,11 @@ async function failure(promise: Promise<unknown>): Promise<string> {
   throw new Error('Expected the call to fail');
 }
 
-const ledgerOf = (managerId: number) => ({
-  order: {
+const ledgerOf = (managerId: number) => {
+  const order = {
     id: 1,
     orderNumber: '0000-066717',
+    baseNumber: '0000-066717',
     clientName: 'Чернявський Владислав',
     amountDue: d('6158.41'),
     exchangeRate: null,
@@ -42,11 +43,21 @@ const ledgerOf = (managerId: number) => ({
     manager: { id: managerId, name: 'Олена' },
     createdAt: new Date('2026-09-03T12:00:00Z'),
     updatedAt: new Date('2026-09-03T12:00:00Z'),
-  },
-  amountPaid: d('0'),
-  payments: [],
-  refunds: [],
-});
+  };
+  return {
+    order,
+    amountPaid: d('0'),
+    payments: [],
+    refunds: [],
+    group: {
+      baseNumber: '0000-066717',
+      amountDue: order.amountDue,
+      amountPaid: d('0'),
+      status: OrderStatus.AWAITING_PAYMENT,
+      parts: [order],
+    },
+  };
+};
 
 describe('CabinetOrdersController', () => {
   const orders = { search: jest.fn(), findLedger: jest.fn(), create: jest.fn(), update: jest.fn() };
@@ -119,6 +130,11 @@ describe('CabinetOrdersController', () => {
         amountPaid: '0.00',
         amountRemaining: '6158.41',
         manager: { id: 8, name: 'Олена' },
+        group: {
+          baseNumber: '0000-066717',
+          amountRemaining: '6158.41',
+          parts: [{ id: 1, orderNumber: '0000-066717', amountDue: '6158.41' }],
+        },
       });
     });
   });
@@ -130,7 +146,17 @@ describe('CabinetOrdersController', () => {
 
       await controller.create(manager, dto);
 
-      expect(orders.create).toHaveBeenCalledWith(7, dto);
+      expect(orders.create).toHaveBeenCalledWith(7, dto, { addPart: undefined });
+    });
+
+    it('should let the caller ask for one more part of a number that is already taken', async () => {
+      orders.create.mockResolvedValue({ orderNumber: '0000-066717(1)' });
+      orders.findLedger.mockResolvedValue(ledgerOf(7));
+
+      await controller.create(manager, { ...dto, addPart: true });
+
+      expect(orders.create).toHaveBeenCalledWith(7, dto, { addPart: true });
+      expect(orders.findLedger).toHaveBeenCalledWith('0000-066717(1)');
     });
 
     it('should not let a manager create orders for someone else', async () => {

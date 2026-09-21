@@ -7,7 +7,11 @@ function formatRate(value: Prisma.Decimal): string {
 
 export function adminOrderCreatedMessage(order: Order, manager: Manager): string {
   const title =
-    order.orderType === OrderType.MINUS_CLOSING ? '➖ <b>Закриття мінусу</b>' : '🆕 <b>Нове замовлення</b>';
+    order.orderType === OrderType.MINUS_CLOSING
+      ? '➖ <b>Закриття мінусу</b>'
+      : order.orderNumber === order.baseNumber
+        ? '🆕 <b>Нове замовлення</b>'
+        : '➕ <b>Нова частина замовлення</b>';
   return [
     title,
     `№ <b>${escapeHtml(order.orderNumber)}</b>`,

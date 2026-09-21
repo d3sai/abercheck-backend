@@ -25,6 +25,7 @@ describe('ActivityService', () => {
       {
         createdAt: at(1),
         orderNumber: '0000-066717',
+        baseNumber: '0000-066717',
         amountDue: d('6158.41'),
         status: OrderStatus.PARTIALLY_PAID,
         clientName: 'Чернявський Владислав',

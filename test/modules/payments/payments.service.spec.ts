@@ -24,13 +24,17 @@ describe('PaymentsService', () => {
   const order = {
     id: 10,
     orderNumber: '0000-066717',
+    baseNumber: '0000-066717',
+    clientName: 'Чернявський Владислав',
     amountDue: new Prisma.Decimal('6158.41'),
     status: OrderStatus.AWAITING_PAYMENT,
   };
 
+  type Part = Omit<typeof order, 'status'> & { status: OrderStatus };
+
   const tx = {
     $queryRaw: jest.fn(),
-    order: { findUnique: jest.fn(), update: jest.fn() },
+    order: { findMany: jest.fn(), update: jest.fn() },
     payment: { create: jest.fn(), aggregate: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     refund: { aggregate: jest.fn() },
   };
@@ -42,6 +46,12 @@ describe('PaymentsService', () => {
   };
   const events = { emit: jest.fn() };
   let service: PaymentsService;
+  let parts: Part[] = [];
+
+  const withParts = (list: Part[]) => {
+    parts = list;
+    tx.order.findMany.mockResolvedValue(list);
+  };
 
   const paidSoFar = (amount: string) =>
     tx.payment.aggregate.mockResolvedValue({ _sum: { amount: new Prisma.Decimal(amount) } });
@@ -58,9 +68,14 @@ describe('PaymentsService', () => {
     service = moduleRef.get(PaymentsService);
     prisma.payment.findUnique.mockResolvedValue(null);
     tx.$queryRaw.mockResolvedValue([{ id: order.id }]);
-    tx.order.findUnique.mockResolvedValue(order);
+    withParts([order]);
     tx.payment.create.mockImplementation(({ data }: { data: object }) => ({ id: 1, ...data }));
-    tx.order.update.mockImplementation(({ data }: { data: object }) => ({ ...order, ...data }));
+    tx.order.update.mockImplementation(
+      ({ where, data }: { where: { id: number }; data: object }) => ({
+        ...(parts.find((part) => part.id === where.id) ?? order),
+        ...data,
+      }),
+    );
     tx.refund.aggregate.mockResolvedValue({ _sum: { amount: null } });
   });
 
@@ -89,7 +104,7 @@ describe('PaymentsService', () => {
   });
 
   it('should mark the order paid when the second transfer covers the rest', async () => {
-    tx.order.findUnique.mockResolvedValue({ ...order, status: OrderStatus.PARTIALLY_PAID });
+    withParts([{ ...order, status: OrderStatus.PARTIALLY_PAID }]);
     paidSoFar('6158.41');
 
     const result = await service.ingest({ ...dto, external_transaction_id: 'tx-2' });
@@ -98,7 +113,7 @@ describe('PaymentsService', () => {
   });
 
   it('should not rewrite the order when its status stays the same', async () => {
-    tx.order.findUnique.mockResolvedValue({ ...order, status: OrderStatus.PARTIALLY_PAID });
+    withParts([{ ...order, status: OrderStatus.PARTIALLY_PAID }]);
     paidSoFar('5000');
 
     await service.ingest(dto);
@@ -107,7 +122,7 @@ describe('PaymentsService', () => {
   });
 
   it('should keep a payment for an unknown order for manual review', async () => {
-    tx.$queryRaw.mockResolvedValue([]);
+    withParts([]);
 
     const result = await service.ingest(dto);
 
@@ -123,7 +138,7 @@ describe('PaymentsService', () => {
     const result = await service.ingest({ ...dto, order_number: null });
 
     expect(result.kind).toBe('unmatched');
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.order.findMany).not.toHaveBeenCalled();
   });
 
   it('should return an already processed transaction without side effects', async () => {
@@ -154,13 +169,85 @@ describe('PaymentsService', () => {
   });
 
   it('should count paid money net of refunds', async () => {
-    tx.order.findUnique.mockResolvedValue({ ...order, status: OrderStatus.OVERPAID });
+    withParts([{ ...order, status: OrderStatus.OVERPAID }]);
     paidSoFar('6208.41');
     tx.refund.aggregate.mockResolvedValue({ _sum: { amount: new Prisma.Decimal('50') } });
 
     const result = await service.ingest(dto);
 
     expect(result).toMatchObject({ kind: 'recorded', order: { status: OrderStatus.PAID } });
+  });
+
+  describe('a number with several orders', () => {
+    const second = {
+      ...order,
+      id: 11,
+      orderNumber: '0000-066717(1)',
+      clientName: 'Другий ФОП',
+      amountDue: new Prisma.Decimal('1000'),
+    };
+
+    it('should cover every part with one payment and report the number as a whole', async () => {
+      withParts([order, second]);
+      paidSoFar('7158.41');
+
+      const result = await service.ingest(dto);
+
+      expect(result).toMatchObject({
+        kind: 'recorded',
+        previousStatus: OrderStatus.AWAITING_PAYMENT,
+        amountPaid: new Prisma.Decimal('7158.41'),
+        order: {
+          orderNumber: '0000-066717',
+          amountDue: new Prisma.Decimal('7158.41'),
+          clientName: 'Чернявський Владислав, Другий ФОП',
+          status: OrderStatus.PAID,
+        },
+      });
+      expect(tx.order.update).toHaveBeenCalledTimes(2);
+      expect(tx.order.update).toHaveBeenCalledWith({
+        where: { id: 11 },
+        data: { status: OrderStatus.PAID },
+      });
+    });
+
+    it('should leave the whole number partially paid until the total is covered', async () => {
+      withParts([order, second]);
+      paidSoFar('6158.41');
+
+      const result = await service.ingest(dto);
+
+      expect(result).toMatchObject({ order: { status: OrderStatus.PARTIALLY_PAID } });
+    });
+
+    it('should hang the payment on the first part that is still alive', async () => {
+      withParts([{ ...order, status: OrderStatus.CANCELLED }, second]);
+      paidSoFar('1000');
+
+      await service.ingest(dto);
+
+      expect(tx.payment.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ orderId: 11 }) as unknown,
+      });
+    });
+
+    it('should not count a cancelled part towards what is due', async () => {
+      withParts([{ ...order, status: OrderStatus.CANCELLED }, second]);
+      paidSoFar('1000');
+
+      const result = await service.ingest(dto);
+
+      expect(result).toMatchObject({ order: { status: OrderStatus.PAID } });
+    });
+
+    it('should resolve a suffixed number to the group', async () => {
+      withParts([order, second]);
+      paidSoFar('100');
+
+      await service.ingest({ ...dto, order_number: '0000-066717(1)' });
+
+      expect(tx.$queryRaw.mock.calls[0]).toContain('0000-066717');
+    });
   });
 
   describe('attach', () => {
@@ -206,12 +293,24 @@ describe('PaymentsService', () => {
     });
 
     it('should refuse an order that does not exist or is cancelled', async () => {
-      tx.$queryRaw.mockResolvedValueOnce([{ id: 15 }]).mockResolvedValueOnce([]);
+      withParts([]);
       await expect(service.attach(15, '0000-000000')).rejects.toBeInstanceOf(OrderNotFoundError);
 
-      tx.order.findUnique.mockResolvedValue({ ...order, status: OrderStatus.CANCELLED });
+      withParts([{ ...order, status: OrderStatus.CANCELLED }]);
       await expect(service.attach(15, '0000-066717')).rejects.toBeInstanceOf(OrderCancelledError);
       expect(tx.payment.update).not.toHaveBeenCalled();
+    });
+
+    it('should attach to the number of a suffixed part and refuse a number whose parts are all cancelled', async () => {
+      paidSoFar('2544.09');
+      await service.attach(15, '0000-066717(1)');
+      expect(tx.$queryRaw.mock.calls[1]).toContain('0000-066717');
+
+      withParts([
+        { ...order, status: OrderStatus.CANCELLED },
+        { ...order, id: 11, orderNumber: '0000-066717(1)', status: OrderStatus.CANCELLED },
+      ]);
+      await expect(service.attach(15, '0000-066717')).rejects.toBeInstanceOf(OrderCancelledError);
     });
   });
 });

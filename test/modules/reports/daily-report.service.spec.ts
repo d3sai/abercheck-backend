@@ -12,7 +12,7 @@ describe('DailyReportService', () => {
     refund: { aggregate: jest.fn() },
     $queryRaw: jest.fn(),
   };
-  const orders = { findManyWithBalance: jest.fn() };
+  const orders = { findGroupsByOrderIds: jest.fn() };
   let service: DailyReportService;
 
   const dayStart = new Date('2026-09-02T21:00:00Z');
@@ -75,7 +75,7 @@ describe('DailyReportService', () => {
 
   it('should mark stale partial orders underpaid in one statement and return them', async () => {
     prisma.$queryRaw.mockResolvedValue([{ id: 3 }, { id: 8 }]);
-    orders.findManyWithBalance.mockResolvedValue(['order 3', 'order 8']);
+    orders.findGroupsByOrderIds.mockResolvedValue(['group 3', 'group 8']);
 
     const result = await service.markUnderpaid(dayStart);
 
@@ -84,8 +84,9 @@ describe('DailyReportService', () => {
       ...unknown[],
     ];
     expect(strings.join('?')).toContain('UPDATE orders');
+    expect(strings.join('?')).toContain('base_number');
     expect(values).toEqual(['UNDERPAID', 'PARTIALLY_PAID', dayStart, dayStart]);
-    expect(orders.findManyWithBalance).toHaveBeenCalledWith([3, 8]);
-    expect(result).toEqual(['order 3', 'order 8']);
+    expect(orders.findGroupsByOrderIds).toHaveBeenCalledWith([3, 8]);
+    expect(result).toEqual(['group 3', 'group 8']);
   });
 });

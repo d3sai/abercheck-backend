@@ -36,7 +36,7 @@ export class PaymentNotifier {
       const [manager, payments] = await Promise.all([
         this.prisma.manager.findUniqueOrThrow({ where: { id: order.managerId } }),
         this.prisma.payment.findMany({
-          where: { orderId: order.id, id: { lte: payment.id } },
+          where: { order: { baseNumber: order.baseNumber }, id: { lte: payment.id } },
           orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
         }),
       ]);

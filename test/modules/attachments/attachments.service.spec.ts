@@ -24,6 +24,7 @@ describe('AttachmentsService.saveFromTelegram', () => {
   const order = {
     id: 1,
     orderNumber: '0000-066717',
+    baseNumber: '0000-066717',
     clientName: 'Test',
     amountDue: new Prisma.Decimal('1'),
   };

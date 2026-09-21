@@ -13,10 +13,16 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Initiator } from '../refunds/refund.events';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { UpdateOrderDto } from './dto/update-order.dto';
-import { lockOrderByNumber, netPaid } from './order-ledger';
-import { generateClosingOrderNumber, normalizeOrderNumber } from './order-number';
+import { allocateShares, nextPartIndex, rollUp } from './order-group';
+import { groupNetPaid, lockGroup, lockOrderByNumber, syncGroupStatus } from './order-ledger';
+import {
+  generateClosingOrderNumber,
+  normalizeBaseNumber,
+  normalizePartNumber,
+  partNumber,
+} from './order-number';
 import { type OrderCreated, OrderEvents } from './order.events';
-import { calculateOrderStatus, UNPAID_STATUSES } from './order-status';
+import { UNPAID_STATUSES } from './order-status';
 import { OrderNotFoundError, OrderNumberTakenError } from './orders.errors';
 
 export interface OrderFilter {
@@ -41,9 +47,23 @@ export interface OrderSearch extends OrderFilter {
   take: number;
 }
 
+export interface OrderGroupView {
+  baseNumber: string;
+  amountDue: Prisma.Decimal;
+  amountPaid: Prisma.Decimal;
+  status: OrderStatus;
+  parts: OrderWithManager[];
+}
+
 export interface OrderLedger extends OrderWithPaid<OrderWithManager> {
   payments: Payment[];
   refunds: Refund[];
+  group: OrderGroupView;
+}
+
+interface LoadedGroup {
+  parts: OrderWithManager[];
+  paid: Prisma.Decimal;
 }
 
 function orderBy(sort: OrderSort, direction: Prisma.SortOrder) {
@@ -64,20 +84,37 @@ export class OrdersService {
     private readonly events: EventEmitter2,
   ) {}
 
+  // Creating an order on a number that is already taken is refused, unless the caller asks for
+  // another part of that number: it then gets the next "(n)" suffix and joins the group.
   async create(
     managerId: number,
     dto: CreateOrderDto,
-    options?: { notify?: boolean },
+    options?: { notify?: boolean; addPart?: boolean },
   ): Promise<Order> {
-    const orderNumber = dto.orderNumber
-      ? normalizeOrderNumber(dto.orderNumber)
+    const baseNumber = dto.orderNumber
+      ? normalizeBaseNumber(dto.orderNumber)
       : generateClosingOrderNumber();
     let order: Order;
     try {
-      order = await this.prisma.order.create({ data: { ...dto, orderNumber, managerId } });
+      order = await this.prisma.$transaction(async (tx) => {
+        const parts = await lockGroup(tx, baseNumber);
+        if (parts.length > 0 && !options?.addPart) {
+          throw new OrderNumberTakenError(baseNumber);
+        }
+        const orderNumber = partNumber(baseNumber, nextPartIndex(parts));
+        const created = await tx.order.create({
+          data: { ...dto, orderNumber, baseNumber, managerId },
+        });
+        if (parts.length === 0) {
+          return created;
+        }
+        const paid = await groupNetPaid(tx, baseNumber);
+        const synced = await syncGroupStatus(tx, [...parts, created], paid);
+        return synced.parts[synced.parts.length - 1]!;
+      });
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new OrderNumberTakenError(orderNumber);
+        throw new OrderNumberTakenError(baseNumber);
       }
       throw error;
     }
@@ -87,45 +124,54 @@ export class OrdersService {
     return order;
   }
 
+  // One entry per 1C number: an unpaid number is listed once, with the total of all its parts.
   async findUnpaid(
     limit: number,
     cursor?: number,
   ): Promise<{ items: OrderWithPaid[]; nextCursor: number | null }> {
-    const orders = await this.prisma.order.findMany({
+    const heads = await this.prisma.order.groupBy({
+      by: ['baseNumber'],
       where: { status: { in: UNPAID_STATUSES } },
-      orderBy: { id: 'asc' },
+      _min: { id: true },
+      having: cursor === undefined ? undefined : { id: { _min: { gt: cursor } } },
+      orderBy: { _min: { id: 'asc' } },
       take: limit + 1,
-      ...(cursor !== undefined ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
 
-    const hasMore = orders.length > limit;
-    const page = hasMore ? orders.slice(0, limit) : orders;
-    const nextCursor = hasMore ? page[page.length - 1]!.id : null;
-    return { items: await this.withBalances(page), nextCursor };
+    const hasMore = heads.length > limit;
+    const page = hasMore ? heads.slice(0, limit) : heads;
+    const nextCursor = hasMore ? (page[page.length - 1]!._min.id ?? null) : null;
+    return { items: await this.groupsWithBalance(page.map((head) => head.baseNumber)), nextCursor };
   }
 
-  findByNumber(orderNumber: string): Promise<Order | null> {
-    return this.prisma.order.findUnique({ where: { orderNumber } });
+  // The whole number as one record: total due, everything paid against it.
+  async findWithBalance(orderNumber: string): Promise<OrderWithPaid<OrderWithManager> | null> {
+    const [group] = await this.groupsWithBalance([normalizeBaseNumber(orderNumber)]);
+    return group ?? null;
   }
 
-  findWithBalance(orderNumber: string): Promise<OrderWithPaid<OrderWithManager> | null> {
-    return this.findOneWithBalance({ orderNumber: normalizeOrderNumber(orderNumber) });
+  async findWithBalanceById(id: number): Promise<OrderWithPaid<OrderWithManager> | null> {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: { baseNumber: true },
+    });
+    if (!order) {
+      return null;
+    }
+    const [group] = await this.groupsWithBalance([order.baseNumber]);
+    return group ?? null;
   }
 
-  findWithBalanceById(id: number): Promise<OrderWithPaid<OrderWithManager> | null> {
-    return this.findOneWithBalance({ id });
-  }
-
-  async findManyWithBalance(ids: number[]): Promise<OrderWithPaid<OrderWithManager>[]> {
+  async findGroupsByOrderIds(ids: number[]): Promise<OrderWithPaid<OrderWithManager>[]> {
     if (ids.length === 0) {
       return [];
     }
     const orders = await this.prisma.order.findMany({
       where: { id: { in: ids } },
-      include: { manager: true },
-      orderBy: { orderNumber: 'asc' },
+      select: { baseNumber: true },
+      orderBy: { id: 'asc' },
     });
-    return this.withBalances(orders);
+    return this.groupsWithBalance([...new Set(orders.map((order) => order.baseNumber))]);
   }
 
   async list(
@@ -177,23 +223,46 @@ export class OrdersService {
     return { items: await this.withBalances(orders), total };
   }
 
+  // A single order (part) of a number; payments and refunds are those of the whole number.
   async findLedger(orderNumber: string): Promise<OrderLedger | null> {
-    const found = await this.findWithBalance(orderNumber);
-    if (!found) {
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber: normalizePartNumber(orderNumber) },
+      select: { baseNumber: true },
+    });
+    if (!order) {
       return null;
     }
-    const orderId = found.order.id;
-    const [payments, refunds] = await Promise.all([
+    const { baseNumber } = order;
+    const [groups, payments, refunds] = await Promise.all([
+      this.loadGroups([baseNumber]),
       this.prisma.payment.findMany({
-        where: { orderId },
+        where: { order: { baseNumber } },
         orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
       }),
       this.prisma.refund.findMany({
-        where: { orderId },
+        where: { order: { baseNumber } },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
     ]);
-    return { ...found, payments, refunds };
+    const group = groups.get(baseNumber);
+    const part = group?.parts.find((p) => p.orderNumber === normalizePartNumber(orderNumber));
+    if (!group || !part) {
+      return null;
+    }
+    const rolled = rollUp(group.parts);
+    return {
+      order: part,
+      amountPaid: allocateShares(group.parts, group.paid).get(part.id) ?? new Prisma.Decimal(0),
+      payments,
+      refunds,
+      group: {
+        baseNumber,
+        amountDue: rolled.amountDue,
+        amountPaid: group.paid,
+        status: rolled.status,
+        parts: group.parts,
+      },
+    };
   }
 
   async update(orderNumber: string, dto: UpdateOrderDto, initiator: Initiator): Promise<Order> {
@@ -214,11 +283,9 @@ export class OrdersService {
       if (!order) {
         throw new OrderNotFoundError(orderNumber);
       }
+      const parts = await lockGroup(tx, order.baseNumber);
 
       const newAmountDue = new Prisma.Decimal(amountDue);
-      const paid = await netPaid(tx, order.id);
-      const status = calculateOrderStatus(newAmountDue, paid, order.status);
-
       await tx.orderAmountChange.create({
         data: {
           orderId: order.id,
@@ -229,29 +296,27 @@ export class OrdersService {
         },
       });
 
-      return tx.order.update({
+      const updated = await tx.order.update({
         where: { id: order.id },
-        data: { ...dto, amountDue: newAmountDue, status },
+        data: { ...dto, amountDue: newAmountDue },
       });
+      const paid = await groupNetPaid(tx, order.baseNumber);
+      const synced = await syncGroupStatus(
+        tx,
+        parts.map((part) => (part.id === updated.id ? updated : part)),
+        paid,
+      );
+      return synced.parts.find((part) => part.id === updated.id) ?? updated;
     });
   }
 
-  private async findOneWithBalance(
-    where: Prisma.OrderWhereUniqueInput,
-  ): Promise<OrderWithPaid<OrderWithManager> | null> {
-    const order = await this.prisma.order.findUnique({ where, include: { manager: true } });
-    if (!order) {
-      return null;
-    }
-    const [withBalance] = await this.withBalances([order]);
-    return withBalance ?? null;
-  }
-
-  private async withBalances<T extends Order>(orders: T[]): Promise<OrderWithPaid<T>[]> {
-    if (orders.length === 0) {
-      return [];
-    }
-    const where = { orderId: { in: orders.map((order) => order.id) } };
+  private async loadGroups(baseNumbers: string[]): Promise<Map<string, LoadedGroup>> {
+    const parts = await this.prisma.order.findMany({
+      where: { baseNumber: { in: baseNumbers } },
+      include: { manager: true },
+      orderBy: { id: 'asc' },
+    });
+    const where = { orderId: { in: parts.map((part) => part.id) } };
     const [payments, refunds] = await Promise.all([
       this.prisma.payment.groupBy({ by: ['orderId'], where, _sum: { amount: true } }),
       this.prisma.refund.groupBy({ by: ['orderId'], where, _sum: { amount: true } }),
@@ -261,9 +326,45 @@ export class OrdersService {
     const paid = new Map(payments.map((sum) => [sum.orderId, sum._sum.amount ?? zero]));
     const refunded = new Map(refunds.map((sum) => [sum.orderId, sum._sum.amount ?? zero]));
 
-    return orders.map((order) => ({
-      order,
-      amountPaid: (paid.get(order.id) ?? zero).minus(refunded.get(order.id) ?? zero),
-    }));
+    const groups = new Map<string, LoadedGroup>();
+    for (const part of parts) {
+      const group = groups.get(part.baseNumber) ?? { parts: [], paid: zero };
+      group.parts.push(part);
+      group.paid = group.paid.plus(paid.get(part.id) ?? zero).minus(refunded.get(part.id) ?? zero);
+      groups.set(part.baseNumber, group);
+    }
+    return groups;
+  }
+
+  private async groupsWithBalance(
+    baseNumbers: string[],
+  ): Promise<OrderWithPaid<OrderWithManager>[]> {
+    if (baseNumbers.length === 0) {
+      return [];
+    }
+    const groups = await this.loadGroups(baseNumbers);
+    return baseNumbers.flatMap((baseNumber) => {
+      const group = groups.get(baseNumber);
+      return group ? [{ order: rollUp(group.parts), amountPaid: group.paid }] : [];
+    });
+  }
+
+  // Each order shows its own share of what was paid against its number.
+  private async withBalances<T extends Order>(orders: T[]): Promise<OrderWithPaid<T>[]> {
+    if (orders.length === 0) {
+      return [];
+    }
+    const groups = await this.loadGroups([...new Set(orders.map((order) => order.baseNumber))]);
+    const zero = new Prisma.Decimal(0);
+    const shares = new Map<string, Map<number, Prisma.Decimal>>();
+    return orders.map((order) => {
+      let byOrder = shares.get(order.baseNumber);
+      if (!byOrder) {
+        const group = groups.get(order.baseNumber);
+        byOrder = group ? allocateShares(group.parts, group.paid) : new Map();
+        shares.set(order.baseNumber, byOrder);
+      }
+      return { order, amountPaid: byOrder.get(order.id) ?? zero };
+    });
   }
 }

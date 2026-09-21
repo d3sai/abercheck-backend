@@ -11,6 +11,7 @@ const d = (value: string) => new Prisma.Decimal(value);
 const order = (overrides: Partial<Order> = {}): Order => ({
   id: 1,
   orderNumber: '0000-067968',
+  baseNumber: '0000-067968',
   clientName: 'ФОП Берчатова Лариса',
   amountDue: d('170.10'),
   exchangeRate: null,
@@ -37,6 +38,14 @@ const manager: Manager = {
 };
 
 describe('adminOrderCreatedMessage', () => {
+  it('should announce one more part of a number under its own (n) number', () => {
+    const message = adminOrderCreatedMessage(order({ orderNumber: '0000-067968(1)' }), manager);
+
+    expect(message).toContain('➕ <b>Нова частина замовлення</b>');
+    expect(message).toContain('№ <b>0000-067968(1)</b>');
+    expect(message).not.toContain('Нове замовлення');
+  });
+
   it('should show the essentials for a bare order', () => {
     const message = adminOrderCreatedMessage(order(), manager);
 
@@ -84,7 +93,10 @@ describe('adminOrderCreatedMessage', () => {
   });
 
   it('should show a distinct header for a minus-closing order', () => {
-    const message = adminOrderCreatedMessage(order({ orderType: OrderType.MINUS_CLOSING }), manager);
+    const message = adminOrderCreatedMessage(
+      order({ orderType: OrderType.MINUS_CLOSING }),
+      manager,
+    );
 
     expect(message).toContain('➖ <b>Закриття мінусу</b>');
   });

@@ -47,6 +47,7 @@ describe('DailyReportJob', () => {
       {
         order: {
           orderNumber: '0000-066717',
+          baseNumber: '0000-066717',
           clientName: 'Петренко',
           amountDue: new Prisma.Decimal('100'),
           manager: { name: 'Христина', telegramId: 5000000000n },

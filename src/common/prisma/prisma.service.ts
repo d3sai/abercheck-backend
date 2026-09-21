@@ -10,6 +10,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     const adapter = new PrismaPg({
       connectionString: config.get('DATABASE_URL', { infer: true }),
       connectionTimeoutMillis: 5_000,
+      options: '-c timezone=UTC',
     });
     super({ adapter });
   }

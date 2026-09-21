@@ -89,9 +89,9 @@ export class CabinetOrdersController {
   @Post()
   async create(
     @CurrentManager() me: Manager,
-    @Body() { managerId, ...dto }: CabinetCreateOrderDto,
+    @Body() { managerId, addPart, ...dto }: CabinetCreateOrderDto,
   ): Promise<OrderDetailView> {
-    const order = await this.orders.create(await this.ownerFor(me, managerId), dto);
+    const order = await this.orders.create(await this.ownerFor(me, managerId), dto, { addPart });
     return this.detailFor(me, order.orderNumber);
   }
 

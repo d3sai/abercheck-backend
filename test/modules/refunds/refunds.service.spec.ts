@@ -18,12 +18,16 @@ describe('RefundsService', () => {
   const order = {
     id: 1,
     orderNumber: '0000-066717',
+    baseNumber: '0000-066717',
+    clientName: 'Чернявський Владислав',
     amountDue: d('6158.41'),
-    status: OrderStatus.OVERPAID,
+    status: OrderStatus.OVERPAID as OrderStatus,
   };
+  type Part = typeof order;
+  let parts: Part[] = [];
   const tx = {
     $queryRaw: jest.fn(),
-    order: { findUnique: jest.fn(), update: jest.fn() },
+    order: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
     payment: { aggregate: jest.fn() },
     refund: { aggregate: jest.fn(), create: jest.fn() },
   };
@@ -32,6 +36,13 @@ describe('RefundsService', () => {
   };
   const events = { emit: jest.fn() };
   let service: RefundsService;
+
+  // The order being addressed is `parts[0]` unless stated otherwise; all parts belong to one number.
+  const withParts = (list: Part[], addressed: Part = list[0]!) => {
+    parts = list;
+    tx.order.findUnique.mockResolvedValue(addressed);
+    tx.order.findMany.mockResolvedValue(list);
+  };
 
   const balance = (paid: string, refunded: string | null = null) => {
     tx.payment.aggregate.mockResolvedValue({ _sum: { amount: d(paid) } });
@@ -50,8 +61,13 @@ describe('RefundsService', () => {
     service = moduleRef.get(RefundsService);
     prisma.$transaction.mockImplementation((callback) => callback(tx));
     tx.$queryRaw.mockResolvedValue([{ id: order.id }]);
-    tx.order.findUnique.mockResolvedValue(order);
-    tx.order.update.mockImplementation(({ data }: { data: object }) => ({ ...order, ...data }));
+    withParts([order]);
+    tx.order.update.mockImplementation(
+      ({ where, data }: { where: { id: number }; data: object }) => ({
+        ...(parts.find((part) => part.id === where.id) ?? order),
+        ...data,
+      }),
+    );
     tx.refund.create.mockImplementation(({ data }: { data: object }) => ({ id: 1, ...data }));
   });
 
@@ -97,7 +113,7 @@ describe('RefundsService', () => {
     });
 
     it('should reopen a paid order as partially paid after a partial refund', async () => {
-      tx.order.findUnique.mockResolvedValue({ ...order, status: OrderStatus.PAID });
+      withParts([{ ...order, status: OrderStatus.PAID }]);
       balance('6158.41');
 
       const result = await service.refund(order.id, '1000', admin);
@@ -132,7 +148,7 @@ describe('RefundsService', () => {
 
   describe('cancelUnpaid', () => {
     it('should cancel an order nobody paid for', async () => {
-      tx.order.findUnique.mockResolvedValue({ ...order, status: OrderStatus.AWAITING_PAYMENT });
+      withParts([{ ...order, status: OrderStatus.AWAITING_PAYMENT }]);
       tx.payment.aggregate.mockResolvedValue({ _sum: { amount: null } });
       tx.refund.aggregate.mockResolvedValue({ _sum: { amount: null } });
 
@@ -151,11 +167,101 @@ describe('RefundsService', () => {
     });
 
     it('should refuse an already cancelled order', async () => {
-      tx.order.findUnique.mockResolvedValue({ ...order, status: OrderStatus.CANCELLED });
+      withParts([{ ...order, status: OrderStatus.CANCELLED }]);
 
       await expect(service.cancelUnpaid(order.id, admin)).rejects.toBeInstanceOf(
         OrderCancelledError,
       );
+    });
+  });
+
+  describe('a number with several orders', () => {
+    const first = { ...order, status: OrderStatus.PAID, amountDue: d('3000') };
+    const second = {
+      ...order,
+      id: 2,
+      orderNumber: '0000-066717(1)',
+      clientName: 'Другий ФОП',
+      status: OrderStatus.PAID,
+      amountDue: d('3158.41'),
+    };
+
+    it('should take a partial refund from the shared pool and reopen every part', async () => {
+      withParts([first, second]);
+      balance('6158.41');
+
+      const result = await service.refund(1, '1000', admin);
+
+      expect(tx.order.update).toHaveBeenCalledWith({
+        where: { id: 2 },
+        data: { status: OrderStatus.PARTIALLY_PAID },
+      });
+      expect(result.order).toMatchObject({
+        orderNumber: '0000-066717',
+        amountDue: d('6158.41'),
+        status: OrderStatus.PARTIALLY_PAID,
+      });
+      expect(result.amountPaid.toFixed(2)).toBe('5158.41');
+    });
+
+    it('should cancel every part on a full refund', async () => {
+      withParts([first, second]);
+      balance('6158.41');
+
+      const result = await service.refund(1, null, admin);
+
+      expect(tx.order.update).toHaveBeenCalledTimes(2);
+      expect(result.order.status).toBe(OrderStatus.CANCELLED);
+      expect(result.refund.type).toBe(RefundType.FULL);
+    });
+
+    it('should record the refund against the first live part even when another part was addressed', async () => {
+      withParts([first, second], second);
+      balance('6158.41');
+
+      await service.refund(2, '100', admin);
+
+      expect(tx.refund.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ orderId: 1 }) as unknown,
+      });
+    });
+
+    it('should cancel only the addressed part while nothing is paid', async () => {
+      const unpaid = { ...first, status: OrderStatus.AWAITING_PAYMENT };
+      const other = { ...second, status: OrderStatus.AWAITING_PAYMENT };
+      withParts([unpaid, other], other);
+      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: null } });
+      tx.refund.aggregate.mockResolvedValue({ _sum: { amount: null } });
+
+      const result = await service.cancelUnpaid(2, admin);
+
+      expect(tx.order.update).toHaveBeenCalledTimes(1);
+      expect(result.order).toMatchObject({ id: 2, status: OrderStatus.CANCELLED });
+    });
+
+    it('should cancel every live part when asked to cancel the whole number', async () => {
+      const unpaid = { ...first, status: OrderStatus.AWAITING_PAYMENT };
+      const other = { ...second, status: OrderStatus.AWAITING_PAYMENT };
+      withParts([unpaid, other]);
+      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: null } });
+      tx.refund.aggregate.mockResolvedValue({ _sum: { amount: null } });
+
+      const result = await service.cancelUnpaid(1, admin, { wholeNumber: true });
+
+      expect(tx.order.update).toHaveBeenCalledTimes(2);
+      expect(result.order).toMatchObject({
+        orderNumber: '0000-066717',
+        status: OrderStatus.CANCELLED,
+      });
+    });
+
+    it('should refuse to cancel a part while its number has received money', async () => {
+      const unpaid = { ...second, status: OrderStatus.PARTIALLY_PAID };
+      withParts([first, unpaid], unpaid);
+      balance('100');
+
+      await expect(service.cancelUnpaid(2, admin)).rejects.toBeInstanceOf(OrderHasPaymentsError);
+      expect(tx.order.update).not.toHaveBeenCalled();
     });
   });
 });

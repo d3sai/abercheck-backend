@@ -17,6 +17,7 @@ describe('OrdersController', () => {
         {
           order: {
             orderNumber: '0000-066717',
+            baseNumber: '0000-066717',
             clientName: 'Іваненко Іван',
             amountDue: d('1250.50'),
             status: 'AWAITING_PAYMENT',

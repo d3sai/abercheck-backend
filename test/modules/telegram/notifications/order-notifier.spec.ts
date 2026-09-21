@@ -14,6 +14,7 @@ describe('OrderNotifier', () => {
     order: {
       id: 1,
       orderNumber: '0000-067968',
+      baseNumber: '0000-067968',
       clientName: 'ФОП Берчатова Лариса',
       amountDue: new Prisma.Decimal('170.10'),
       exchangeRate: null,

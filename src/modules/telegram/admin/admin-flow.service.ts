@@ -242,7 +242,9 @@ export class AdminFlowService {
 
   async cancel(orderId: number, admin: Admin): Promise<BotReply> {
     try {
-      const { order } = await this.refunds.cancelUnpaid(orderId, admin);
+      const { order } = await this.refunds.cancelUnpaid(orderId, admin, {
+        wholeNumber: true,
+      });
       return {
         html: `❌ Замовлення № <b>${escapeHtml(order.orderNumber)}</b> скасовано · ${escapeHtml(admin.name)}`,
       };

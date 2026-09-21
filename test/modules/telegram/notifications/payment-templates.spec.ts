@@ -20,6 +20,7 @@ const d = (value: string) => new Prisma.Decimal(value);
 const order = (status: OrderStatus): Order => ({
   id: 1,
   orderNumber: '0000-066717',
+  baseNumber: '0000-066717',
   clientName: 'Чернявський Владислав',
   amountDue: d('6158.41'),
   exchangeRate: d('44.9'),

@@ -41,6 +41,7 @@ const manager = {
 const openOrder = {
   order: {
     orderNumber: '0000-066717',
+    baseNumber: '0000-066717',
     status: OrderStatus.PARTIALLY_PAID,
     amountDue: new Prisma.Decimal('6158.41'),
     clientName: 'Чернявський Владислав',
@@ -49,6 +50,12 @@ const openOrder = {
   },
   amountPaid: new Prisma.Decimal('3000'),
 } as OrderWithPaid<OrderWithManager>;
+
+const ordersMock = {
+  list: () => Promise.resolve({ items: [openOrder], total: 1 }),
+  findWithBalance: jest.fn(),
+  create: jest.fn(),
+};
 
 @Module({
   providers: [
@@ -65,10 +72,7 @@ const openOrder = {
         requestAccess: () => Promise.resolve({ manager, isNew: false }),
       },
     },
-    {
-      provide: OrdersService,
-      useValue: { list: () => Promise.resolve({ items: [openOrder], total: 1 }) },
-    },
+    { provide: OrdersService, useValue: ordersMock },
     {
       provide: PaymentsService,
       useValue: { findUnmatched: () => Promise.resolve({ payments: [], total: 0 }) },
@@ -82,7 +86,10 @@ class BotTestModule {}
 
 interface SendMessagePayload {
   text: string;
-  reply_markup?: { keyboard?: { text: string }[][] };
+  reply_markup?: {
+    keyboard?: { text: string }[][];
+    inline_keyboard?: { text: string; callback_data?: string }[][];
+  };
 }
 
 interface DeliverOptions {
@@ -104,11 +111,15 @@ describe('BotUpdate', () => {
   let moduleRef: TestingModule;
   let bot: Telegraf;
   let sent: SendMessagePayload[] = [];
+  let edited: SendMessagePayload[] = [];
   let loggedErrors: jest.SpyInstance;
   let updateId = 0;
 
   beforeEach(async () => {
     sent = [];
+    edited = [];
+    ordersMock.findWithBalance.mockReset();
+    ordersMock.create.mockReset();
     loggedErrors = jest.spyOn(ConsoleLogger.prototype, 'error').mockImplementation(() => undefined);
     jest.spyOn(Telegram.prototype, 'callApi').mockImplementation(((
       method: string,
@@ -116,6 +127,9 @@ describe('BotUpdate', () => {
     ) => {
       if (method === 'sendMessage') {
         sent.push(payload);
+      }
+      if (method === 'editMessageText') {
+        edited.push(payload);
       }
       return Promise.resolve(true);
     }) as never);
@@ -173,6 +187,27 @@ describe('BotUpdate', () => {
     } as never);
     expect(loggedErrors).not.toHaveBeenCalled();
     return sent;
+  };
+
+  const press = async (data: string, fromId = MANAGER_ID): Promise<void> => {
+    sent = [];
+    edited = [];
+    await bot.handleUpdate({
+      update_id: ++updateId,
+      callback_query: {
+        id: `cb-${updateId}`,
+        chat_instance: 'instance',
+        data,
+        from: { id: fromId, is_bot: false, first_name: 'Христина' },
+        message: {
+          message_id: updateId,
+          date: 0,
+          chat: privateChat(fromId),
+          text: 'offer',
+        },
+      },
+    });
+    expect(loggedErrors).not.toHaveBeenCalled();
   };
 
   const say = (text: string, options?: DeliverOptions) =>
@@ -263,6 +298,75 @@ describe('BotUpdate', () => {
   describe('a menu button label typed in the admin group', () => {
     it.each(Object.values(MENU_LABEL))('should ignore %s', async (label) => {
       expect(await say(label, { chat: adminGroup })).toEqual([]);
+    });
+  });
+
+  describe('another part of a number that is already taken', () => {
+    const existing = {
+      order: {
+        orderNumber: '0000-066717',
+        baseNumber: '0000-066717',
+        clientName: 'Чернявський Владислав',
+        amountDue: new Prisma.Decimal('6158.41'),
+      },
+      amountPaid: new Prisma.Decimal('0'),
+    };
+    const message = ['0000-066717', 'Другий ФОП', '1 000,00 грн'].join('\n');
+    const createdPart = {
+      id: 2,
+      orderNumber: '0000-066717(1)',
+      baseNumber: '0000-066717',
+      clientName: 'Другий ФОП',
+      amountDue: new Prisma.Decimal('1000'),
+      orderType: 'REGULAR',
+      status: OrderStatus.AWAITING_PAYMENT,
+    };
+
+    beforeEach(() => ordersMock.findWithBalance.mockResolvedValue(existing));
+
+    it('should ask for confirmation with two buttons instead of creating a duplicate', async () => {
+      const replies = await say(message);
+
+      expect(replies).toHaveLength(1);
+      expect(replies[0]!.text).toContain('вже є в системі');
+      expect(
+        replies[0]!.reply_markup?.inline_keyboard?.flat().map((button) => button.callback_data),
+      ).toEqual(['part:add', 'part:skip']);
+      expect(ordersMock.create).not.toHaveBeenCalled();
+    });
+
+    it('should add the part when the manager presses the button', async () => {
+      ordersMock.create.mockResolvedValue(createdPart);
+      await say(message);
+
+      await press('part:add');
+
+      expect(ordersMock.create).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ orderNumber: '0000-066717', clientName: 'Другий ФОП' }),
+        { notify: true, addPart: true },
+      );
+      expect(edited).toHaveLength(1);
+      expect(edited[0]!.text).toContain('0000-066717(1)');
+    });
+
+    it('should drop the draft when the manager declines, and not add it later', async () => {
+      await say(message);
+
+      await press('part:skip');
+      expect(edited.map(({ text }) => text)).toEqual(['Скасовано.']);
+
+      await press('part:add');
+      expect(edited[0]!.text).toContain('Немає даних');
+      expect(ordersMock.create).not.toHaveBeenCalled();
+    });
+
+    it('should not let someone who is not a manager add anything', async () => {
+      await press('part:add', STRANGER_ID);
+
+      expect(sent[0]!.text).toContain('/start');
+      expect(edited).toHaveLength(0);
+      expect(ordersMock.create).not.toHaveBeenCalled();
     });
   });
 });

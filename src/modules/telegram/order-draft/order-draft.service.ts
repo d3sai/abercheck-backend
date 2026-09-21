@@ -11,8 +11,12 @@ import { AttachmentsService, type TelegramFileRef } from '../../attachments/atta
 import { type Manager, type Order, OrderType } from '../../../generated/prisma/client';
 import { CreateOrderDto } from '../../orders/dto/create-order.dto';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
-import { OrdersService } from '../../orders/orders.service';
-import type { BotReply } from '../core/bot-reply';
+import {
+  type OrderWithManager,
+  type OrderWithPaid,
+  OrdersService,
+} from '../../orders/orders.service';
+import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatMoney } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { adminOrderCreatedMessage } from '../notifications/order-templates';
@@ -43,6 +47,19 @@ const FIELDS: readonly FieldSpec[] = [
   { field: 'comment', label: 'Коментар', optional: true, parse: parseText(2000) },
 ];
 
+export const DraftAction = {
+  AddPart: 'part:add',
+  SkipPart: 'part:skip',
+} as const;
+
+// How long a manager has to confirm adding a part to an already existing number.
+const PART_OFFER_TTL_MS = 10 * 60_000;
+
+interface PartOffer {
+  data: Partial<Record<DraftField, string>>;
+  expiresAt: number;
+}
+
 function pluralizeFiles(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -55,6 +72,7 @@ function pluralizeFiles(count: number): string {
 @Injectable()
 export class OrderDraftService {
   private readonly pendingFiles = new Map<bigint, TelegramFileRef[]>();
+  private readonly partOffers = new Map<bigint, PartOffer>();
 
   constructor(
     private readonly orders: OrdersService,
@@ -81,6 +99,9 @@ export class OrderDraftService {
         `📝 <b>${title}</b>`,
         'Надішліть одним повідомленням, кожне значення з нового рядка',
         `Файли (до ${MAX_FILES_PER_UPLOAD}) — разом із повідомленням або перед ним`,
+        ...(isMinus
+          ? []
+          : ['Номер уже є в системі? Бот запропонує додати ще одну частину до нього.']),
         '',
         "Порядок рядків (* — обов'язкове):",
         lines.join(', '),
@@ -128,7 +149,22 @@ export class OrderDraftService {
 
   cancel(userId: bigint): BotReply {
     const hadFiles = this.pendingFiles.delete(userId);
-    return { html: hadFiles ? 'Скасовано.' : 'Нема чого скасовувати.' };
+    const hadOffer = this.partOffers.delete(userId);
+    return { html: hadFiles || hadOffer ? 'Скасовано.' : 'Нема чого скасовувати.' };
+  }
+
+  async addPart(manager: Manager): Promise<BotReply> {
+    const offer = this.partOffers.get(manager.telegramId);
+    this.partOffers.delete(manager.telegramId);
+    if (!offer || offer.expiresAt < Date.now()) {
+      return { html: '⚠️ Немає даних для додавання. Надішліть замовлення ще раз.' };
+    }
+    return this.createOrder(manager, offer.data, true);
+  }
+
+  skipPart(userId: bigint): BotReply {
+    this.partOffers.delete(userId);
+    return { html: 'Скасовано.' };
   }
 
   private async process(manager: Manager, raw: Record<string, string>): Promise<BotReply> {
@@ -151,26 +187,44 @@ export class OrderDraftService {
       data[field.field] = result.value;
     }
 
-    if (
-      errors.length === 0 &&
-      data.orderNumber &&
-      (await this.orders.findByNumber(data.orderNumber))
-    ) {
-      errors.push(`«Номер»: замовлення № ${data.orderNumber} вже є в системі.`);
-    }
-
     if (errors.length > 0) {
       return {
         html: ['⚠️ Виправте та надішліть ще раз:', ...errors.map((e) => `• ${e}`)].join('\n'),
       };
     }
 
-    return this.createOrder(manager, data);
+    const existing = data.orderNumber ? await this.orders.findWithBalance(data.orderNumber) : null;
+    return existing ? this.offerPart(manager, data, existing) : this.createOrder(manager, data);
+  }
+
+  // An order on a taken number is a duplicate unless the manager confirms it is one more part of
+  // the same payment; the draft waits for that answer.
+  private offerPart(
+    manager: Manager,
+    data: Partial<Record<DraftField, string>>,
+    { order, amountPaid }: OrderWithPaid<OrderWithManager>,
+  ): BotReply {
+    this.partOffers.set(manager.telegramId, { data, expiresAt: Date.now() + PART_OFFER_TTL_MS });
+    return {
+      html: [
+        `⚠️ Номер № <b>${escapeHtml(order.orderNumber)}</b> вже є в системі.`,
+        `${escapeHtml(order.clientName)} · ${formatMoney(order.amountDue)} грн · сплачено ${formatMoney(amountPaid)} грн`,
+        '',
+        'Додати це замовлення ще однією частиною цього номера? Оплата за номером покриє всі частини.',
+      ].join('\n'),
+      buttons: [
+        [
+          button('➕ Додати частину', DraftAction.AddPart),
+          button('✖ Скасувати', DraftAction.SkipPart),
+        ],
+      ],
+    };
   }
 
   private async createOrder(
     manager: Manager,
     data: Partial<Record<DraftField, string>>,
+    addPart = false,
   ): Promise<BotReply> {
     const orderType = data.orderNumber ? OrderType.REGULAR : OrderType.MINUS_CLOSING;
     const dto = plainToInstance(CreateOrderDto, { orderType, ...data });
@@ -181,7 +235,7 @@ export class OrderDraftService {
     const files = this.pendingFiles.get(manager.telegramId) ?? [];
     const hasFiles = files.length > 0;
     try {
-      const order = await this.orders.create(manager.id, dto, { notify: !hasFiles });
+      const order = await this.orders.create(manager.id, dto, { notify: !hasFiles, addPart });
       this.pendingFiles.delete(manager.telegramId);
       if (hasFiles) {
         await this.notifyWithAttachment(order, manager, files);
@@ -197,7 +251,11 @@ export class OrderDraftService {
 
   private createdReply(order: Order): BotReply {
     const label =
-      order.orderType === OrderType.MINUS_CLOSING ? '➖ Закриття мінусу' : '✅ Замовлення';
+      order.orderType === OrderType.MINUS_CLOSING
+        ? '➖ Закриття мінусу'
+        : order.orderNumber === order.baseNumber
+          ? '✅ Замовлення'
+          : '➕ Частину замовлення';
     return {
       html: [
         `${label} № <b>${escapeHtml(order.orderNumber)}</b> створено — повідомлю про оплату.`,

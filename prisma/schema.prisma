@@ -75,6 +75,7 @@ model Manager {
 model Order {
   id            Int         @id @default(autoincrement())
   orderNumber   String      @unique @map("order_number")
+  baseNumber    String      @map("base_number")
   clientName    String      @map("client_name")
   amountDue     Decimal     @map("amount_due") @db.Decimal(14, 2)
   exchangeRate  Decimal?    @map("exchange_rate") @db.Decimal(8, 4)
@@ -93,6 +94,7 @@ model Order {
 
   @@index([status])
   @@index([managerId])
+  @@index([baseNumber])
   @@map("orders")
 }
 

@@ -34,6 +34,7 @@ describe('PaymentNotifier', () => {
     order: {
       id: 1,
       orderNumber: '0000-066717',
+      baseNumber: '0000-066717',
       clientName: 'Клієнт',
       amountDue: new Prisma.Decimal('3000'),
       exchangeRate: null,
@@ -80,7 +81,7 @@ describe('PaymentNotifier', () => {
     await notifier.onRecorded(event(OrderStatus.PAID));
 
     expect(prisma.payment.findMany).toHaveBeenCalledWith({
-      where: { orderId: 1, id: { lte: 5 } },
+      where: { order: { baseNumber: '0000-066717' }, id: { lte: 5 } },
       orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
     });
   });

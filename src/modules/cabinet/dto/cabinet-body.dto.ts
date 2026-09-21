@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -21,6 +22,11 @@ export class CabinetCreateOrderDto extends CreateOrderDto {
   @IsInt()
   @IsPositive()
   managerId?: number;
+
+  // The number is already taken: create this order as one more part of it instead of failing.
+  @IsOptional()
+  @IsBoolean()
+  addPart?: boolean;
 }
 
 export class RefundDto {

@@ -68,9 +68,13 @@ export class DailyReportService {
       UPDATE orders o
       SET status = ${OrderStatus.UNDERPAID}::order_status, updated_at = now()
       WHERE o.status = ${OrderStatus.PARTIALLY_PAID}::order_status
-        AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.paid_at >= ${todayStart})
-        AND NOT EXISTS (SELECT 1 FROM refunds r WHERE r.order_id = o.id AND r.created_at >= ${todayStart})
+        AND NOT EXISTS (
+          SELECT 1 FROM payments p JOIN orders po ON po.id = p.order_id
+          WHERE po.base_number = o.base_number AND p.paid_at >= ${todayStart})
+        AND NOT EXISTS (
+          SELECT 1 FROM refunds r JOIN orders ro ON ro.id = r.order_id
+          WHERE ro.base_number = o.base_number AND r.created_at >= ${todayStart})
       RETURNING o.id`;
-    return this.orders.findManyWithBalance(rows.map((row) => row.id));
+    return this.orders.findGroupsByOrderIds(rows.map((row) => row.id));
   }
 }

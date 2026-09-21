@@ -73,9 +73,28 @@ export interface OrderAttachmentView {
   createdAt: string;
 }
 
+export interface OrderGroupPartView {
+  id: number;
+  orderNumber: string;
+  clientName: string;
+  amountDue: string;
+  status: OrderStatus;
+}
+
+// The whole 1C number this order belongs to: all its parts are paid by the same payment.
+export interface OrderGroupView {
+  baseNumber: string;
+  amountDue: string;
+  amountPaid: string;
+  amountRemaining: string;
+  status: OrderStatus;
+  parts: OrderGroupPartView[];
+}
+
 export interface OrderDetailView extends OrderSummaryView {
   exchangeRate: string | null;
   comment: string | null;
+  group: OrderGroupView;
   payments: PaymentView[];
   refunds: RefundView[];
   attachments: OrderAttachmentView[];
@@ -176,6 +195,20 @@ export function toOrderDetail(
     ...toOrderSummary(ledger),
     exchangeRate: order.exchangeRate?.toFixed(4) ?? null,
     comment: order.comment,
+    group: {
+      baseNumber: ledger.group.baseNumber,
+      amountDue: money(ledger.group.amountDue),
+      amountPaid: money(ledger.group.amountPaid),
+      amountRemaining: money(ledger.group.amountDue.minus(ledger.group.amountPaid)),
+      status: ledger.group.status,
+      parts: ledger.group.parts.map((part) => ({
+        id: part.id,
+        orderNumber: part.orderNumber,
+        clientName: part.clientName,
+        amountDue: money(part.amountDue),
+        status: part.status,
+      })),
+    },
     payments: ledger.payments.map(toPaymentView),
     refunds: ledger.refunds.map(toRefundView),
     attachments: attachments.map(toAttachmentView),

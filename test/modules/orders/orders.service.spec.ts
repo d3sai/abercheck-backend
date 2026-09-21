@@ -15,11 +15,26 @@ const d = (value: string) => new Prisma.Decimal(value);
 const prismaError = (code: string) =>
   new Prisma.PrismaClientKnownRequestError('prisma error', { code, clientVersion: 'test' });
 
+const part = (
+  id: number,
+  orderNumber: string,
+  amountDue: string,
+  status: OrderStatus = OrderStatus.PAID,
+) => ({
+  id,
+  orderNumber,
+  baseNumber: orderNumber.replace(/\(\d+\)$/, ''),
+  clientName: `ФОП ${id}`,
+  amountDue: d(amountDue),
+  status,
+  manager: { id: 7, name: 'Олена' },
+});
+
 describe('OrdersService', () => {
   const order = {
-    create: jest.fn(),
     findUnique: jest.fn(),
     findMany: jest.fn(),
+    groupBy: jest.fn(),
     count: jest.fn(),
     update: jest.fn(),
   };
@@ -27,7 +42,7 @@ describe('OrdersService', () => {
   const refund = { groupBy: jest.fn(), findMany: jest.fn() };
   const tx = {
     $queryRaw: jest.fn(),
-    order: { findUnique: jest.fn(), update: jest.fn() },
+    order: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     payment: { aggregate: jest.fn() },
     refund: { aggregate: jest.fn() },
     orderAmountChange: { create: jest.fn() },
@@ -44,6 +59,11 @@ describe('OrdersService', () => {
     amountDue: '1250.50',
   };
 
+  const paidSoFar = (amount: string | null) => {
+    tx.payment.aggregate.mockResolvedValue({ _sum: { amount: amount ? d(amount) : null } });
+    tx.refund.aggregate.mockResolvedValue({ _sum: { amount: null } });
+  };
+
   beforeEach(async () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -58,60 +78,156 @@ describe('OrdersService', () => {
     refund.groupBy.mockResolvedValue([]);
     $transaction.mockImplementation((callback) => callback(tx));
     tx.$queryRaw.mockResolvedValue([{ id: 1 }]);
-    tx.order.update.mockImplementation(({ data }: { data: object }) => ({ id: 1, ...data }));
+    tx.order.findMany.mockResolvedValue([]);
+    tx.order.create.mockImplementation(({ data }: { data: object }) => ({
+      id: 1,
+      status: OrderStatus.AWAITING_PAYMENT,
+      ...data,
+    }));
+    tx.order.update.mockImplementation(
+      ({ where, data }: { where: { id: number }; data: object }) => ({
+        id: where.id,
+        ...data,
+      }),
+    );
     tx.orderAmountChange.create.mockImplementation(({ data }: { data: object }) => ({
       id: 1,
       ...data,
     }));
+    paidSoFar(null);
   });
 
   afterEach(() => jest.resetAllMocks());
 
   describe('create', () => {
     it('should attach the order to the manager who created it', async () => {
-      order.create.mockResolvedValue({ id: 1 });
-
       await service.create(7, dto);
 
-      expect(order.create).toHaveBeenCalledWith({ data: { ...dto, managerId: 7 } });
+      expect(tx.order.create).toHaveBeenCalledWith({
+        data: { ...dto, orderNumber: 'ЗН-000123', baseNumber: 'ЗН-000123', managerId: 7 },
+      });
     });
 
     it('should emit an event once the order is created', async () => {
-      order.create.mockResolvedValue({ id: 1 });
-
       await service.create(7, dto);
 
-      expect(events.emit).toHaveBeenCalledWith(OrderEvents.Created, { order: { id: 1 } });
+      expect(events.emit).toHaveBeenCalledWith(OrderEvents.Created, {
+        order: expect.objectContaining({ orderNumber: 'ЗН-000123' }) as unknown,
+      });
+    });
+
+    it('should stay silent when the caller asked not to notify', async () => {
+      await service.create(7, dto, { notify: false });
+
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('should not emit an event when creation fails', async () => {
-      order.create.mockRejectedValue(prismaError('P2002'));
+      tx.order.create.mockRejectedValue(prismaError('P2002'));
 
       await expect(service.create(7, dto)).rejects.toBeInstanceOf(OrderNumberTakenError);
       expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('should store the order number in the canonical 1C format', async () => {
-      order.create.mockResolvedValue({ id: 1 });
-
       await service.create(7, { ...dto, orderNumber: '№А 0000-066717' });
 
-      expect(order.create).toHaveBeenCalledWith({
-        data: { ...dto, orderNumber: '0000-066717', managerId: 7 },
+      expect(tx.order.create).toHaveBeenCalledWith({
+        data: { ...dto, orderNumber: '0000-066717', baseNumber: '0000-066717', managerId: 7 },
       });
-    });
-
-    it('should throw OrderNumberTakenError when the order number already exists', async () => {
-      order.create.mockRejectedValue(prismaError('P2002'));
-
-      await expect(service.create(7, dto)).rejects.toBeInstanceOf(OrderNumberTakenError);
     });
 
     it('should rethrow unexpected database errors', async () => {
       const error = prismaError('P1001');
-      order.create.mockRejectedValue(error);
+      tx.order.create.mockRejectedValue(error);
 
       await expect(service.create(7, dto)).rejects.toBe(error);
+    });
+
+    it('should generate a number for a closing minus, which is a group of its own', async () => {
+      await service.create(7, { clientName: 'Мінус', amountDue: '80' });
+
+      expect(tx.order.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          orderNumber: expect.stringMatching(/^МІНУС-\d+$/) as unknown,
+          baseNumber: expect.stringMatching(/^МІНУС-\d+$/) as unknown,
+        }) as unknown,
+      });
+      const [[{ data }]] = tx.order.create.mock.calls as unknown as [
+        [{ data: { orderNumber: string; baseNumber: string } }],
+      ];
+      expect(data.baseNumber).toBe(data.orderNumber);
+    });
+
+    describe('on a number that is already taken', () => {
+      const existing = [part(1, '0000-066717', '1000')];
+
+      it('should refuse it by default and name the whole number', async () => {
+        tx.order.findMany.mockResolvedValue(existing);
+
+        await expect(service.create(7, { ...dto, orderNumber: '0000-066717' })).rejects.toEqual(
+          expect.objectContaining({ orderNumber: '0000-066717' }),
+        );
+        expect(tx.order.create).not.toHaveBeenCalled();
+        expect(events.emit).not.toHaveBeenCalled();
+      });
+
+      it('should add the next part with a (n) suffix when asked to', async () => {
+        tx.order.findMany.mockResolvedValue([...existing, part(2, '0000-066717(1)', '500')]);
+
+        await service.create(7, { ...dto, orderNumber: '0000-066717' }, { addPart: true });
+
+        expect(tx.order.create).toHaveBeenCalledWith({
+          data: {
+            ...dto,
+            orderNumber: '0000-066717(2)',
+            baseNumber: '0000-066717',
+            managerId: 7,
+          },
+        });
+      });
+
+      it('should number the first extra part (1)', async () => {
+        tx.order.findMany.mockResolvedValue(existing);
+
+        await service.create(7, { ...dto, orderNumber: '0000-066717' }, { addPart: true });
+
+        expect(tx.order.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ orderNumber: '0000-066717(1)' }) as unknown,
+        });
+      });
+
+      it('should treat a typed suffix as the same number', async () => {
+        tx.order.findMany.mockResolvedValue(existing);
+
+        await service.create(7, { ...dto, orderNumber: '0000-066717(5)' }, { addPart: true });
+
+        expect(tx.$queryRaw.mock.calls[0]).toContain('0000-066717');
+        expect(tx.order.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            orderNumber: '0000-066717(1)',
+            baseNumber: '0000-066717',
+          }) as unknown,
+        });
+      });
+
+      it('should reopen a paid number, so the new part shares its status', async () => {
+        tx.order.findMany.mockResolvedValue(existing);
+        paidSoFar('1000');
+
+        const created = await service.create(
+          7,
+          { ...dto, orderNumber: '0000-066717' },
+          { addPart: true },
+        );
+
+        expect(tx.order.update).toHaveBeenCalledWith({
+          where: { id: 1 },
+          data: { status: OrderStatus.PARTIALLY_PAID },
+        });
+        expect(created.status).toBe(OrderStatus.PARTIALLY_PAID);
+        expect(events.emit).toHaveBeenCalledWith(OrderEvents.Created, { order: created });
+      });
     });
   });
 
@@ -135,81 +251,186 @@ describe('OrdersService', () => {
       expect(order.count).toHaveBeenCalledWith({ where });
       expect(result).toEqual({ items: [], total: 42 });
     });
+
+    it('should show each order its own share of what was paid against the number', async () => {
+      const first = part(1, '0000-066717', '700');
+      const second = part(2, '0000-066717(1)', '300');
+      order.findMany.mockResolvedValueOnce([second, first]).mockResolvedValueOnce([first, second]);
+      order.count.mockResolvedValue(2);
+      payment.groupBy.mockResolvedValue([{ orderId: 1, _sum: { amount: d('800') } }]);
+
+      const { items } = await service.list({}, 25);
+
+      expect(items.map((item) => [item.order.orderNumber, item.amountPaid.toFixed(2)])).toEqual([
+        ['0000-066717(1)', '100.00'],
+        ['0000-066717', '700.00'],
+      ]);
+    });
   });
 
   describe('findWithBalance', () => {
-    it('should look up the normalized number and subtract refunds', async () => {
-      order.findUnique.mockResolvedValue({ id: 1 });
-      payment.groupBy.mockResolvedValue([
-        { orderId: 1, _sum: { amount: new Prisma.Decimal('6208.41') } },
-      ]);
-      refund.groupBy.mockResolvedValue([
-        { orderId: 1, _sum: { amount: new Prisma.Decimal('50') } },
-      ]);
+    it('should look up the whole number by its base and subtract refunds', async () => {
+      order.findMany.mockResolvedValue([part(1, '0000-066717', '6158.41')]);
+      payment.groupBy.mockResolvedValue([{ orderId: 1, _sum: { amount: d('6208.41') } }]);
+      refund.groupBy.mockResolvedValue([{ orderId: 1, _sum: { amount: d('50') } }]);
 
-      const result = await service.findWithBalance('№Р 0000-066717');
+      const result = await service.findWithBalance('№Р 0000-066717(1)');
 
-      expect(order.findUnique).toHaveBeenCalledWith({
-        where: { orderNumber: '0000-066717' },
+      expect(order.findMany).toHaveBeenCalledWith({
+        where: { baseNumber: { in: ['0000-066717'] } },
         include: { manager: true },
+        orderBy: { id: 'asc' },
       });
       expect(result?.amountPaid.toFixed(2)).toBe('6158.41');
     });
 
+    it('should describe a number with several orders as one order for the total', async () => {
+      order.findMany.mockResolvedValue([
+        part(1, '0000-066717', '3000'),
+        part(2, '0000-066717(1)', '1000'),
+      ]);
+      payment.groupBy.mockResolvedValue([{ orderId: 1, _sum: { amount: d('1500') } }]);
+
+      const result = await service.findWithBalance('0000-066717');
+
+      expect(result?.order).toMatchObject({
+        orderNumber: '0000-066717',
+        clientName: 'ФОП 1, ФОП 2',
+        amountDue: d('4000'),
+      });
+      expect(result?.amountPaid.toFixed(2)).toBe('1500.00');
+    });
+
+    it('should ignore cancelled parts when totalling what is due', async () => {
+      order.findMany.mockResolvedValue([
+        part(1, '0000-066717', '3000', OrderStatus.CANCELLED),
+        part(2, '0000-066717(1)', '1000', OrderStatus.AWAITING_PAYMENT),
+      ]);
+
+      const result = await service.findWithBalance('0000-066717');
+
+      expect(result?.order.amountDue.toFixed(2)).toBe('1000.00');
+      expect(result?.order.status).toBe(OrderStatus.AWAITING_PAYMENT);
+    });
+
     it('should return null for an unknown order', async () => {
-      order.findUnique.mockResolvedValue(null);
+      order.findMany.mockResolvedValue([]);
 
       await expect(service.findWithBalance('0000-000000')).resolves.toBeNull();
     });
   });
 
-  describe('findUnpaid', () => {
-    it('should attach the paid amount to each unpaid order, capped at the limit plus one lookahead', async () => {
-      order.findMany.mockResolvedValue([{ id: 1 }, { id: 2 }]);
-      payment.groupBy.mockResolvedValue([
-        { orderId: 1, _sum: { amount: new Prisma.Decimal('3614.32') } },
+  describe('findWithBalanceById', () => {
+    it('should resolve the id to its whole number', async () => {
+      order.findUnique.mockResolvedValue({ baseNumber: '0000-066717' });
+      order.findMany.mockResolvedValue([
+        part(1, '0000-066717', '10'),
+        part(2, '0000-066717(1)', '20'),
       ]);
+
+      const result = await service.findWithBalanceById(2);
+
+      expect(order.findUnique).toHaveBeenCalledWith({
+        where: { id: 2 },
+        select: { baseNumber: true },
+      });
+      expect(result?.order.amountDue.toFixed(2)).toBe('30.00');
+    });
+
+    it('should return null for an unknown id', async () => {
+      order.findUnique.mockResolvedValue(null);
+
+      await expect(service.findWithBalanceById(404)).resolves.toBeNull();
+    });
+  });
+
+  describe('findGroupsByOrderIds', () => {
+    it('should return each number once, however many of its orders were given', async () => {
+      order.findMany
+        .mockResolvedValueOnce([
+          { baseNumber: 'A-1' },
+          { baseNumber: 'A-1' },
+          { baseNumber: 'B-2' },
+        ])
+        .mockResolvedValueOnce([part(1, 'A-1', '10'), part(2, 'A-1(1)', '5'), part(3, 'B-2', '7')]);
+
+      const groups = await service.findGroupsByOrderIds([1, 2, 3]);
+
+      expect(groups.map((g) => [g.order.orderNumber, g.order.amountDue.toFixed(2)])).toEqual([
+        ['A-1', '15.00'],
+        ['B-2', '7.00'],
+      ]);
+    });
+
+    it('should not query anything for an empty list', async () => {
+      await expect(service.findGroupsByOrderIds([])).resolves.toEqual([]);
+      expect(order.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findUnpaid', () => {
+    const unpaidWhere = { status: { in: ['AWAITING_PAYMENT', 'PARTIALLY_PAID', 'UNDERPAID'] } };
+
+    it('should list a number once, with the total of its parts and what was paid', async () => {
+      order.groupBy.mockResolvedValue([{ baseNumber: '0000-066717', _min: { id: 1 } }]);
+      order.findMany.mockResolvedValue([
+        part(1, '0000-066717', '3000', OrderStatus.PARTIALLY_PAID),
+        part(2, '0000-066717(1)', '1000', OrderStatus.PARTIALLY_PAID),
+      ]);
+      payment.groupBy.mockResolvedValue([{ orderId: 1, _sum: { amount: d('3614.32') } }]);
 
       const result = await service.findUnpaid(50);
 
-      expect(order.findMany).toHaveBeenCalledWith({
-        where: { status: { in: ['AWAITING_PAYMENT', 'PARTIALLY_PAID', 'UNDERPAID'] } },
-        orderBy: { id: 'asc' },
+      expect(order.groupBy).toHaveBeenCalledWith({
+        by: ['baseNumber'],
+        where: unpaidWhere,
+        _min: { id: true },
+        having: undefined,
+        orderBy: { _min: { id: 'asc' } },
         take: 51,
       });
-      expect(result.items.map((item) => item.amountPaid.toFixed(2))).toEqual(['3614.32', '0.00']);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]!.order).toMatchObject({
+        orderNumber: '0000-066717',
+        amountDue: d('4000'),
+      });
+      expect(result.items[0]!.amountPaid.toFixed(2)).toBe('3614.32');
       expect(result.nextCursor).toBeNull();
     });
 
-    it('should skip the payments query when nothing is unpaid', async () => {
-      order.findMany.mockResolvedValue([]);
+    it('should skip loading orders and payments when nothing is unpaid', async () => {
+      order.groupBy.mockResolvedValue([]);
 
       await expect(service.findUnpaid(50)).resolves.toEqual({ items: [], nextCursor: null });
+      expect(order.findMany).not.toHaveBeenCalled();
       expect(payment.groupBy).not.toHaveBeenCalled();
     });
 
-    it('should return a cursor and drop the lookahead row when there are more pages', async () => {
-      order.findMany.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: 3 }]);
+    it('should return a cursor and drop the lookahead number when there are more pages', async () => {
+      order.groupBy.mockResolvedValue([
+        { baseNumber: 'A-1', _min: { id: 1 } },
+        { baseNumber: 'B-2', _min: { id: 4 } },
+        { baseNumber: 'C-3', _min: { id: 9 } },
+      ]);
+      order.findMany.mockResolvedValue([part(1, 'A-1', '1'), part(4, 'B-2', '1')]);
 
       const result = await service.findUnpaid(2);
 
-      expect(result.items).toHaveLength(2);
-      expect(result.items.map((item) => item.order)).toEqual([{ id: 1 }, { id: 2 }]);
-      expect(result.nextCursor).toBe(2);
+      expect(order.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { baseNumber: { in: ['A-1', 'B-2'] } } }),
+      );
+      expect(result.items.map((item) => item.order.orderNumber)).toEqual(['A-1', 'B-2']);
+      expect(result.nextCursor).toBe(4);
     });
 
     it('should resume after the given cursor', async () => {
-      order.findMany.mockResolvedValue([]);
+      order.groupBy.mockResolvedValue([]);
 
       await service.findUnpaid(50, 7);
 
-      expect(order.findMany).toHaveBeenCalledWith({
-        where: { status: { in: ['AWAITING_PAYMENT', 'PARTIALLY_PAID', 'UNDERPAID'] } },
-        orderBy: { id: 'asc' },
-        take: 51,
-        cursor: { id: 7 },
-        skip: 1,
-      });
+      expect(order.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ having: { id: { _min: { gt: 7 } } }, take: 51 }),
+      );
     });
   });
 
@@ -234,15 +455,11 @@ describe('OrdersService', () => {
       expect($transaction).not.toHaveBeenCalled();
     });
 
-    it('should recalculate the status, persist the new amount and record the audit trail', async () => {
-      tx.order.findUnique.mockResolvedValue({
-        id: 1,
-        orderNumber: '0000-066717',
-        amountDue: d('100'),
-        status: OrderStatus.PAID,
-      });
-      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: d('100') } });
-      tx.refund.aggregate.mockResolvedValue({ _sum: { amount: null } });
+    it('should persist the new amount, record the audit trail and recalculate the status', async () => {
+      const only = part(1, '0000-066717', '100');
+      tx.order.findUnique.mockResolvedValue(only);
+      tx.order.findMany.mockResolvedValue([only]);
+      paidSoFar('100');
 
       await service.update('0000-066717', { amountDue: '150' }, admin);
 
@@ -255,9 +472,35 @@ describe('OrdersService', () => {
           changedByName: admin.name,
         },
       });
+      expect(tx.order.update).toHaveBeenNthCalledWith(1, {
+        where: { id: 1 },
+        data: { amountDue: d('150') },
+      });
+      expect(tx.order.update).toHaveBeenNthCalledWith(2, {
+        where: { id: 1 },
+        data: { status: OrderStatus.PARTIALLY_PAID },
+      });
+    });
+
+    it('should re-evaluate every part of the number when one of them changes', async () => {
+      const first = part(1, '0000-066717', '100');
+      const second = part(2, '0000-066717(1)', '100');
+      tx.order.findUnique.mockResolvedValue(second);
+      tx.order.findMany.mockResolvedValue([first, second]);
+      paidSoFar('200');
+
+      await service.update('0000-066717(1)', { amountDue: '150' }, admin);
+
+      expect(tx.orderAmountChange.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ orderId: 2 }) as unknown,
+      });
       expect(tx.order.update).toHaveBeenCalledWith({
         where: { id: 1 },
-        data: { amountDue: d('150'), status: OrderStatus.PARTIALLY_PAID },
+        data: { status: OrderStatus.PARTIALLY_PAID },
+      });
+      expect(tx.order.update).toHaveBeenCalledWith({
+        where: { id: 2 },
+        data: { status: OrderStatus.PARTIALLY_PAID },
       });
     });
 
@@ -327,26 +570,52 @@ describe('OrdersService', () => {
   });
 
   describe('findLedger', () => {
-    it('should return the order with its payments and refunds in time order', async () => {
-      order.findUnique.mockResolvedValue({ id: 1 });
+    const first = part(1, '0000-066717', '700');
+    const second = part(2, '0000-066717(1)', '300');
+
+    it("should return one order with the whole number's payments and refunds in time order", async () => {
+      order.findUnique.mockResolvedValue({ baseNumber: '0000-066717' });
+      order.findMany.mockResolvedValue([first, second]);
       payment.findMany.mockResolvedValue([{ id: 10 }]);
       refund.findMany.mockResolvedValue([{ id: 20 }]);
+      payment.groupBy.mockResolvedValue([{ orderId: 1, _sum: { amount: d('800') } }]);
 
-      const ledger = await service.findLedger('0000-066717');
+      const ledger = await service.findLedger('0000-066717(1)');
 
+      expect(order.findUnique).toHaveBeenCalledWith({
+        where: { orderNumber: '0000-066717(1)' },
+        select: { baseNumber: true },
+      });
       expect(payment.findMany).toHaveBeenCalledWith({
-        where: { orderId: 1 },
+        where: { order: { baseNumber: '0000-066717' } },
         orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
       });
       expect(refund.findMany).toHaveBeenCalledWith({
-        where: { orderId: 1 },
+        where: { order: { baseNumber: '0000-066717' } },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
       expect(ledger).toMatchObject({
-        order: { id: 1 },
+        order: { id: 2, orderNumber: '0000-066717(1)' },
         payments: [{ id: 10 }],
         refunds: [{ id: 20 }],
+        group: { baseNumber: '0000-066717', parts: [{ id: 1 }, { id: 2 }] },
       });
+      expect(ledger?.amountPaid.toFixed(2)).toBe('100.00');
+      expect(ledger?.group.amountPaid.toFixed(2)).toBe('800.00');
+      expect(ledger?.group.amountDue.toFixed(2)).toBe('1000.00');
+    });
+
+    it('should normalize a number pasted with noise but keep its part suffix', async () => {
+      order.findUnique.mockResolvedValue({ baseNumber: '0000-066717' });
+      order.findMany.mockResolvedValue([first, second]);
+      payment.findMany.mockResolvedValue([]);
+      refund.findMany.mockResolvedValue([]);
+
+      await service.findLedger('№А 0000-066717 (1)');
+
+      expect(order.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { orderNumber: '0000-066717(1)' } }),
+      );
     });
 
     it('should return null for an unknown order', async () => {

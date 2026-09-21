@@ -1,5 +1,5 @@
 import type { OnApplicationBootstrap } from '@nestjs/common';
-import { Command, Ctx, Help, Next, On, Start, Update } from 'nestjs-telegraf';
+import { Action, Command, Ctx, Help, Next, On, Start, Update } from 'nestjs-telegraf';
 import type { Context } from 'telegraf';
 import type { TelegramFileRef } from '../../attachments/attachments.service';
 import { type Manager, OrderType } from '../../../generated/prisma/client';
@@ -8,8 +8,8 @@ import { HELP, NOT_A_MANAGER, newManagerNotice, startReply } from '../access/acc
 import { ADMIN_HELP } from '../admin/admin.update';
 import { MENU_LABEL } from './menu';
 import { OrderListService } from '../orders-list/order-list.service';
-import { OrderDraftService } from '../order-draft/order-draft.service';
-import { type CommandContext, fullName, isPrivate, reply } from './telegram-context';
+import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
+import { type CommandContext, edit, fullName, isPrivate, reply } from './telegram-context';
 import { TelegramSender } from './telegram-sender';
 
 type Next = () => Promise<void>;
@@ -109,6 +109,23 @@ export class BotUpdate implements OnApplicationBootstrap {
   async cancel(@Ctx() ctx: Context): Promise<void> {
     if (isPrivate(ctx) && ctx.from) {
       await reply(ctx, this.drafts.cancel(BigInt(ctx.from.id)));
+    }
+  }
+
+  @Action(DraftAction.AddPart)
+  async addPart(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      await edit(ctx, await this.drafts.addPart(manager));
+    }
+  }
+
+  @Action(DraftAction.SkipPart)
+  async skipPart(@Ctx() ctx: Context): Promise<void> {
+    if (isPrivate(ctx) && ctx.from) {
+      await ctx.answerCbQuery();
+      await edit(ctx, this.drafts.skipPart(BigInt(ctx.from.id)));
     }
   }
 

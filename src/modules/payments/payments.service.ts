@@ -1,15 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import {
-  MatchType,
-  type Order,
-  OrderStatus,
-  type Payment,
-  Prisma,
-} from '../../generated/prisma/client';
-import { lockOrderByNumber, netPaid } from '../orders/order-ledger';
-import { normalizeOrderNumber } from '../orders/order-number';
-import { calculateOrderStatus } from '../orders/order-status';
+import { MatchType, type Order, type Payment, Prisma } from '../../generated/prisma/client';
+import { liveParts, pickAnchor, rollUp } from '../orders/order-group';
+import { groupNetPaid, lockGroup, syncGroupStatus } from '../orders/order-ledger';
+import { normalizeBaseNumber } from '../orders/order-number';
 import { OrderCancelledError, OrderNotFoundError } from '../orders/orders.errors';
 import { isUniqueViolation } from '../../common/prisma/prisma-errors';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -70,20 +64,20 @@ export class PaymentsService {
         throw new PaymentAlreadyAttachedError(paymentId);
       }
 
-      const number = normalizeOrderNumber(orderNumber);
-      const order = await lockOrderByNumber(tx, number);
-      if (!order) {
+      const number = normalizeBaseNumber(orderNumber);
+      const parts = await lockGroup(tx, number);
+      if (parts.length === 0) {
         throw new OrderNotFoundError(number);
       }
-      if (order.status === OrderStatus.CANCELLED) {
+      if (liveParts(parts).length === 0) {
         throw new OrderCancelledError(number);
       }
 
       const attached = await tx.payment.update({
         where: { id: paymentId },
-        data: { orderId: order.id },
+        data: { orderId: pickAnchor(parts).id },
       });
-      return this.applyToOrder(tx, attached, order);
+      return this.applyToGroup(tx, attached, parts);
     });
 
     this.events.emit(PaymentEvents.Recorded, result);
@@ -141,9 +135,10 @@ export class PaymentsService {
     dto: CreatePaymentDto,
   ): Promise<PaymentRecorded | PaymentUnmatched> {
     const reportedOrderNumber = dto.order_number ?? null;
-    const order = reportedOrderNumber
-      ? await lockOrderByNumber(tx, normalizeOrderNumber(reportedOrderNumber))
-      : null;
+    const parts = reportedOrderNumber
+      ? await lockGroup(tx, normalizeBaseNumber(reportedOrderNumber))
+      : [];
+    const anchor = parts.length > 0 ? pickAnchor(parts) : null;
 
     const payment = await tx.payment.create({
       data: {
@@ -154,26 +149,30 @@ export class PaymentsService {
         purposeText: dto.purpose_text,
         paidAt: new Date(dto.paid_at),
         reportedOrderNumber,
-        orderId: order?.id ?? null,
-        matchType: order ? MatchType.MATCHED_BY_PROVIDER : MatchType.MANUAL,
+        orderId: anchor?.id ?? null,
+        matchType: anchor ? MatchType.MATCHED_BY_PROVIDER : MatchType.MANUAL,
       },
     });
-    return order ? this.applyToOrder(tx, payment, order) : { kind: 'unmatched', payment };
+    return anchor ? this.applyToGroup(tx, payment, parts) : { kind: 'unmatched', payment };
   }
 
-  private async applyToOrder(
+  // A payment covers the whole 1C number: all its orders share the resulting status.
+  private async applyToGroup(
     tx: Prisma.TransactionClient,
     payment: Payment,
-    order: Order,
+    parts: Order[],
   ): Promise<PaymentRecorded> {
-    const amountPaid = await netPaid(tx, order.id);
-    const status = calculateOrderStatus(order.amountDue, amountPaid, order.status);
-    const updated =
-      status === order.status
-        ? order
-        : await tx.order.update({ where: { id: order.id }, data: { status } });
+    const amountPaid = await groupNetPaid(tx, pickAnchor(parts).baseNumber);
+    const previousStatus = pickAnchor(parts).status;
+    const synced = await syncGroupStatus(tx, parts, amountPaid);
 
-    return { kind: 'recorded', payment, order: updated, previousStatus: order.status, amountPaid };
+    return {
+      kind: 'recorded',
+      payment,
+      order: rollUp(synced.parts),
+      previousStatus,
+      amountPaid,
+    };
   }
 
   private findByExternalId(externalTransactionId: string): Promise<Payment | null> {
