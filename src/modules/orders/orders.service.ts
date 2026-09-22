@@ -144,7 +144,7 @@ export class OrdersService {
   async createGroup(
     managerId: number,
     items: GroupOrderItem[],
-    common: { clientName: string; exchangeRate?: string; comment?: string; requisites?: string },
+    common: { clientName: string; exchangeRate?: string; comment?: string },
     options?: { notify?: boolean },
   ): Promise<Order[]> {
     const numbers = items.map((item) => baseNumberOf(normalizeBaseNumber(item.orderNumber)));
@@ -168,14 +168,13 @@ export class OrdersService {
           created.push(
             await tx.order.create({
               data: {
-                orderType: OrderType.REQUISITES,
+                orderType: OrderType.REGULAR,
                 orderNumber: numbers[index]!,
                 baseNumber,
                 clientName: common.clientName,
                 amountDue: item.amountDue,
                 exchangeRate: common.exchangeRate,
                 comment: index === 0 ? common.comment : `Оплата разом із № ${baseNumber}`,
-                requisites: index === 0 ? common.requisites : undefined,
                 managerId,
               },
             }),

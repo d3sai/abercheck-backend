@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import {
@@ -17,10 +17,11 @@ import {
   type OrderWithPaid,
   OrdersService,
 } from '../../orders/orders.service';
-import { type BotReply, button } from '../core/bot-reply';
+import { RequisitesService } from '../../requisites/requisites.service';
+import { BOT_RESTART_NOTICE, type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatMoney } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
-import { adminOrderCreatedMessage, adminRequisitesMessage } from '../notifications/order-templates';
+import { adminOrderCreatedMessage } from '../notifications/order-templates';
 import {
   parseExchangeRate,
   parseFreeform,
@@ -31,13 +32,15 @@ import {
   parseText,
 } from './order-draft.parsers';
 import {
+  adminRequisitesMessage,
+  multipleOrRequisitesGuard,
   requisitesCreatedReply,
   requisitesErrors,
   requisitesHint,
   requisitesPreview,
 } from './requisites.messages';
 import {
-  looksLikeRequisites,
+  hasMultipleOrdersOrRequisites,
   parseRequisites,
   type RequisitesPlan,
   withoutNumbers,
@@ -65,25 +68,25 @@ export const DraftAction = {
   SkipPart: 'part:skip',
 } as const;
 
-// How long a manager has to confirm adding a part to an already existing number.
+// How long a manager has to confirm adding a part to an already existing number, or to answer a
+// requisites report's preview.
 const PART_OFFER_TTL_MS = 10 * 60_000;
+const REQUISITES_DRAFT_TTL_MS = 10 * 60_000;
+
+// How long the "кілька номерів / реквізити" mode waits for the message after the button/command.
+const REQUISITES_MODE_TTL_MS = 30 * 60_000;
 
 interface PartOffer {
   data: Partial<Record<DraftField, string>>;
   expiresAt: number;
 }
 
-// How long the "payment to other requisites" mode waits for the message, and how long a preview
-// waits for the manager's answer.
-const REQUISITES_MODE_TTL_MS = 30 * 60_000;
-
 interface RequisitesDraft {
   plan: RequisitesPlan;
+  /** The original message, kept for the "це звичайне замовлення" escape hatch. */
   text: string;
-  /** The single number already exists: the order becomes one more part of it. */
+  /** The single number already exists: this becomes one more part of it. */
   addPart: boolean;
-  /** The bot recognised the message on its own; the manager did not press the button. */
-  auto: boolean;
   /** Numbers left out of a group because they already exist. */
   skipped: string[];
   expiresAt: number;
@@ -99,7 +102,7 @@ function pluralizeFiles(count: number): string {
 }
 
 @Injectable()
-export class OrderDraftService {
+export class OrderDraftService implements OnApplicationShutdown {
   private readonly pendingFiles = new Map<bigint, TelegramFileRef[]>();
   private readonly partOffers = new Map<bigint, PartOffer>();
   private readonly requisitesUntil = new Map<bigint, number>();
@@ -107,9 +110,30 @@ export class OrderDraftService {
 
   constructor(
     private readonly orders: OrdersService,
+    private readonly requisites: RequisitesService,
     private readonly attachments: AttachmentsService,
     private readonly sender: TelegramSender,
   ) {}
+
+  // The bot is restarting: whoever has files waiting, an unanswered part offer, or an armed/pending
+  // requisites flow would otherwise lose it silently. A short warning at least makes that visible.
+  async onApplicationShutdown(): Promise<void> {
+    const now = Date.now();
+    const ids = new Set<bigint>();
+    for (const id of this.pendingFiles.keys()) {
+      ids.add(id);
+    }
+    for (const [id, offer] of this.partOffers) {
+      if (offer.expiresAt > now) ids.add(id);
+    }
+    for (const [id, until] of this.requisitesUntil) {
+      if (until > now) ids.add(id);
+    }
+    for (const [id, draft] of this.requisitesDrafts) {
+      if (draft.expiresAt > now) ids.add(id);
+    }
+    await Promise.all([...ids].map((id) => this.sender.send(id, BOT_RESTART_NOTICE)));
+  }
 
   hint(type: OrderType): BotReply {
     const isMinus = type === OrderType.MINUS_CLOSING;
@@ -133,6 +157,7 @@ export class OrderDraftService {
         ...(isMinus
           ? []
           : ['Номер уже є в системі? Бот запропонує додати ще одну частину до нього.']),
+        'Для кількох номерів або оплати на чужі реквізити скористайтесь командою /requisites.',
         '',
         "Порядок рядків (* — обов'язкове):",
         lines.join(', '),
@@ -143,12 +168,25 @@ export class OrderDraftService {
     };
   }
 
+  // Arms the "кілька номерів / реквізити" mode: only while it's armed does the very next message go
+  // through the requisites parser instead of the regular single-order template.
+  startRequisites(userId: bigint): BotReply {
+    this.partOffers.delete(userId);
+    this.requisitesDrafts.delete(userId);
+    this.requisitesUntil.set(userId, Date.now() + REQUISITES_MODE_TTL_MS);
+    return requisitesHint();
+  }
+
+  private inRequisites(userId: bigint): boolean {
+    return (this.requisitesUntil.get(userId) ?? 0) > Date.now();
+  }
+
   async handleText(manager: Manager, text: string): Promise<BotReply | null> {
     if (this.inRequisites(manager.telegramId)) {
-      return this.handleRequisites(manager, text, false);
+      return this.handleRequisites(manager, text);
     }
-    if (this.isRequisitesMessage(text)) {
-      return this.handleRequisites(manager, text, true);
+    if (this.needsRequisitesButton(text)) {
+      return multipleOrRequisitesGuard();
     }
     const raw = this.extractFields(text);
     if (!raw) {
@@ -160,6 +198,14 @@ export class OrderDraftService {
   private extractFields(text: string): Record<string, string> | null {
     const labeled = parseTemplate(text, FIELDS);
     return Object.keys(labeled).length > 0 ? labeled : parseFreeform(text);
+  }
+
+  // The regular/minus templates stay standard and unaffected: only text with NO explicit field
+  // labels of its own, but the shape of several numbers or someone else's requisites, is refused.
+  private needsRequisitesButton(text: string): boolean {
+    return (
+      Object.keys(parseTemplate(text, FIELDS)).length === 0 && hasMultipleOrdersOrRequisites(text)
+    );
   }
 
   async addFile(manager: Manager, file: TelegramFileRef, caption?: string): Promise<BotReply> {
@@ -175,13 +221,18 @@ export class OrderDraftService {
 
     const files = this.bufferFile(manager.telegramId, file);
     const text = caption?.trim();
-    if (text && this.inRequisites(manager.telegramId)) {
-      return this.handleRequisites(manager, text, false);
+    if (!text) {
+      return {
+        html: `📎 Додано «${escapeHtml(file.filename)}» (${files.length}/${MAX_FILES_PER_UPLOAD}).`,
+      };
     }
-    if (text && this.isRequisitesMessage(text)) {
-      return this.handleRequisites(manager, text, true);
+    if (this.inRequisites(manager.telegramId)) {
+      return this.handleRequisites(manager, text);
     }
-    const raw = text ? this.extractFields(text) : null;
+    if (this.needsRequisitesButton(text)) {
+      return multipleOrRequisitesGuard();
+    }
+    const raw = this.extractFields(text);
     if (raw) {
       return this.process(manager, raw);
     }
@@ -193,21 +244,16 @@ export class OrderDraftService {
   cancel(userId: bigint): BotReply {
     const hadFiles = this.pendingFiles.delete(userId);
     const hadOffer = this.partOffers.delete(userId);
-    const hadRequisites = this.requisitesUntil.delete(userId);
-    this.requisitesDrafts.delete(userId);
+    const hadWaiting = this.requisitesUntil.delete(userId);
+    const hadDraft = this.requisitesDrafts.delete(userId);
     return {
-      html: hadFiles || hadOffer || hadRequisites ? 'Скасовано.' : 'Нема чого скасовувати.',
+      html:
+        hadFiles || hadOffer || hadWaiting || hadDraft ? 'Скасовано.' : 'Нема чого скасовувати.',
     };
   }
 
-  startRequisites(userId: bigint): BotReply {
-    this.partOffers.delete(userId);
-    this.requisitesDrafts.delete(userId);
-    this.requisitesUntil.set(userId, Date.now() + REQUISITES_MODE_TTL_MS);
-    return requisitesHint();
-  }
-
-  // Another flow was started: the next message is no longer a payment to other requisites.
+  // Another flow was started: the next message is no longer a requisites report, and any pending
+  // preview is dropped.
   leaveRequisites(userId: bigint): void {
     this.requisitesUntil.delete(userId);
     this.requisitesDrafts.delete(userId);
@@ -219,40 +265,9 @@ export class OrderDraftService {
     return { html: 'Гаразд. Надішліть виправлене повідомлення.' };
   }
 
-  async confirmRequisites(manager: Manager): Promise<BotReply> {
-    const draft = this.requisitesDrafts.get(manager.telegramId);
-    this.requisitesDrafts.delete(manager.telegramId);
-    if (!draft || draft.expiresAt < Date.now()) {
-      return { html: '⚠️ Немає даних для відправки. Надішліть повідомлення ще раз.' };
-    }
-
-    try {
-      const orders = await this.createRequisiteOrders(manager, draft);
-      this.leaveRequisites(manager.telegramId);
-      return requisitesCreatedReply(orders, draft.skipped);
-    } catch (error) {
-      if (error instanceof OrderNumberTakenError) {
-        this.requisitesUntil.set(manager.telegramId, Date.now() + REQUISITES_MODE_TTL_MS);
-        return {
-          html: `⚠️ Номер ${escapeHtml(error.orderNumber)} щойно з'явився в системі. Надішліть повідомлення ще раз.`,
-        };
-      }
-      throw error;
-    }
-  }
-
-  private inRequisites(userId: bigint): boolean {
-    return (this.requisitesUntil.get(userId) ?? 0) > Date.now();
-  }
-
-  // A labelled regular template is always a regular order; otherwise several numbers, an IBAN, a
-  // card or several amounts can only be a payment to other requisites.
-  private isRequisitesMessage(text: string): boolean {
-    return Object.keys(parseTemplate(text, FIELDS)).length === 0 && looksLikeRequisites(text);
-  }
-
-  // "This is a regular order after all": the same text goes through the regular template.
-  async regularFromDraft(manager: Manager): Promise<BotReply> {
+  // "Це звичайне замовлення" escape hatch: the message was misread as a requisites report, so the
+  // same text goes through the regular template instead.
+  async regularFromRequisites(manager: Manager): Promise<BotReply> {
     const draft = this.requisitesDrafts.get(manager.telegramId);
     this.leaveRequisites(manager.telegramId);
     if (!draft) {
@@ -265,7 +280,29 @@ export class OrderDraftService {
     return this.process(manager, raw);
   }
 
-  private async handleRequisites(manager: Manager, text: string, auto: boolean): Promise<BotReply> {
+  async confirmRequisites(manager: Manager): Promise<BotReply> {
+    const draft = this.requisitesDrafts.get(manager.telegramId);
+    this.requisitesDrafts.delete(manager.telegramId);
+    if (!draft || draft.expiresAt < Date.now()) {
+      return { html: '⚠️ Немає даних для відправки. Надішліть повідомлення ще раз.' };
+    }
+
+    try {
+      const orders = await this.createRequisiteOrders(manager, draft);
+      this.requisitesUntil.delete(manager.telegramId);
+      return requisitesCreatedReply(orders, draft.skipped);
+    } catch (error) {
+      if (error instanceof OrderNumberTakenError) {
+        this.requisitesUntil.set(manager.telegramId, Date.now() + REQUISITES_MODE_TTL_MS);
+        return {
+          html: `⚠️ Номер ${escapeHtml(error.orderNumber)} щойно з'явився в системі. Надішліть повідомлення ще раз.`,
+        };
+      }
+      throw error;
+    }
+  }
+
+  private async handleRequisites(manager: Manager, text: string): Promise<BotReply> {
     const original = text.trim();
     const parsed = parseRequisites(original);
     if (!parsed.ok) {
@@ -310,15 +347,13 @@ export class OrderDraftService {
       plan,
       text: original,
       addPart,
-      auto,
       skipped,
-      expiresAt: Date.now() + PART_OFFER_TTL_MS,
+      expiresAt: Date.now() + REQUISITES_DRAFT_TTL_MS,
     });
     return requisitesPreview(plan, {
       addsPart: addPart,
       skipped,
       files: this.pendingFiles.get(manager.telegramId)?.length ?? 0,
-      auto,
     });
   }
 
@@ -328,7 +363,6 @@ export class OrderDraftService {
       clientName: plan.label,
       exchangeRate: plan.rate ?? undefined,
       comment: plan.comment ?? undefined,
-      requisites: plan.requisites || undefined,
     };
 
     let orders: Order[];
@@ -344,7 +378,7 @@ export class OrderDraftService {
           manager.id,
           {
             ...common,
-            orderType: plan.kind === 'minus' ? OrderType.MINUS_CLOSING : OrderType.REQUISITES,
+            orderType: plan.kind === 'minus' ? OrderType.MINUS_CLOSING : OrderType.REGULAR,
             orderNumber: plan.items[0]?.number,
             amountDue: plan.total.toFixed(2),
           },
@@ -353,12 +387,17 @@ export class OrderDraftService {
       ];
     }
 
+    const added =
+      plan.requisiteLines.length > 0
+        ? await this.requisites.addMany(orders[0]!.id, plan.requisiteLines, {
+            telegramId: manager.telegramId,
+            name: manager.name,
+          })
+        : [];
+
     const files = this.pendingFiles.get(manager.telegramId) ?? [];
     this.pendingFiles.delete(manager.telegramId);
-    const notes = Object.fromEntries(
-      plan.items.flatMap((item) => (item.note ? [[item.number, item.note]] : [])),
-    );
-    const notice = adminRequisitesMessage(orders, manager, { skipped: draft.skipped, notes });
+    const notice = adminRequisitesMessage(orders, manager.name, added, draft.skipped);
     if (files.length > 0) {
       await this.notifyWithAttachment(orders[0]!, manager, files, notice);
     } else {
@@ -408,7 +447,9 @@ export class OrderDraftService {
     }
 
     const existing = data.orderNumber ? await this.orders.findWithBalance(data.orderNumber) : null;
-    return existing ? this.offerPart(manager, data, existing) : this.createOrder(manager, data);
+    return existing
+      ? this.offerPart(manager, data, existing)
+      : this.createOrder(manager, data, false);
   }
 
   // An order on a taken number is a duplicate unless the manager confirms it is one more part of
@@ -438,7 +479,7 @@ export class OrderDraftService {
   private async createOrder(
     manager: Manager,
     data: Partial<Record<DraftField, string>>,
-    addPart = false,
+    addPart: boolean,
   ): Promise<BotReply> {
     const orderType = data.orderNumber ? OrderType.REGULAR : OrderType.MINUS_CLOSING;
     const dto = plainToInstance(CreateOrderDto, { orderType, ...data });

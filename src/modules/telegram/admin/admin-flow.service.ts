@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, type OnApplicationShutdown } from '@nestjs/common';
 import { OrderStatus, type Payment, Prisma } from '../../../generated/prisma/client';
 import { calculateOrderStatus } from '../../orders/order-status';
 import { OrderCancelledError, OrderNotFoundError } from '../../orders/orders.errors';
@@ -16,8 +16,9 @@ import {
   RefundAmountError,
 } from '../../refunds/refunds.errors';
 import { RefundsService } from '../../refunds/refunds.service';
-import { type BotReply, button, mention } from '../core/bot-reply';
+import { BOT_RESTART_NOTICE, type BotReply, button, mention } from '../core/bot-reply';
 import { escapeHtml, formatMoney } from '../core/format';
+import { TelegramSender } from '../core/telegram-sender';
 import { parseMoney } from '../order-draft/order-draft.parsers';
 import { statusLabel } from '../orders-list/status-labels';
 
@@ -32,9 +33,6 @@ export const AdminAction = {
   Dismiss: 'admin:dismiss',
 } as const;
 
-const ATTACH_PROMPT = /Прив'язка платежу #(\d+)/;
-const REFUND_PROMPT = /Часткове повернення · № (\S+)/;
-
 export interface Admin extends Initiator {
   userId: number;
 }
@@ -43,17 +41,50 @@ const money = (value: Prisma.Decimal) => `${formatMoney(value)} грн`;
 const dismissButton = button('Скасувати', AdminAction.Dismiss);
 const warn = (text: string): BotReply => ({ html: `⚠️ ${text}` });
 
+// How long a "reply to this message" prompt (attach a payment, enter a partial refund amount)
+// waits for the admin's answer.
+const ADMIN_PROMPT_TTL_MS = 10 * 60_000;
+
+interface AttachPrompt {
+  paymentId: number;
+  expiresAt: number;
+}
+
+interface RefundPrompt {
+  orderId: number;
+  expiresAt: number;
+}
+
 function paymentSummary(payment: Payment): string {
   return `#${payment.id} · ${money(payment.amount)} · ${escapeHtml(payment.payerName ?? '—')}`;
 }
 
 @Injectable()
-export class AdminFlowService {
+export class AdminFlowService implements OnApplicationShutdown {
+  private readonly logger = new Logger(AdminFlowService.name);
+  private readonly attachPrompts = new Map<bigint, AttachPrompt>();
+  private readonly refundPrompts = new Map<bigint, RefundPrompt>();
+
   constructor(
     private readonly orders: OrdersService,
     private readonly payments: PaymentsService,
     private readonly refunds: RefundsService,
+    private readonly sender: TelegramSender,
   ) {}
+
+  // The bot is restarting: an admin mid-way through attaching a payment or entering a refund
+  // amount would otherwise get no reply at all when they answer. A short warning makes that visible.
+  async onApplicationShutdown(): Promise<void> {
+    const now = Date.now();
+    const ids = new Set<bigint>();
+    for (const [id, prompt] of this.attachPrompts) {
+      if (prompt.expiresAt > now) ids.add(id);
+    }
+    for (const [id, prompt] of this.refundPrompts) {
+      if (prompt.expiresAt > now) ids.add(id);
+    }
+    await Promise.all([...ids].map((id) => this.sender.send(id, BOT_RESTART_NOTICE)));
+  }
 
   async attachPrompt(paymentId: number, admin: Admin): Promise<BotReply> {
     const payment = await this.payments.findById(paymentId);
@@ -63,6 +94,10 @@ export class AdminFlowService {
     if (payment.orderId !== null) {
       return warn(`Платіж #${paymentId} уже прив'язано до замовлення.`);
     }
+    this.attachPrompts.set(admin.telegramId, {
+      paymentId,
+      expiresAt: Date.now() + ADMIN_PROMPT_TTL_MS,
+    });
     return {
       html:
         `${mention(admin.userId, escapeHtml(admin.name))}, 🔗 Прив'язка платежу ${paymentSummary(payment)}\n` +
@@ -121,9 +156,16 @@ export class AdminFlowService {
     }
   }
 
-  async answerAttachPrompt(promptText: string, answer: string): Promise<BotReply | null> {
-    const match = ATTACH_PROMPT.exec(promptText);
-    return match ? this.attachPreview(Number(match[1]), answer) : null;
+  async answerAttachPrompt(telegramId: bigint, answer: string): Promise<BotReply | null> {
+    const prompt = this.attachPrompts.get(telegramId);
+    if (!prompt) {
+      return null;
+    }
+    this.attachPrompts.delete(telegramId);
+    if (prompt.expiresAt < Date.now()) {
+      return warn('Запит застарів. Натисніть кнопку ще раз.');
+    }
+    return this.attachPreview(prompt.paymentId, answer);
   }
 
   async refundMenu(orderNumber: string): Promise<BotReply> {
@@ -185,6 +227,10 @@ export class AdminFlowService {
     if (!found) {
       return warn('Замовлення не знайдено.');
     }
+    this.refundPrompts.set(admin.telegramId, {
+      orderId,
+      expiresAt: Date.now() + ADMIN_PROMPT_TTL_MS,
+    });
     return {
       html:
         `${mention(admin.userId, escapeHtml(admin.name))}, ↩️ Часткове повернення · № ${escapeHtml(found.order.orderNumber)} · сплачено ${money(found.amountPaid)}\n` +
@@ -193,16 +239,20 @@ export class AdminFlowService {
     };
   }
 
-  async answerRefundPrompt(promptText: string, answer: string): Promise<BotReply | null> {
-    const match = REFUND_PROMPT.exec(promptText);
-    if (!match) {
+  async answerRefundPrompt(telegramId: bigint, answer: string): Promise<BotReply | null> {
+    const prompt = this.refundPrompts.get(telegramId);
+    if (!prompt) {
       return null;
+    }
+    this.refundPrompts.delete(telegramId);
+    if (prompt.expiresAt < Date.now()) {
+      return warn('Запит застарів. Натисніть кнопку ще раз.');
     }
     const amount = parseMoney(answer);
     if (!amount.ok) {
       return warn(`${escapeHtml(amount.error)} Надішліть суму ще раз у відповідь на запит.`);
     }
-    const found = await this.orders.findWithBalance(match[1]!);
+    const found = await this.findOrderById(prompt.orderId);
     return found ? this.refundConfirmFor(found, amount.value) : warn('Замовлення не знайдено.');
   }
 
@@ -302,6 +352,7 @@ export class AdminFlowService {
       return warn(
         `За замовленням № ${escapeHtml(error.orderNumber)} сплачено ${money(error.paid)} — спершу оформіть повернення: /refund ${escapeHtml(error.orderNumber)}`,
       );
-    throw error;
+    this.logger.error('Unexpected error in an admin action', error);
+    return warn('Щось пішло не так. Спробуйте ще раз.');
   }
 }

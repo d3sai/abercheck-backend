@@ -8,6 +8,7 @@ import { RefundAmountError } from '../../../../src/modules/refunds/refunds.error
 import { RefundsService } from '../../../../src/modules/refunds/refunds.service';
 import type { BotReply } from '../../../../src/modules/telegram/core/bot-reply';
 import { AdminFlowService } from '../../../../src/modules/telegram/admin/admin-flow.service';
+import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 
 const d = (value: string) => new Prisma.Decimal(value);
 const callbacks = (reply: BotReply) =>
@@ -18,6 +19,7 @@ describe('AdminFlowService', () => {
   const orders = { findWithBalance: jest.fn(), findWithBalanceById: jest.fn() };
   const payments = { findById: jest.fn(), attach: jest.fn() };
   const refunds = { refund: jest.fn(), cancelUnpaid: jest.fn() };
+  const sender = { send: jest.fn() };
   let flow: AdminFlowService;
 
   const order = (status: OrderStatus, amountPaid: string) => ({
@@ -46,6 +48,7 @@ describe('AdminFlowService', () => {
         { provide: OrdersService, useValue: orders },
         { provide: PaymentsService, useValue: payments },
         { provide: RefundsService, useValue: refunds },
+        { provide: TelegramSender, useValue: sender },
       ],
     }).compile();
 
@@ -77,21 +80,47 @@ describe('AdminFlowService', () => {
     it('should turn the reply to the prompt into a confirmation with the resulting status', async () => {
       payments.findById.mockResolvedValue(unknownPayment);
       orders.findWithBalance.mockResolvedValue(order(OrderStatus.PARTIALLY_PAID, '3614.32'));
+      await flow.attachPrompt(15, admin);
 
-      const preview = await flow.answerAttachPrompt(
-        "Уляна, 🔗 Прив'язка платежу #15 · 2 544,09 грн · Сидоренко Олена",
-        '№А 0000-066717',
-      );
+      const preview = await flow.answerAttachPrompt(admin.telegramId, '№А 0000-066717');
 
       expect(orders.findWithBalance).toHaveBeenCalledWith('№А 0000-066717');
       expect(preview?.html).toContain("Після прив'язки: сплачено 6 158,41 грн → 🟢 Оплачено");
       expect(preview && callbacks(preview)).toEqual(['attach:ok:15:0000-066717', 'admin:dismiss']);
     });
 
-    it('should ignore replies to other messages', async () => {
-      await expect(
-        flow.answerAttachPrompt('Звичайне повідомлення', '0000-066717'),
-      ).resolves.toBeNull();
+    it('should ignore a reply when this admin has no attach prompt waiting', async () => {
+      await expect(flow.answerAttachPrompt(admin.telegramId, '0000-066717')).resolves.toBeNull();
+    });
+
+    it('should not answer twice for the same prompt', async () => {
+      payments.findById.mockResolvedValue(unknownPayment);
+      orders.findWithBalance.mockResolvedValue(order(OrderStatus.PARTIALLY_PAID, '3614.32'));
+      await flow.attachPrompt(15, admin);
+      await flow.answerAttachPrompt(admin.telegramId, '0000-066717');
+
+      await expect(flow.answerAttachPrompt(admin.telegramId, '0000-066717')).resolves.toBeNull();
+    });
+
+    it('should not mix up prompts between different admins', async () => {
+      const other = { userId: 222, telegramId: 222n, name: 'Марія' };
+      payments.findById.mockResolvedValue(unknownPayment);
+      await flow.attachPrompt(15, admin);
+
+      await expect(flow.answerAttachPrompt(other.telegramId, '0000-066717')).resolves.toBeNull();
+    });
+
+    it('should refuse an answer once the prompt has expired', async () => {
+      const now = jest.spyOn(Date, 'now');
+      now.mockReturnValue(1_000_000);
+      payments.findById.mockResolvedValue(unknownPayment);
+      await flow.attachPrompt(15, admin);
+
+      now.mockReturnValue(1_000_000 + 11 * 60_000);
+      const reply = await flow.answerAttachPrompt(admin.telegramId, '0000-066717');
+
+      expect(reply?.html).toContain('Запит застарів');
+      now.mockRestore();
     });
 
     it('should refuse to preview an attach to a cancelled order', async () => {
@@ -124,10 +153,12 @@ describe('AdminFlowService', () => {
       });
     });
 
-    it('should rethrow unexpected errors', async () => {
+    it('should reply with a generic warning instead of leaving the admin without an answer', async () => {
       payments.attach.mockRejectedValue(new Error('db down'));
 
-      await expect(flow.attach(15, '0000-066717', admin)).rejects.toThrow('db down');
+      await expect(flow.attach(15, '0000-066717', admin)).resolves.toMatchObject({
+        html: expect.stringContaining('⚠️ Щось пішло не так') as unknown,
+      });
     });
   });
 
@@ -180,27 +211,40 @@ describe('AdminFlowService', () => {
     });
 
     it('should parse the typed amount from a reply to the partial refund prompt', async () => {
-      orders.findWithBalance.mockResolvedValue(order(OrderStatus.PAID, '6158.41'));
+      orders.findWithBalanceById.mockResolvedValue(order(OrderStatus.PAID, '6158.41'));
+      await flow.refundPrompt(3, admin);
 
-      const confirm = await flow.answerRefundPrompt(
-        'Уляна, ↩️ Часткове повернення · № 0000-066717 · сплачено 6 158,41 грн',
-        '1 000,50 грн',
-      );
+      const confirm = await flow.answerRefundPrompt(admin.telegramId, '1 000,50 грн');
 
-      expect(orders.findWithBalance).toHaveBeenCalledWith('0000-066717');
+      expect(orders.findWithBalanceById).toHaveBeenCalledWith(3);
       expect(confirm && callbacks(confirm)).toEqual(['refund:ok:3:1000.50', 'admin:dismiss']);
     });
 
     it('should reject a typed amount above what was paid', async () => {
-      orders.findWithBalance.mockResolvedValue(order(OrderStatus.PAID, '6158.41'));
+      orders.findWithBalanceById.mockResolvedValue(order(OrderStatus.PAID, '6158.41'));
+      await flow.refundPrompt(3, admin);
 
-      const confirm = await flow.answerRefundPrompt(
-        '↩️ Часткове повернення · № 0000-066717',
-        '7000',
-      );
+      const confirm = await flow.answerRefundPrompt(admin.telegramId, '7000');
 
       expect(confirm?.html).toContain('від 0,01 до 6 158,41 грн');
       expect(confirm?.buttons).toBeUndefined();
+    });
+
+    it('should ignore a reply when this admin has no refund prompt waiting', async () => {
+      await expect(flow.answerRefundPrompt(admin.telegramId, '100')).resolves.toBeNull();
+    });
+
+    it('should refuse an answer once the refund prompt has expired', async () => {
+      const now = jest.spyOn(Date, 'now');
+      now.mockReturnValue(1_000_000);
+      orders.findWithBalanceById.mockResolvedValue(order(OrderStatus.PAID, '6158.41'));
+      await flow.refundPrompt(3, admin);
+
+      now.mockReturnValue(1_000_000 + 11 * 60_000);
+      const reply = await flow.answerRefundPrompt(admin.telegramId, '100');
+
+      expect(reply?.html).toContain('Запит застарів');
+      now.mockRestore();
     });
 
     it('should report a stale amount when the balance changed before confirmation', async () => {
@@ -235,6 +279,48 @@ describe('AdminFlowService', () => {
 
       expect(refunds.cancelUnpaid).toHaveBeenCalledWith(3, admin, { wholeNumber: true });
       expect(result.html).toContain('❌ Замовлення № <b>0000-066717</b> скасовано · Уляна');
+    });
+  });
+
+  describe('onApplicationShutdown', () => {
+    it('should warn an admin waiting to answer an attach prompt', async () => {
+      payments.findById.mockResolvedValue({ id: 15, orderId: null, amount: d('100') });
+      await flow.attachPrompt(15, admin);
+
+      await flow.onApplicationShutdown();
+
+      expect(sender.send).toHaveBeenCalledWith(
+        admin.telegramId,
+        expect.stringContaining('перезапускається'),
+      );
+    });
+
+    it('should warn an admin waiting to answer a refund prompt', async () => {
+      orders.findWithBalanceById.mockResolvedValue(order(OrderStatus.PAID, '6158.41'));
+      await flow.refundPrompt(3, admin);
+
+      await flow.onApplicationShutdown();
+
+      expect(sender.send).toHaveBeenCalledWith(admin.telegramId, expect.any(String));
+    });
+
+    it('should not warn once the prompt has already expired', async () => {
+      const now = jest.spyOn(Date, 'now');
+      now.mockReturnValue(1_000_000);
+      payments.findById.mockResolvedValue({ id: 15, orderId: null, amount: d('100') });
+      await flow.attachPrompt(15, admin);
+
+      now.mockReturnValue(1_000_000 + 11 * 60_000);
+      await flow.onApplicationShutdown();
+
+      expect(sender.send).not.toHaveBeenCalled();
+      now.mockRestore();
+    });
+
+    it('should not warn anyone when no prompt is pending', async () => {
+      await flow.onApplicationShutdown();
+
+      expect(sender.send).not.toHaveBeenCalled();
     });
   });
 });

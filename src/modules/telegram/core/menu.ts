@@ -3,7 +3,7 @@ import type { ReplyKeyboardMarkup } from 'telegraf/types';
 export const MENU_LABEL = {
   NewOrder: '📝 Нове замовлення',
   NewMinus: '➖ Закрити мінус',
-  Requisites: '💳 Оплата на інші реквізити',
+  Requisites: '💳 Кілька номерів / реквізити',
   List: '📋 Список',
   Cancel: '❌ Скасувати',
 } as const;

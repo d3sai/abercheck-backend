@@ -29,7 +29,7 @@ export class BotUpdate implements OnApplicationBootstrap {
       [
         { command: 'new', description: 'Формат нового замовлення' },
         { command: 'newminus', description: 'Формат закриття мінусу (без номера)' },
-        { command: 'requisites', description: 'Оплата на інші реквізити' },
+        { command: 'requisites', description: 'Кілька номерів або оплата на чужі реквізити' },
         { command: 'list', description: 'Мої відкриті замовлення' },
         { command: 'cancel', description: 'Забути прикріплені файли' },
         { command: 'help', description: 'Що вміє бот' },
@@ -111,6 +111,8 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
+  // Arms the "кілька номерів / реквізити" mode: only the very next message is read as a requisites
+  // report instead of a regular single-order template.
   @Command('requisites')
   async requisites(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);
@@ -135,21 +137,20 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
+  @Action(DraftAction.SkipPart)
+  async skipPart(@Ctx() ctx: Context): Promise<void> {
+    if (isPrivate(ctx) && ctx.from) {
+      await ctx.answerCbQuery();
+      await edit(ctx, this.drafts.skipPart(BigInt(ctx.from.id)));
+    }
+  }
+
   @Action(RequisitesAction.Send)
   async sendRequisites(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);
     if (manager) {
       await ctx.answerCbQuery();
       await edit(ctx, await this.drafts.confirmRequisites(manager));
-    }
-  }
-
-  @Action(RequisitesAction.Regular)
-  async regularOrder(@Ctx() ctx: Context): Promise<void> {
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await ctx.answerCbQuery();
-      await edit(ctx, await this.drafts.regularFromDraft(manager));
     }
   }
 
@@ -161,11 +162,12 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
-  @Action(DraftAction.SkipPart)
-  async skipPart(@Ctx() ctx: Context): Promise<void> {
-    if (isPrivate(ctx) && ctx.from) {
+  @Action(RequisitesAction.Regular)
+  async regularFromRequisites(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
       await ctx.answerCbQuery();
-      await edit(ctx, this.drafts.skipPart(BigInt(ctx.from.id)));
+      await edit(ctx, await this.drafts.regularFromRequisites(manager));
     }
   }
 

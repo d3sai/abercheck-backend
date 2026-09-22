@@ -46,6 +46,12 @@ function offsetMinutes(date: Date): number {
   return match[1] === '-' ? -minutes : minutes;
 }
 
+// Interprets a wall-clock date/time as Europe/Kyiv local and returns the matching UTC instant.
+export function kyivDateTime(year: number, month: number, day: number, hour = 0, minute = 0): Date {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute);
+  return new Date(utcGuess - offsetMinutes(new Date(utcGuess)) * 60_000);
+}
+
 export function kyivDayStart(date: Date): Date {
   const { year, month, day } = kyivParts(date);
   const utcMidnight = Date.UTC(Number(year), Number(month) - 1, Number(day));

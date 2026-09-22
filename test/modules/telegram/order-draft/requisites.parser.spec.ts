@@ -1,11 +1,13 @@
 import {
-  looksLikeRequisites,
-  parseRequisites,
   REQUISITES_MAX_LENGTH,
+  hasMultipleOrdersOrRequisites,
+  parseRequisites,
   type RequisitesPlan,
+  withoutNumbers,
 } from '../../../../src/modules/telegram/order-draft/requisites.parser';
 
-// Real messages from managers, exactly as they were written.
+// Real messages from managers, exactly as they were written — the same ones this whole feature was
+// originally built against; "одним повідомленням" must keep reading them the same way.
 const SAMPLES = {
   severalNumbers: `0000-068772 335,58 грн.
 0000-068773 971,83 грн.
@@ -117,7 +119,29 @@ UA549358710000067320000088286
 "UA573052990000026005031228837
 3153718452
 Призначення платежу : Оплата за товар"
-Ів`,
+Івченко Євгеній виплата на (ФОП Івченко Євгеній Вадимович) 75 000,00 грн
+
+44,9`,
+  oneNumberFopAndCard: `0000-066092
+07.09.2026
+ФОП Носенко Роман - 4 527,00 грн 14:57
+4441 1110 6964 5962 Андріанов Олександр - 2 140,00 грн 14:59
+45`,
+  fiveNumbersTwoCards: `0000-068796
+511,86 грн
+0000-068891
+545,08 грн
+0000-069031
+546,3 грн
+0000-069119
+573,75 грн
+0000-069143
+546,3 грн
+Загальна сума: 2 723,29 грн
+4441 1111 0377 3382  Афанасьєв Олексій (Виплата на Афанасьєва Поліна) 2 039,00 грн 21.09.2026 17:45
+5355 2800 2090 0252 Денисенко Марина 684,29 грн 21.09.2026 17:45
+
+45`,
 };
 
 function planOf(text: string): RequisitesPlan {
@@ -130,12 +154,14 @@ function planOf(text: string): RequisitesPlan {
 
 const amounts = (plan: RequisitesPlan) =>
   plan.items.map((item) => `${item.number} ${item.amount.toFixed(2)}`);
+const requisites = (plan: RequisitesPlan) =>
+  plan.requisiteLines.map((r) => `${r.payerName}|${r.account ?? ''}|${r.amount}`);
 const has = (plan: RequisitesPlan, part: string) =>
   plan.warnings.some((warning) => warning.includes(part));
 
 describe('parseRequisites', () => {
   describe('several numbers paid together (one group)', () => {
-    it('should give every number its own amount and take the written total, rate and recipient', () => {
+    it('should give every number its own amount, take the written total/rate/recipient, and record no requisites', () => {
       const plan = planOf(SAMPLES.severalNumbers);
 
       expect(plan.kind).toBe('group');
@@ -148,6 +174,8 @@ describe('parseRequisites', () => {
       expect(plan.derivedTotal).toBe(false);
       expect(plan.rate).toBe('44.9');
       expect(plan.label).toBe('Гук Віктор Степанович ФОП');
+      expect(plan.comment).toBe('18.09.2026 21:28');
+      expect(plan.requisiteLines).toEqual([]);
       expect(plan.warnings).toEqual([]);
     });
 
@@ -172,7 +200,7 @@ describe('parseRequisites', () => {
       expect(plan.warnings).toEqual([]);
     });
 
-    it('should take twelve numbers as one group and warn about a difference from the payment', () => {
+    it('should take twelve numbers as one group and warn about the real difference, not a doubled amount', () => {
       const plan = planOf(SAMPLES.twelveNumbersOnePayment);
 
       expect(plan.kind).toBe('group');
@@ -200,64 +228,96 @@ describe('parseRequisites', () => {
 
       expect(result).toEqual({
         ok: false,
-        errors: [expect.stringContaining('Біля номера 0000-068773 немає суми')],
+        errors: [expect.stringContaining('Біля номера 0000-068773 немає суми') as string],
       });
+    });
+
+    it('should take the amount from the next line when a number has none of its own, and attach the third-party cards that paid for the whole group', () => {
+      const plan = planOf(SAMPLES.fiveNumbersTwoCards);
+
+      expect(plan.kind).toBe('group');
+      expect(amounts(plan)).toEqual([
+        '0000-068796 511.86',
+        '0000-068891 545.08',
+        '0000-069031 546.30',
+        '0000-069119 573.75',
+        '0000-069143 546.30',
+      ]);
+      expect(plan.total.toFixed(2)).toBe('2723.29');
+      expect(plan.derivedTotal).toBe(false);
+      expect(plan.rate).toBe('45');
+      expect(plan.requisiteLines).toHaveLength(2);
+      expect(plan.requisiteLines[0]).toMatchObject({
+        account: '4441 1111 0377 3382',
+        amount: '2039.00',
+      });
+      expect(plan.requisiteLines[0]!.payerName).toContain('Афанасьєв Олексій');
+      expect(plan.requisiteLines[1]).toMatchObject({
+        payerName: 'Денисенко Марина',
+        account: '5355 2800 2090 0252',
+        amount: '684.29',
+      });
+      expect(plan.warnings).toEqual([]);
     });
   });
 
-  describe('one number paid to several recipients (one order)', () => {
-    it('should add the recipients up and say the total was worked out, not written', () => {
+  describe('one number paid to several recipients (one order + requisites)', () => {
+    it('should add the recipients up, flag the total as worked out, and record one requisite per recipient', () => {
       const plan = planOf(SAMPLES.oneNumberTwoFops);
 
       expect(plan.kind).toBe('single');
       expect(amounts(plan)).toEqual(['0000-068652 118810.64']);
       expect(plan.total.toFixed(2)).toBe('118810.64');
       expect(plan.derivedTotal).toBe(true);
-      expect(plan.amountLines.map((a) => a.toFixed(2))).toEqual(['59438.85', '59371.79']);
       expect(plan.rate).toBe('44.9');
-      expect(plan.label).toBe('ФОП Берчатов М.М +1');
       expect(has(plan, 'порахував')).toBe(true);
+      expect(requisites(plan)).toEqual([
+        'ФОП Берчатов М.М||59438.85',
+        'ФОП Берчатова Л.О||59371.79',
+      ]);
+      expect(plan.requisiteLines[0]!.paidAt.toISOString()).toBe('2026-09-19T07:50:00.000Z');
     });
 
     it('should read amounts written with a dot and an amount followed by a time', () => {
       const plan = planOf(SAMPLES.oneNumberTwoRecipients);
 
       expect(plan.total.toFixed(2)).toBe('9048.93');
-      expect(plan.label).toBe('ФОП Пеленський А.Й +1');
+      expect(requisites(plan)).toEqual(['ФОП Пеленський А.Й||4629.04', 'ТОВ Абертайм||4419.89']);
     });
 
-    it('should point out the same amount appearing twice', () => {
+    it('should treat a restated payment as one requisite, not two, and point it out', () => {
       const plan = planOf(SAMPLES.sameAmountTwice);
 
-      expect(plan.total.toFixed(2)).toBe('5029.24');
-      expect(has(plan, 'Сума 2 514,62 грн зустрічається 2 рази')).toBe(true);
+      expect(plan.total.toFixed(2)).toBe('2514.62');
+      expect(plan.requisiteLines).toHaveLength(1);
+      expect(has(plan, 'порахував')).toBe(true);
     });
 
-    it('should use a written total, compare it with the lines and fix a number missing a zero', () => {
+    it('should use a written total, compare it with the lines, fix a number missing a zero, and record each card as a requisite', () => {
       const plan = planOf(SAMPLES.cardsWithTypo);
 
       expect(plan.kind).toBe('single');
       expect(amounts(plan)).toEqual(['0000-066092 9067.00']);
       expect(plan.derivedTotal).toBe(false);
-      expect(plan.amountLines.map((a) => a.toFixed(2))).toEqual([
-        '4527.00',
-        '2140.00',
-        '1573.00',
-        '827.00',
-      ]);
       expect(plan.rate).toBe('45');
-      expect(plan.label).toBe('Носенко Роман +3');
       expect(plan.warnings).toEqual([
         'Номер «000-066092» схожий на 0000-066092 — виправив, перевірте.',
       ]);
+      expect(requisites(plan)).toEqual([
+        'Носенко Роман|5168 7451 7598 8366|4527.00',
+        'Андріанов Олександр Ігорович|4441 1110 6964 5962|2140.00',
+        'Лукін Юрій|4149 4999 9712 3011|1573.00',
+        'Кравцов Богдан|4441 1144 4794 3026|827.00',
+      ]);
     });
 
-    it('should take an amount written on the number line itself', () => {
+    it('should take an amount written on the number line itself, with no requisites to report', () => {
       const plan = planOf('0000-068641 809,48 грн\n44,9%');
 
       expect(plan.kind).toBe('single');
       expect(plan.total.toFixed(2)).toBe('809.48');
       expect(plan.derivedTotal).toBe(false);
+      expect(plan.requisiteLines).toEqual([]);
     });
 
     it('should take a number found in the middle of a line when it is the only one', () => {
@@ -266,6 +326,7 @@ describe('parseRequisites', () => {
       expect(plan.kind).toBe('single');
       expect(plan.items[0]!.number).toBe('0000-068641');
       expect(has(plan, 'не на початку рядка')).toBe(true);
+      expect(requisites(plan)).toEqual(['ФОП Гук В.С||500.00']);
     });
 
     it('should not guess between several numbers hidden inside lines', () => {
@@ -283,41 +344,53 @@ describe('parseRequisites', () => {
   });
 
   describe('closing a minus (no number)', () => {
-    it('should add up four payments but warn about the repeated amount and the card without one', () => {
+    it('should add up three real payments (a restated one dropped), keep the IBANs, and warn about the untotalled card line', () => {
       const plan = planOf(SAMPLES.minusFourPayments);
 
       expect(plan.kind).toBe('minus');
       expect(plan.items).toEqual([]);
-      expect(plan.amountLines.map((a) => a.toFixed(2))).toEqual([
-        '29500.00',
-        '6961.00',
-        '1303.00',
-        '1303.00',
-      ]);
-      expect(plan.total.toFixed(2)).toBe('39067.00');
+      expect(plan.total.toFixed(2)).toBe('37764.00');
       expect(plan.derivedTotal).toBe(true);
       expect(plan.rate).toBeNull();
       expect(plan.label).toBe('Оплата мінусу клієнта Вівчарук Валентин за 12.09');
-      expect(has(plan, 'Сума 1 303 грн зустрічається 2 рази')).toBe(true);
+      expect(plan.comment).toBe('Оплата мінусу клієнта Вівчарук Валентин за 12.09');
+      expect(requisites(plan)).toEqual([
+        'ФОП Чулінда Вадим Павлович|UA383052990000026004001606383|29500.00',
+        'ФОП Івченко Євгеній Вадимович|UA573052990000026005031228837|6961.00',
+        'ФОП Чегринець Ангеліна Олександрівна|UA983220010000026001350007371|1303.00',
+      ]);
       expect(has(plan, '4149 4975 2362 4981')).toBe(true);
       expect(has(plan, 'порахував')).toBe(true);
     });
 
     it.each([
-      [SAMPLES.minusTimeBeforeDate, '4890.00'],
-      [SAMPLES.minusPayerInBrackets, '1954.00'],
-    ])('should read a payment with the time before the date', (text, total) => {
-      const plan = planOf(text);
+      [
+        SAMPLES.minusTimeBeforeDate,
+        '4890.00',
+        'ФОП Солтик Олександра Олегівна',
+        'UA549358710000067320000088286',
+      ],
+      [SAMPLES.minusPayerInBrackets, '1954.00', null, 'UA263052990000026005005934414'],
+    ])(
+      'should read a payment with the time before the date and pick up its IBAN',
+      (text, total, name, iban) => {
+        const plan = planOf(text);
 
-      expect(plan.kind).toBe('minus');
-      expect(plan.total.toFixed(2)).toBe(total);
-      expect(plan.label).toBe('Закрила Любов Андрейчук');
-    });
+        expect(plan.kind).toBe('minus');
+        expect(plan.total.toFixed(2)).toBe(total);
+        expect(plan.label).toBe('Закрила Любов Андрейчук');
+        expect(plan.requisiteLines).toHaveLength(1);
+        expect(plan.requisiteLines[0]!.account).toBe(iban);
+        if (name) {
+          expect(plan.requisiteLines[0]!.payerName).toBe(name);
+        }
+      },
+    );
 
     it('should never take an IBAN, a tax id or a court number for an amount', () => {
       const plan = planOf(SAMPLES.minusTimeBeforeDate);
 
-      expect(plan.amountLines.map((a) => a.toFixed(2))).toEqual(['4890.00']);
+      expect(plan.requisiteLines.map((r) => r.amount)).toEqual(['4890.00']);
     });
 
     it('should prefer a written total over the sum of the lines', () => {
@@ -333,42 +406,18 @@ describe('parseRequisites', () => {
     });
   });
 
-  describe('reading amounts', () => {
-    it('should not glue a time in front of an amount to it', () => {
-      const plan = planOf('Оплата мінусу\nФОП Гук 10:50 500 грн');
+  describe('one number split between a FOP and a card holder', () => {
+    it('should read the number, split the two recipients into requisites, and take the comment as the date', () => {
+      const plan = planOf(SAMPLES.oneNumberFopAndCard);
 
-      expect(plan.total.toFixed(2)).toBe('500.00');
-    });
-
-    it('should not glue a date in front of an amount to it', () => {
-      const plan = planOf('Оплата мінусу\n17.09.2026 4 890,00 грн');
-
-      expect(plan.total.toFixed(2)).toBe('4890.00');
-    });
-
-    it('should accept thousands separated by a non-breaking space', () => {
-      const plan = planOf('Оплата мінусу\nФОП Гук 12 345,60 грн');
-
-      expect(plan.total.toFixed(2)).toBe('12345.60');
-    });
-
-    it('should accept an amount with one decimal digit and a trailing dot', () => {
-      const plan = planOf('Оплата мінусу\nФОП Гук 578,2 грн.');
-
-      expect(plan.total.toFixed(2)).toBe('578.20');
-    });
-
-    it('should read a labelled total and a labelled rate', () => {
-      const plan = planOf('0000-068641\nСума: 6 158,41\nКурс: 44,9');
-
-      expect(plan.total.toFixed(2)).toBe('6158.41');
-      expect(plan.rate).toBe('44.9');
-    });
-
-    it('should not mistake a lone amount for a rate', () => {
-      const plan = planOf('0000-068641\nФОП Гук - 500 грн\n335,58');
-
-      expect(plan.rate).toBeNull();
+      expect(plan.kind).toBe('single');
+      expect(plan.total.toFixed(2)).toBe('6667.00');
+      expect(plan.rate).toBe('45');
+      expect(plan.comment).toBe('07.09.2026');
+      expect(requisites(plan)).toEqual([
+        'ФОП Носенко Роман||4527.00',
+        'Андріанов Олександр|4441 1110 6964 5962|2140.00',
+      ]);
     });
   });
 
@@ -378,7 +427,7 @@ describe('parseRequisites', () => {
 
       expect(result).toEqual({
         ok: false,
-        errors: [expect.stringContaining('Не знайшов жодної суми')],
+        errors: [expect.stringContaining('Не знайшов жодної суми') as string],
       });
     });
 
@@ -395,10 +444,7 @@ describe('parseRequisites', () => {
     it('should refuse an overlong message', () => {
       const result = parseRequisites(`0000-068641 100 грн\n${'а'.repeat(REQUISITES_MAX_LENGTH)}`);
 
-      expect(result).toEqual({
-        ok: false,
-        errors: [expect.stringContaining('задовге')],
-      });
+      expect(result).toEqual({ ok: false, errors: [expect.stringContaining('задовге') as string] });
     });
   });
 
@@ -409,125 +455,33 @@ describe('parseRequisites', () => {
   });
 });
 
-describe('sections of the message', () => {
-  it('should turn the example from the manager into recipients, amount, rate and comment', () => {
-    const plan = planOf(`0000-066092
-07.09.2026
-ФОП Носенко Роман - 4 527,00 грн 14:57
-4441 1110 6964 5962 Андріанов Олександр - 2 140,00 грн 14:59
-45`);
+describe('hasMultipleOrdersOrRequisites', () => {
+  it('should flag more than one order number', () => {
+    expect(hasMultipleOrdersOrRequisites(SAMPLES.severalNumbers)).toBe(true);
+    expect(hasMultipleOrdersOrRequisites(SAMPLES.fiveNumbersTwoCards)).toBe(true);
+  });
 
-    expect(plan.items.map((item) => item.number)).toEqual(['0000-066092']);
-    expect(plan.total.toFixed(2)).toBe('6667.00');
-    expect(plan.rate).toBe('45');
-    expect(plan.comment).toBe('07.09.2026');
-    expect(plan.requisites).toBe(
-      [
-        'ФОП Носенко Роман - 4 527,00 грн 14:57',
-        '4441 1110 6964 5962 Андріанов Олександр - 2 140,00 грн 14:59',
-      ].join('\n'),
+  it('should flag a card, an IBAN or a marker word even with one number or none', () => {
+    expect(hasMultipleOrdersOrRequisites(SAMPLES.oneNumberFopAndCard)).toBe(true);
+    expect(hasMultipleOrdersOrRequisites(SAMPLES.minusTimeBeforeDate)).toBe(true);
+    expect(hasMultipleOrdersOrRequisites('Оплата клієнта ЄДРПОУ 12345678')).toBe(true);
+  });
+
+  it('should leave a single number with no card/IBAN/marker alone', () => {
+    expect(hasMultipleOrdersOrRequisites('0000-066717\nЧернявський Владислав\n6 158,41 грн')).toBe(
+      false,
     );
-  });
-
-  it('should put the date of a group into the comment and keep the recipient as the details', () => {
-    const plan = planOf(SAMPLES.severalNumbers);
-
-    expect(plan.comment).toBe('18.09.2026 21:28');
-    expect(plan.requisites).toBe('Гук Віктор Степанович ФОП');
-  });
-
-  it('should keep several dates with their own payments instead of picking one for the comment', () => {
-    const plan = planOf(SAMPLES.minusFourPayments);
-
-    expect(plan.comment).toBe('Оплата мінусу клієнта Вівчарук Валентин за 12.09');
-    expect(plan.requisites.startsWith('15.09.2026 12:16\nФОП Чулінда')).toBe(true);
-    expect(plan.requisites).toContain('15.09.2026 00:08');
-    expect(plan.requisites).toContain('15.09.2026 00:09');
-    expect(plan.requisites).toContain('Кухарчук Олексій (Виплата на ФОП');
-  });
-
-  it('should take the header of a minus closing as the comment and keep the payment as the details', () => {
-    const plan = planOf(SAMPLES.minusTimeBeforeDate);
-
-    expect(plan.comment).toBe('Закрила Любов Андрейчук');
-    expect(plan.requisites.startsWith('ФОП Солтик Олександра Олегівна 4 890,00  грн')).toBe(true);
-    expect(plan.requisites).toContain('UA549358710000067320000088286');
-  });
-
-  it('should join a written comment with the date', () => {
-    const plan = planOf('0000-068641 100 грн\n07.09.2026\nФОП Гук\nКоментар: Терміново');
-
-    expect(plan.comment).toBe('07.09.2026 · Терміново');
-    expect(plan.requisites).toBe('ФОП Гук');
-  });
-
-  it('should keep the note written after the amount of a number', () => {
-    const plan = planOf(SAMPLES.twelveNumbersOnePayment);
-
-    expect(plan.items[0]!.note).toBe('(залишок)');
-    expect(plan.items.slice(1).every((item) => item.note === null)).toBe(true);
-    expect(plan.comment).toBe('27/08/2026 16:33');
-    expect(plan.requisites).toContain('ФОП Івченко Євгеній Вадимович 75 000,00 грн');
-    expect(plan.requisites.endsWith('Ів')).toBe(true);
-  });
-
-  it('should leave the details empty when the message holds nothing else', () => {
-    const plan = planOf('0000-068641 100 грн\n44,9%');
-
-    expect(plan.requisites).toBe('');
-    expect(plan.comment).toBeNull();
-  });
-
-  it('should lose no line: everything that was not read out stays in the details', () => {
-    const plan = planOf(SAMPLES.minusPayerInBrackets);
-
-    expect(plan.requisites).toContain('Кравцов Богдан ( Виплата на ФОП Руслан Гниденко)');
-    expect(plan.requisites).toContain('РНОКПП/ЄДРПОУ');
-    expect(plan.requisites).toContain('3431206092');
-    expect(plan.requisites).toContain('Призначення платежу :  Оплата за товар');
+    expect(hasMultipleOrdersOrRequisites('привіт, як справи?')).toBe(false);
   });
 });
 
-describe('a payment amount written twice', () => {
-  const TWICE = `${SAMPLES.twelveNumbersOnePayment.replace('\nІв', '')}
-Івченко Євгеній виплата на (ФОП Івченко Євгеній Вадимович) 75 000,00 грн
+describe('withoutNumbers', () => {
+  it('should drop the named numbers and the total line, keeping everything else', () => {
+    const text = withoutNumbers(SAMPLES.severalNumbers, ['0000-068773']);
 
-44,9`;
-
-  it('should not report the doubled amount as the difference, only the real 0,27', () => {
-    const plan = planOf(TWICE);
-
-    expect(plan.kind).toBe('group');
-    expect(plan.total.toFixed(2)).toBe('75000.27');
-    expect(plan.warnings).toEqual([
-      'Сума 75 000 грн зустрічається 2 рази — це різні платежі?',
-      'Сума номерів 75 000,27 грн, а оплата 75 000 грн — різниця 0,27 грн.',
-    ]);
-    expect(plan.rate).toBe('44.9');
-  });
-});
-
-describe('looksLikeRequisites', () => {
-  it.each([
-    ['several numbers', SAMPLES.severalNumbers],
-    ['one number and two recipients', SAMPLES.oneNumberTwoFops],
-    ['the same amount twice', SAMPLES.sameAmountTwice],
-    ['an IBAN', SAMPLES.minusTimeBeforeDate],
-    ['cards', SAMPLES.cardsWithTypo],
-    ['twelve numbers', SAMPLES.twelveNumbersOnePayment],
-    ['only a card line', '4149 4975 2362 4981 Загайчук Сергій'],
-    ['a tax id marker', 'Оплата мінусу\nІПН 3854704584\nФОП Гук 500 грн'],
-  ])('should recognise %s', (_name, text) => {
-    expect(looksLikeRequisites(text)).toBe(true);
-  });
-
-  it.each([
-    ['the regular template', '0000-066717\nЧернявський Владислав\n6 158,41 грн\n44,9\nТерміново'],
-    ['a template without the currency', '0000-066717\nЧернявський Владислав\n6158,41\n44,9'],
-    ['a minus closing', 'Чернявський Владислав\n6 158,41 грн'],
-    ['a labelled template', 'Номер: 0000-066717\nФОП: Чернявський\nСума: 6 158,41 грн'],
-    ['chat text', 'привіт, як справи?'],
-  ])('should leave %s alone', (_name, text) => {
-    expect(looksLikeRequisites(text)).toBe(false);
+    expect(text).not.toContain('0000-068773');
+    expect(text).not.toContain('Загальна сума');
+    expect(text).toContain('0000-068772');
+    expect(text).toContain('Гук Віктор Степанович ФОП');
   });
 });

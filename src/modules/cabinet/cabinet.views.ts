@@ -4,6 +4,7 @@ import type {
   ManagerStatus,
   MatchType,
   OrderAttachment,
+  OrderRequisite,
   OrderStatus,
   Payment,
   Prisma,
@@ -73,6 +74,18 @@ export interface OrderAttachmentView {
   createdAt: string;
 }
 
+// One individual payment behind an order paid via other people's requisites (a card, another FOP):
+// who actually paid, through which account, how much and when.
+export interface OrderRequisiteView {
+  id: number;
+  payerName: string;
+  account: string | null;
+  amount: string;
+  paidAt: string;
+  addedByName: string;
+  createdAt: string;
+}
+
 export interface OrderGroupPartView {
   id: number;
   orderNumber: string;
@@ -94,11 +107,11 @@ export interface OrderGroupView {
 export interface OrderDetailView extends OrderSummaryView {
   exchangeRate: string | null;
   comment: string | null;
-  requisites: string | null;
   group: OrderGroupView;
   payments: PaymentView[];
   refunds: RefundView[];
   attachments: OrderAttachmentView[];
+  requisites: OrderRequisiteView[];
 }
 
 export interface ManagerView extends MeResponse {
@@ -187,16 +200,28 @@ export function toAttachmentView(attachment: OrderAttachment): OrderAttachmentVi
   };
 }
 
+export function toRequisiteView(requisite: OrderRequisite): OrderRequisiteView {
+  return {
+    id: requisite.id,
+    payerName: requisite.payerName,
+    account: requisite.account,
+    amount: money(requisite.amount),
+    paidAt: requisite.paidAt.toISOString(),
+    addedByName: requisite.addedByName,
+    createdAt: requisite.createdAt.toISOString(),
+  };
+}
+
 export function toOrderDetail(
   ledger: OrderLedger,
   attachments: OrderAttachment[],
+  requisites: OrderRequisite[],
 ): OrderDetailView {
   const { order } = ledger;
   return {
     ...toOrderSummary(ledger),
     exchangeRate: order.exchangeRate?.toFixed(4) ?? null,
     comment: order.comment,
-    requisites: order.requisites,
     group: {
       baseNumber: ledger.group.baseNumber,
       amountDue: money(ledger.group.amountDue),
@@ -214,6 +239,7 @@ export function toOrderDetail(
     payments: ledger.payments.map(toPaymentView),
     refunds: ledger.refunds.map(toRefundView),
     attachments: attachments.map(toAttachmentView),
+    requisites: requisites.map(toRequisiteView),
   };
 }
 

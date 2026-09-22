@@ -131,10 +131,10 @@ export class AdminUpdate {
     ) {
       return next();
     }
-    const promptText = prompt && 'text' in prompt ? prompt.text : '';
+    const telegramId = BigInt(ctx.from!.id);
     const result =
-      (await this.flow.answerAttachPrompt(promptText, ctx.text)) ??
-      (await this.flow.answerRefundPrompt(promptText, ctx.text));
+      (await this.flow.answerAttachPrompt(telegramId, ctx.text)) ??
+      (await this.flow.answerRefundPrompt(telegramId, ctx.text));
     if (result) {
       await reply(ctx, result, message?.message_id);
     }

@@ -6,6 +6,7 @@ import { OrdersModule } from '../orders/orders.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { RefundsModule } from '../refunds/refunds.module';
 import { ReportsModule } from '../reports/reports.module';
+import { RequisitesModule } from '../requisites/requisites.module';
 import { CabinetManagersController } from './controllers/cabinet-managers.controller';
 import { CabinetOrdersController } from './controllers/cabinet-orders.controller';
 import { CabinetPaymentsController } from './controllers/cabinet-payments.controller';
@@ -20,6 +21,7 @@ import { CabinetStatsController } from './controllers/cabinet-stats.controller';
     PaymentsModule,
     RefundsModule,
     ReportsModule,
+    RequisitesModule,
   ],
   controllers: [
     CabinetOrdersController,

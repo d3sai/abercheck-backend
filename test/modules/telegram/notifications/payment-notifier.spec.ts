@@ -108,6 +108,14 @@ describe('PaymentNotifier', () => {
     ]);
   });
 
+  it('should swallow errors when notifying about an unmatched payment', async () => {
+    sender.sendToAdmins.mockRejectedValue(new Error('telegram down'));
+
+    await expect(
+      notifier.onUnmatched({ kind: 'unmatched', payment: { ...payment, orderId: null } }),
+    ).resolves.toBeUndefined();
+  });
+
   it('should tell the manager about a refund on their order', async () => {
     const { order } = event(OrderStatus.PAID);
 

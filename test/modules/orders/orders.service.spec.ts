@@ -242,7 +242,6 @@ describe('OrdersService', () => {
       clientName: 'Гук Віктор Степанович ФОП',
       exchangeRate: '44.9',
       comment: 'весь текст',
-      requisites: 'реквізити',
     };
 
     it('should create each number as its own order under the first number', async () => {
@@ -251,14 +250,13 @@ describe('OrdersService', () => {
       expect(created).toHaveLength(3);
       expect(tx.order.create).toHaveBeenNthCalledWith(1, {
         data: {
-          orderType: 'REQUISITES',
+          orderType: 'REGULAR',
           orderNumber: '0000-068772',
           baseNumber: '0000-068772',
           clientName: 'Гук Віктор Степанович ФОП',
           amountDue: '335.58',
           exchangeRate: '44.9',
           comment: 'весь текст',
-          requisites: 'реквізити',
           managerId: 7,
         },
       });
@@ -268,7 +266,6 @@ describe('OrdersService', () => {
           baseNumber: '0000-068772',
           amountDue: '971.83',
           comment: 'Оплата разом із № 0000-068772',
-          requisites: undefined,
         }) as unknown,
       });
       expect(tx.order.create).toHaveBeenNthCalledWith(3, {

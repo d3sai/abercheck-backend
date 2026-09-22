@@ -1,5 +1,6 @@
 import {
   kyivDate,
+  kyivDateTime,
   kyivDayStart,
   kyivDayStartOf,
   nextKyivDayStart,
@@ -44,5 +45,25 @@ describe('Kyiv day boundaries', () => {
   it('should find the start of a day given as YYYY-MM-DD', () => {
     expect(iso(kyivDayStartOf('2026-09-11'))).toBe('2026-09-10T21:00:00.000Z');
     expect(iso(kyivDayStartOf('2026-12-15'))).toBe('2026-12-14T22:00:00.000Z');
+  });
+});
+
+describe('kyivDateTime', () => {
+  it('should convert a Kyiv wall-clock time in summer (UTC+3)', () => {
+    expect(iso(kyivDateTime(2026, 9, 7, 14, 57))).toBe('2026-09-07T11:57:00.000Z');
+  });
+
+  it('should convert a Kyiv wall-clock time in winter (UTC+2)', () => {
+    expect(iso(kyivDateTime(2026, 12, 15, 10, 0))).toBe('2026-12-15T08:00:00.000Z');
+  });
+
+  it('should default the time of day to midnight', () => {
+    expect(iso(kyivDateTime(2026, 9, 7))).toBe('2026-09-06T21:00:00.000Z');
+  });
+
+  it('should round-trip through kyivParts for an ordinary date', () => {
+    const date = kyivDateTime(2026, 9, 7, 14, 57);
+
+    expect(kyivDate(date)).toBe('2026-09-07');
   });
 });

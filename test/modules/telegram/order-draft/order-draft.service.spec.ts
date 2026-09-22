@@ -3,6 +3,7 @@ import { type Manager, OrderType, Prisma } from '../../../../src/generated/prism
 import { AttachmentsService } from '../../../../src/modules/attachments/attachments.service';
 import { OrderNumberTakenError } from '../../../../src/modules/orders/orders.errors';
 import { OrdersService } from '../../../../src/modules/orders/orders.service';
+import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import {
   DraftAction,
@@ -23,9 +24,14 @@ describe('OrderDraftService', () => {
     sessionVersion: 0,
     createdAt: new Date(),
   };
-  const orders = { findWithBalance: jest.fn(), create: jest.fn(), createGroup: jest.fn() };
+  const orders = {
+    findWithBalance: jest.fn(),
+    create: jest.fn(),
+    createGroup: jest.fn(),
+  };
+  const requisites = { addMany: jest.fn(), list: jest.fn() };
   const attachments = { saveFromTelegram: jest.fn() };
-  const sender = { sendToAdmins: jest.fn() };
+  const sender = { sendToAdmins: jest.fn(), send: jest.fn() };
   let service: OrderDraftService;
 
   const file = (filename = 'screenshot.png') => ({
@@ -71,6 +77,7 @@ describe('OrderDraftService', () => {
       providers: [
         OrderDraftService,
         { provide: OrdersService, useValue: orders },
+        { provide: RequisitesService, useValue: requisites },
         { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
       ],
@@ -78,6 +85,8 @@ describe('OrderDraftService', () => {
 
     service = moduleRef.get(OrderDraftService);
     orders.findWithBalance.mockResolvedValue(null);
+    requisites.list.mockResolvedValue([]);
+    requisites.addMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.resetAllMocks());
@@ -128,6 +137,109 @@ describe('OrderDraftService', () => {
     expect(reply?.html).toContain('«ФОП» — поле');
     expect(reply?.html).toContain('«Сума»');
     expect(orders.create).not.toHaveBeenCalled();
+  });
+
+  describe('refusing several numbers / requisites outside the button, with guidance', () => {
+    it('should refuse a message with more than one order number', async () => {
+      const reply = await service.handleText(
+        MANAGER,
+        '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%',
+      );
+
+      expect(reply?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(reply?.html).toContain('💳 Кілька номерів / реквізити');
+      expect(reply?.html).toContain('/requisites');
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
+    it('should refuse a message that mentions a card, even with just one number', async () => {
+      const reply = await service.handleText(
+        MANAGER,
+        '0000-066092\nФОП Носенко Роман\n4441 1110 6964 5962 картка для довідки\n4 527,00 грн',
+      );
+
+      expect(reply?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
+    it('should refuse a message that mentions an IBAN or a ЄДРПОУ/IBAN marker word, with no number at all', async () => {
+      const withIban = await service.handleText(
+        MANAGER,
+        'Закрила Любов Андрейчук\nUA549358710000067320000088286\n4 890,00 грн',
+      );
+      const withMarker = await service.handleText(
+        MANAGER,
+        'Закрила Любов Андрейчук\nЄДРПОУ 12345678\n4 890,00 грн',
+      );
+
+      expect(withIban?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(withMarker?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
+    it('should still work through /requisites once guided there', async () => {
+      const guided = await service.handleText(
+        MANAGER,
+        '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%',
+      );
+      expect(guided?.html).toContain('/requisites');
+
+      service.startRequisites(USER);
+      orders.createGroup.mockResolvedValue([
+        createdOrder({ id: 1, orderNumber: '0000-068772', baseNumber: '0000-068772' }),
+        createdOrder({ id: 2, orderNumber: '0000-068773', baseNumber: '0000-068772' }),
+      ]);
+      const preview = await service.handleText(
+        MANAGER,
+        '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%',
+      );
+
+      expect(preview?.html).toContain('кілька номерів однією оплатою');
+    });
+
+    it('should leave the labelled classic template alone even if a field value looks like a card', async () => {
+      orders.create.mockResolvedValue(createdOrder({ comment: 'картка 4441 1110 6964 5962' }));
+
+      const reply = await service.handleText(
+        MANAGER,
+        template({ Коментар: 'картка 4441 1110 6964 5962' }),
+      );
+
+      expect(reply?.html).toContain('створено');
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        expect.objectContaining({ comment: 'картка 4441 1110 6964 5962' }),
+        { notify: true, addPart: false },
+      );
+    });
+
+    it('should leave a normal single-number classic order alone', async () => {
+      orders.create.mockResolvedValue(createdOrder());
+
+      const reply = await service.handleText(
+        MANAGER,
+        ['0000-066717', 'Чернявський Владислав', '6 158,41 грн'].join('\n'),
+      );
+
+      expect(reply?.html).toContain('створено');
+      expect(orders.create).toHaveBeenCalled();
+    });
+
+    it('should leave a normal minus-closing template alone', async () => {
+      orders.create.mockResolvedValue(createdOrder({ orderType: 'MINUS_CLOSING' }));
+
+      const reply = await service.handleText(
+        MANAGER,
+        ['Чернявський Владислав', '6 158,41 грн'].join('\n'),
+      );
+
+      expect(reply?.html).toContain('створено');
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        expect.objectContaining({ orderType: 'MINUS_CLOSING' }),
+        { notify: true, addPart: false },
+      );
+    });
   });
 
   describe('a number that already exists', () => {
@@ -388,7 +500,7 @@ describe('OrderDraftService', () => {
       const reply = await service.addFile(MANAGER, file());
 
       expect(reply.html).toContain('Додано');
-      expect(reply.html).toContain('1/5');
+      expect(reply.html).toContain('1/10');
     });
 
     it('should create the order from a caption sent together with the file', async () => {
@@ -413,13 +525,13 @@ describe('OrderDraftService', () => {
     });
 
     it('should cap the number of buffered files', async () => {
-      for (let i = 0; i < 5; i += 1) {
+      for (let i = 0; i < 10; i += 1) {
         await service.addFile(MANAGER, file(`f${i}.png`));
       }
 
       const reply = await service.addFile(MANAGER, file('overflow.png'));
 
-      expect(reply.html).toContain('Максимум 5');
+      expect(reply.html).toContain('Максимум 10');
     });
 
     it('should nudge instead of the generic fallback when files are waiting for details', async () => {
@@ -474,7 +586,7 @@ describe('OrderDraftService', () => {
       const reply = await service.addFile(MANAGER, file('after.png'));
 
       expect(reply.html).toContain('Додано');
-      expect(reply.html).toContain('1/5');
+      expect(reply.html).toContain('1/10');
       expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
 
       orders.create.mockResolvedValue(
@@ -492,7 +604,7 @@ describe('OrderDraftService', () => {
     });
   });
 
-  describe('a payment to other requisites', () => {
+  describe('one message: "кілька номерів / реквізити", armed by /requisites', () => {
     const GROUP = `0000-068772 335,58 грн.
 0000-068773 971,83 грн.
 0000-068774 605,41 грн.
@@ -524,36 +636,60 @@ UA549358710000067320000088286"`;
           id: index + 1,
           orderNumber: number,
           baseNumber: '0000-068772',
-          orderType: 'REQUISITES',
           amountDue: dec(amount!),
-          ...(index === 0
-            ? { requisites: 'Гук Віктор Степанович ФОП', comment: '18.09.2026 21:28' }
-            : { comment: 'Оплата разом із № 0000-068772' }),
         }),
       );
     const singleOrder = () =>
       createdOrder({
         orderNumber: '0000-068652',
         baseNumber: '0000-068652',
-        orderType: 'REQUISITES',
         amountDue: dec('118810.64'),
         exchangeRate: dec('44.9'),
-        comment: '19.09.2026',
-        requisites:
-          'ФОП Берчатов М.М - 59 438.85 грн 10:50\nФОП Берчатова Л.О - 59 371.79 грн 10:50',
       });
+    const addedRows = () => [
+      {
+        id: 1,
+        orderId: 1,
+        payerName: 'ФОП Берчатов М.М',
+        account: null,
+        amount: dec('59438.85'),
+        paidAt: new Date(),
+        addedByTelegramId: USER,
+        addedByName: 'Христина',
+        createdAt: new Date(),
+      },
+      {
+        id: 2,
+        orderId: 1,
+        payerName: 'ФОП Берчатова Л.О',
+        account: null,
+        amount: dec('59371.79'),
+        paidAt: new Date(),
+        addedByTelegramId: USER,
+        addedByName: 'Христина',
+        createdAt: new Date(),
+      },
+    ];
 
     const begin = async (text: string) => {
       service.startRequisites(USER);
       return service.handleText(MANAGER, text);
     };
 
-    it('should explain the format and start waiting for one free-form message', () => {
+    it('should show the format hint and arm waiting for the very next message', () => {
       const reply = service.startRequisites(USER);
 
-      expect(reply.html).toContain('Оплата на інші реквізити');
-      expect(reply.html).toContain('зі словом «грн»');
+      expect(reply.html).toContain('одним повідомленням');
+      expect(reply.html).toContain('Файли');
       expect(reply.buttons).toBeUndefined();
+    });
+
+    it('should refuse a payment-report-shaped message with guidance when the mode was never armed', async () => {
+      const reply = await service.handleText(MANAGER, GROUP);
+
+      expect(reply?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(reply?.html).toContain('/requisites');
+      expect(orders.createGroup).not.toHaveBeenCalled();
     });
 
     it('should show what it understood and create nothing until the manager agrees', async () => {
@@ -562,15 +698,14 @@ UA549358710000067320000088286"`;
       expect(reply?.html).toContain('кілька номерів однією оплатою');
       expect(reply?.html).toContain('№ <b>0000-068773</b> — 971,83 грн');
       expect(reply?.html).toContain('Разом: <b>1 912,82 грн</b>');
-      expect(reply?.html).toContain('Курс: 44,9');
       expect(
         reply?.buttons?.flat().map((b) => ('callback_data' in b ? b.callback_data : null)),
-      ).toEqual(['req:ok', 'req:edit']);
+      ).toEqual(['req:ok', 'req:edit', 'req:regular']);
       expect(orders.createGroup).not.toHaveBeenCalled();
       expect(orders.create).not.toHaveBeenCalled();
     });
 
-    it('should create several numbers as one group and tell the admins once', async () => {
+    it('should create several numbers as one group, as a REGULAR order, with no requisites of their own', async () => {
       orders.createGroup.mockResolvedValue(groupOrders());
       await begin(GROUP);
 
@@ -587,9 +722,9 @@ UA549358710000067320000088286"`;
           clientName: 'Гук Віктор Степанович ФОП',
           exchangeRate: '44.9',
           comment: '18.09.2026 21:28',
-          requisites: 'Гук Віктор Степанович ФОП',
         },
       );
+      expect(requisites.addMany).not.toHaveBeenCalled();
       expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
       expect(sender.sendToAdmins).toHaveBeenCalledWith(
         expect.stringContaining('Разом: 1 912,82 грн'),
@@ -597,35 +732,40 @@ UA549358710000067320000088286"`;
       expect(reply.html).toContain('3 номерів');
     });
 
-    it('should create one order for a number paid to several recipients, with the text as it was', async () => {
+    it('should create one REGULAR order for several recipients and attach each as a structured requisite', async () => {
       orders.create.mockResolvedValue(singleOrder());
       const preview = await begin(SINGLE);
-      expect(preview?.html).toContain('Сума: <b>118 810,64 грн</b> (59 438,85 + 59 371,79)');
       expect(preview?.html).toContain('порахував');
+      expect(preview?.html).toContain('ФОП Берчатов М.М');
 
+      requisites.addMany.mockResolvedValue(addedRows());
       const reply = await service.confirmRequisites(MANAGER);
 
       expect(orders.create).toHaveBeenCalledWith(
         MANAGER.id,
         {
-          clientName: 'ФОП Берчатов М.М +1',
+          clientName: 'ФОП Берчатов М.М',
           exchangeRate: '44.9',
           comment: '19.09.2026',
-          requisites:
-            'ФОП Берчатов М.М - 59 438.85 грн 10:50\nФОП Берчатова Л.О - 59 371.79 грн 10:50',
-          orderType: 'REQUISITES',
+          orderType: 'REGULAR',
           orderNumber: '0000-068652',
           amountDue: '118810.64',
         },
         { notify: false, addPart: false },
       );
-      expect(sender.sendToAdmins).toHaveBeenCalledWith(
-        expect.stringContaining('ФОП Берчатов М.М - 59 438.85 грн 10:50'),
+      expect(requisites.addMany).toHaveBeenCalledWith(
+        singleOrder().id,
+        [
+          expect.objectContaining({ payerName: 'ФОП Берчатов М.М', amount: '59438.85' }),
+          expect.objectContaining({ payerName: 'ФОП Берчатова Л.О', amount: '59371.79' }),
+        ],
+        { telegramId: USER, name: 'Христина' },
       );
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('ФОП Берчатов М.М'));
       expect(reply.html).toContain('№ <b>0000-068652</b>');
     });
 
-    it('should close a minus when there is no number', async () => {
+    it('should close a minus with no number and still attach its one requisite', async () => {
       orders.create.mockResolvedValue(
         createdOrder({ orderType: 'MINUS_CLOSING', clientName: 'Закрила Любов Андрейчук' }),
       );
@@ -644,9 +784,19 @@ UA549358710000067320000088286"`;
         }),
         { notify: false, addPart: false },
       );
+      expect(requisites.addMany).toHaveBeenCalledWith(
+        expect.any(Number),
+        [
+          expect.objectContaining({
+            payerName: 'ФОП Солтик Олександра Олегівна',
+            account: 'UA549358710000067320000088286',
+          }),
+        ],
+        expect.anything(),
+      );
     });
 
-    it('should ask again, and keep waiting, when the message has no amount', async () => {
+    it('should ask again when a message sent while armed has no amount', async () => {
       const reply = await begin('0000-068652\nФОП Гук');
 
       expect(reply?.html).toContain('Не знайшов жодної суми');
@@ -657,16 +807,6 @@ UA549358710000067320000088286"`;
       expect(retry?.html).toContain('Зрозумів так');
     });
 
-    it('should treat the next message as a regular order again once the payment is sent', async () => {
-      orders.create.mockResolvedValue(singleOrder());
-      await begin(SINGLE);
-      await service.confirmRequisites(MANAGER);
-
-      const next = await service.handleText(MANAGER, 'привіт, як справи?');
-
-      expect(next).toBeNull();
-    });
-
     it('should let the manager correct the message', async () => {
       await begin(GROUP);
 
@@ -675,14 +815,51 @@ UA549358710000067320000088286"`;
       expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Зрозумів так');
     });
 
-    it('should stop waiting when another flow starts or on cancel', async () => {
-      await begin(GROUP);
-      service.leaveRequisites(USER);
-      expect(await service.handleText(MANAGER, 'привіт')).toBeNull();
+    it('should treat even a perfectly normal order sent while armed via the escape hatch', async () => {
+      // Nothing "wrong" with this text — it's just what a manager sends while /requisites is armed.
+      const classic = ['0000-066092', 'Носенко Роман', '4 527,00 грн', '44,9', 'Терміново'].join(
+        '\n',
+      );
+      const preview = await begin(classic);
+      expect(preview?.html).toContain('Зрозумів так');
+      orders.create.mockResolvedValue(
+        createdOrder({ orderNumber: '0000-066092', clientName: 'Носенко Роман' }),
+      );
 
-      service.startRequisites(USER);
+      const reply = await service.regularFromRequisites(MANAGER);
+
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        {
+          orderType: 'REGULAR',
+          orderNumber: '0000-066092',
+          clientName: 'Носенко Роман',
+          amountDue: '4527.00',
+          exchangeRate: '44.9',
+          comment: 'Терміново',
+        },
+        { notify: true, addPart: false },
+      );
+      expect(reply.html).toContain('створено');
+      expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
+    });
+
+    it('should forget the draft on /cancel', async () => {
+      await begin(GROUP);
+
       expect(service.cancel(USER).html).toBe('Скасовано.');
-      expect(await service.handleText(MANAGER, 'привіт')).toBeNull();
+      expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
+    });
+
+    it('should drop a pending preview when another flow starts (leaveRequisites)', async () => {
+      await begin(GROUP);
+
+      service.leaveRequisites(USER);
+
+      expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
+      expect((await service.handleText(MANAGER, GROUP))?.html).toContain(
+        'кілька номерів або оплату на чужі реквізити',
+      );
     });
 
     it('should not send an answer that is too old, nor to the wrong manager', async () => {
@@ -699,9 +876,8 @@ UA549358710000067320000088286"`;
       now.mockRestore();
     });
 
-    it('should read a message sent as the caption of a file', async () => {
+    it('should read a message sent as the caption of a file, once armed', async () => {
       service.startRequisites(USER);
-
       const reply = await service.addFile(MANAGER, file(), SINGLE);
 
       expect(reply.html).toContain('Зрозумів так');
@@ -723,168 +899,6 @@ UA549358710000067320000088286"`;
         expect.stringContaining('Разом: 1 912,82 грн'),
       );
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
-    });
-
-    it('should lay the preview out in the order of the regular template', async () => {
-      const preview = await begin(`0000-066092
-07.09.2026
-ФОП Носенко Роман - 4 527,00 грн 14:57
-4441 1110 6964 5962 Андріанов Олександр - 2 140,00 грн 14:59
-45`);
-
-      const html = preview?.html ?? '';
-      const order = [
-        '№ <b>0000-066092</b>',
-        'Реквізити:',
-        'Сума:',
-        'Курс: 45',
-        'Коментар: 07.09.2026',
-      ];
-      const positions = order.map((part) => html.indexOf(part));
-      expect(positions.every((position) => position >= 0)).toBe(true);
-      expect([...positions].sort((a, b) => a - b)).toEqual(positions);
-      expect(html).toContain(
-        '<pre>ФОП Носенко Роман - 4 527,00 грн 14:57\n4441 1110 6964 5962 Андріанов Олександр - 2 140,00 грн 14:59</pre>',
-      );
-      expect(html).toContain('Сума: <b>6 667 грн</b> (4 527 + 2 140)');
-    });
-
-    describe('recognised without the button', () => {
-      const TWELVE = `0000-063555  20 639 грн (залишок)
-0000-064272  2 044,29 грн
-0000-064579  2 044,29 грн
-
-27/08/2026 16:33
-ФОП Івченко Євгеній Вадимович 75 000,00 грн
-"UA573052990000026005031228837
-3153718452
-Призначення платежу : Оплата за товар"
-Івченко Євгеній виплата на (ФОП Івченко Євгеній Вадимович) 75 000,00 грн
-
-44,9`;
-      const TWO_RECIPIENTS = `0000-066092
-07.09.2026
-ФОП Носенко Роман - 4 527,00 грн 14:57
-ФОП Андріанов Олександр - 2 140,00 грн 14:59
-45`;
-      const REGULAR = '0000-066717\nЧернявський Владислав\n6 158,41 грн\n44,9\nТерміново';
-      const buttonsOf = (
-        reply: { buttons?: { text: string; callback_data?: string }[][] } | null,
-      ) => reply?.buttons?.flat().map((b) => b.callback_data);
-
-      it('should take over a message with several numbers and an IBAN instead of failing', async () => {
-        const reply = await service.handleText(MANAGER, TWELVE);
-
-        expect(reply?.html).toContain('Схоже на оплату на інші реквізити — розібрав як таку.');
-        expect(reply?.html).toContain('кілька номерів однією оплатою');
-        expect(buttonsOf(reply)).toEqual(['req:ok', 'req:edit', 'req:regular']);
-        expect(orders.create).not.toHaveBeenCalled();
-        expect(orders.createGroup).not.toHaveBeenCalled();
-      });
-
-      it('should not turn recipients with a lone rate into a regular order of 45 грн', async () => {
-        const reply = await service.handleText(MANAGER, TWO_RECIPIENTS);
-
-        expect(reply?.html).toContain('Сума: <b>6 667 грн</b>');
-        expect(orders.create).not.toHaveBeenCalled();
-      });
-
-      it('should create the group when the manager agrees, as if the button had been pressed', async () => {
-        orders.createGroup.mockResolvedValue(groupOrders().slice(0, 2));
-        await service.handleText(MANAGER, GROUP);
-
-        await service.confirmRequisites(MANAGER);
-
-        expect(orders.createGroup).toHaveBeenCalledTimes(1);
-        expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
-      });
-
-      it('should recognise it in the caption of a file too', async () => {
-        const reply = await service.addFile(MANAGER, file(), TWELVE);
-
-        expect(reply.html).toContain('Схоже на оплату на інші реквізити');
-        expect(reply.html).toContain('Файлів: 1');
-      });
-
-      it('should leave a regular order alone', async () => {
-        orders.create.mockResolvedValue(createdOrder());
-
-        const reply = await service.handleText(MANAGER, REGULAR);
-
-        expect(orders.create).toHaveBeenCalledWith(
-          MANAGER.id,
-          expect.objectContaining({ orderType: 'REGULAR', orderNumber: '0000-066717' }),
-          { notify: true, addPart: false },
-        );
-        expect(reply?.html).toContain('створено');
-      });
-
-      it('should leave a labelled template alone even when a comment mentions money', async () => {
-        orders.create.mockResolvedValue(createdOrder());
-
-        await service.handleText(
-          MANAGER,
-          template({ Сума: '6 158,41 грн', Коментар: 'доплата 500 грн' }),
-        );
-
-        expect(orders.create).toHaveBeenCalledTimes(1);
-      });
-
-      it('should ignore plain chat text', async () => {
-        expect(await service.handleText(MANAGER, 'привіт, як справи?')).toBeNull();
-      });
-
-      it('should read the same text as a regular order when the manager says it is one', async () => {
-        orders.create.mockResolvedValue(createdOrder());
-        const preview = await service.handleText(
-          MANAGER,
-          '0000-066717\nЧернявський Владислав\n6 158,41 грн\n44,9\nдоплата 500 грн',
-        );
-        expect(preview?.html).toContain('Схоже на оплату на інші реквізити');
-        expect(orders.create).not.toHaveBeenCalled();
-
-        const reply = await service.regularFromDraft(MANAGER);
-
-        expect(orders.create).toHaveBeenCalledWith(
-          MANAGER.id,
-          expect.objectContaining({
-            orderType: 'REGULAR',
-            orderNumber: '0000-066717',
-            clientName: 'Чернявський Владислав',
-            comment: 'доплата 500 грн',
-          }),
-          { notify: true, addPart: false },
-        );
-        expect(reply.html).toContain('створено');
-        expect(await service.handleText(MANAGER, 'привіт')).toBeNull();
-      });
-
-      it('should say so when nothing is waiting, and explain when it does not fit the regular template', async () => {
-        expect((await service.regularFromDraft(MANAGER)).html).toContain('Немає даних');
-
-        const long = [
-          ...Array.from({ length: 12 }, (_, i) => `0000-06${4000 + i}  2 044,29 грн`),
-          '',
-          '27/08/2026 16:33',
-          'ФОП Івченко Євгеній Вадимович 75 000,00 грн',
-          'UA573052990000026005031228837',
-          'Призначення платежу : Оплата за товар',
-          '44,9',
-        ].join('\n');
-        await service.handleText(MANAGER, long);
-
-        const reply = await service.regularFromDraft(MANAGER);
-
-        expect(reply.html).toContain('Виправте');
-        expect(orders.create).not.toHaveBeenCalled();
-      });
-
-      it('should not show the button for a message the manager started with the button', async () => {
-        const reply = await begin(TWELVE);
-
-        expect(buttonsOf(reply)).toEqual(['req:ok', 'req:edit']);
-        expect(reply?.html).not.toContain('Схоже на оплату');
-      });
     });
 
     describe('when a number is already in the system', () => {
@@ -963,6 +977,88 @@ UA549358710000067320000088286"`;
       expect(reply.html).toContain("щойно з'явився");
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
       expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Зрозумів так');
+    });
+  });
+
+  describe('onApplicationShutdown', () => {
+    it('should warn a manager with buffered files', async () => {
+      await service.addFile(MANAGER, file());
+
+      await service.onApplicationShutdown();
+
+      expect(sender.send).toHaveBeenCalledWith(
+        MANAGER.telegramId,
+        expect.stringContaining('перезапускається'),
+      );
+    });
+
+    it('should warn a manager with an unanswered part offer', async () => {
+      orders.findWithBalance.mockResolvedValue({
+        order: {
+          orderNumber: '0000-066717',
+          clientName: 'Чернявський Владислав',
+          amountDue: new Prisma.Decimal('6158.41'),
+        },
+        amountPaid: new Prisma.Decimal('0'),
+      });
+      await service.handleText(MANAGER, template());
+
+      await service.onApplicationShutdown();
+
+      expect(sender.send).toHaveBeenCalledWith(MANAGER.telegramId, expect.any(String));
+    });
+
+    it('should not warn once the part offer has expired', async () => {
+      orders.findWithBalance.mockResolvedValue({
+        order: {
+          orderNumber: '0000-066717',
+          clientName: 'Чернявський Владислав',
+          amountDue: new Prisma.Decimal('6158.41'),
+        },
+        amountPaid: new Prisma.Decimal('0'),
+      });
+      const now = jest.spyOn(Date, 'now');
+      now.mockReturnValue(1_000_000);
+      await service.handleText(MANAGER, template());
+
+      now.mockReturnValue(1_000_000 + 11 * 60_000);
+      await service.onApplicationShutdown();
+
+      expect(sender.send).not.toHaveBeenCalled();
+      now.mockRestore();
+    });
+
+    it('should warn a manager who armed the requisites mode', async () => {
+      service.startRequisites(USER);
+
+      await service.onApplicationShutdown();
+
+      expect(sender.send).toHaveBeenCalledWith(USER, expect.any(String));
+    });
+
+    it('should warn a manager with a pending requisites preview', async () => {
+      service.startRequisites(USER);
+      await service.handleText(MANAGER, '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%');
+
+      await service.onApplicationShutdown();
+
+      expect(sender.send).toHaveBeenCalledWith(USER, expect.any(String));
+    });
+
+    it('should warn each affected manager only once, and leave others alone', async () => {
+      await service.addFile(MANAGER, file());
+      const other = { ...MANAGER, id: 8, telegramId: 6000000000n };
+
+      await service.onApplicationShutdown();
+
+      expect(sender.send).toHaveBeenCalledTimes(1);
+      expect(sender.send).not.toHaveBeenCalledWith(other.telegramId, expect.any(String));
+    });
+
+    it('should not warn anyone when nothing is pending', async () => {
+      await service.onApplicationShutdown();
+
+      expect(sender.send).not.toHaveBeenCalled();
     });
   });
 });

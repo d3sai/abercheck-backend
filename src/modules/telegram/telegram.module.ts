@@ -7,6 +7,7 @@ import { ManagersModule } from '../managers/managers.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { RefundsModule } from '../refunds/refunds.module';
+import { RequisitesModule } from '../requisites/requisites.module';
 import { ReportsModule } from '../reports/reports.module';
 import { AccessNotifier } from './access/access-notifier';
 import { AdminFlowService } from './admin/admin-flow.service';
@@ -36,6 +37,7 @@ import { TelegramSender } from './core/telegram-sender';
     PaymentsModule,
     RefundsModule,
     ReportsModule,
+    RequisitesModule,
   ],
   providers: [
     BotLauncher,

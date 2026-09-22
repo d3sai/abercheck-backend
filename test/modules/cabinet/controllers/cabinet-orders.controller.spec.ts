@@ -14,6 +14,7 @@ import type { ManagersService } from '../../../../src/modules/managers/managers.
 import { OrderNotFoundError } from '../../../../src/modules/orders/orders.errors';
 import type { OrdersService } from '../../../../src/modules/orders/orders.service';
 import type { RefundsService } from '../../../../src/modules/refunds/refunds.service';
+import type { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
 
 const d = (value: string) => new Prisma.Decimal(value);
 
@@ -64,11 +65,13 @@ describe('CabinetOrdersController', () => {
   const managers = { findById: jest.fn() };
   const refunds = { refund: jest.fn(), cancelUnpaid: jest.fn() };
   const attachments = { list: jest.fn() };
+  const requisites = { list: jest.fn() };
   const controller = new CabinetOrdersController(
     orders as unknown as OrdersService,
     managers as unknown as ManagersService,
     refunds as unknown as RefundsService,
     attachments as unknown as AttachmentsService,
+    requisites as unknown as RequisitesService,
   );
   const manager = {
     id: 7,
@@ -84,7 +87,10 @@ describe('CabinetOrdersController', () => {
     amountDue: '6158.41',
   };
 
-  beforeEach(() => attachments.list.mockResolvedValue([]));
+  beforeEach(() => {
+    attachments.list.mockResolvedValue([]);
+    requisites.list.mockResolvedValue([]);
+  });
   afterEach(() => jest.resetAllMocks());
 
   describe('list', () => {

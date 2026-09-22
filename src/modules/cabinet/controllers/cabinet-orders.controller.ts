@@ -33,6 +33,7 @@ import { UpdateOrderDto } from '../../orders/dto/update-order.dto';
 import { OrderNotFoundError } from '../../orders/orders.errors';
 import { type OrderLedger, OrdersService } from '../../orders/orders.service';
 import { RefundsService } from '../../refunds/refunds.service';
+import { RequisitesService } from '../../requisites/requisites.service';
 import { canAccessOrder, initiatorOf, isAdmin, ownOrdersOf } from '../cabinet-access';
 import { CabinetErrors } from '../cabinet.errors';
 import {
@@ -55,6 +56,7 @@ export class CabinetOrdersController {
     private readonly managers: ManagersService,
     private readonly refunds: RefundsService,
     private readonly attachments: AttachmentsService,
+    private readonly requisites: RequisitesService,
   ) {}
 
   @Get()
@@ -188,8 +190,11 @@ export class CabinetOrdersController {
 
   private async detailFor(me: Manager, orderNumber: string): Promise<OrderDetailView> {
     const ledger = await this.ledger(me, orderNumber);
-    const attachments = await this.attachments.list(ledger.order.id);
-    return toOrderDetail(ledger, attachments);
+    const [attachments, requisites] = await Promise.all([
+      this.attachments.list(ledger.order.id),
+      this.requisites.list(ledger.order.id),
+    ]);
+    return toOrderDetail(ledger, attachments, requisites);
   }
 
   private async ownerFor(me: Manager, managerId: number | undefined): Promise<number> {

@@ -53,9 +53,13 @@ export class PaymentNotifier {
 
   @OnEvent(PaymentEvents.Unmatched, { async: true })
   async onUnmatched({ payment }: PaymentUnmatched): Promise<void> {
-    await this.sender.sendToAdmins(unknownPaymentMessage(payment), [
-      [button("🔗 Прив'язати до замовлення", `attach:${payment.id}`)],
-    ]);
+    try {
+      await this.sender.sendToAdmins(unknownPaymentMessage(payment), [
+        [button("🔗 Прив'язати до замовлення", `attach:${payment.id}`)],
+      ]);
+    } catch (error) {
+      this.logger.error(`Failed to notify about unmatched payment #${payment.id}`, error);
+    }
   }
 
   @OnEvent(RefundEvents.Recorded, { async: true })
