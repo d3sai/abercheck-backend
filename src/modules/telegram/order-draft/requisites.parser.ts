@@ -5,16 +5,9 @@ import type { RequisiteInput } from '../../requisites/requisites.service';
 import { formatMoney } from '../core/format';
 import { parseExchangeRate } from './order-draft.parsers';
 
-// "Одним повідомленням": the manager pastes everything at once, in whatever shape they already
-// write it in chat — one or several 1C numbers, one or more payers, dates, cards/IBANs, a rate, a
-// comment. Only the essentials are read out: numbers, amounts, the total, the rate, a comment — and,
-// where a message reports several individual payments, each one becomes a structured requisite
-// (payer, account, amount, when), instead of a single free-text dump.
-
 export interface PlanItem {
   number: string;
   amount: Prisma.Decimal;
-  /** What was written after the amount on the number's line, e.g. "(залишок)". */
   note: string | null;
 }
 
@@ -22,18 +15,13 @@ export type PlanKind = 'minus' | 'single' | 'group';
 
 export interface RequisitesPlan {
   kind: PlanKind;
-  /** Numbers with their own amounts: one for "single", several for "group", none for "minus". */
   items: PlanItem[];
   total: Prisma.Decimal;
-  /** True when no total was written and the bot added the amounts up itself. */
   derivedTotal: boolean;
   rate: string | null;
-  /** A short caption for lists. */
   label: string;
   warnings: string[];
-  /** A lone date, the header of a minus closing, or a written "Коментар:" line. */
   comment: string | null;
-  /** Individual payments found in the message, beyond the numbers/total themselves. */
   requisiteLines: RequisiteInput[];
 }
 
@@ -45,7 +33,6 @@ const COMMENT_MAX_LENGTH = 2000;
 const ZERO = new Prisma.Decimal(0);
 
 const AMOUNT_SRC = String.raw`(?:\d{1,3}(?:[\u00a0\u202f ]\d{3})+|\d+)(?:[.,]\d{1,2})?`;
-// The look-behind keeps a time ("10:50 500 грн") or a date from being glued to the amount.
 const AMOUNT = new RegExp(String.raw`(?<![\d.,:])(${AMOUNT_SRC})\s*грн\.?`, 'giu');
 const TOTAL_LABEL = new RegExp(
   String.raw`^\s*(?:загальна\s+сума|разом|всього|сума)\s*[:\-–—]?\s*(${AMOUNT_SRC})\s*(?:грн\.?)?\s*$`,
@@ -85,8 +72,6 @@ function noteAfterAmount(text: string): string | null {
   return note === '' ? null : note;
 }
 
-// "07.09.2026 14:57" / "07/09/2026" as Kyiv local time; rejects calendar dates that do not exist
-// (e.g. 31.02) by checking the value round-trips.
 function parseDateTime(raw: string): Date | null {
   const match = DATETIME.exec(raw.trim());
   if (!match) {
@@ -107,13 +92,15 @@ function parseDateTime(raw: string): Date | null {
   return roundTrips ? date : null;
 }
 
-// Whether a message plainly needs the "кілька номерів / реквізити" mode instead of the regular
-// single-order template: more than one 1C number, a card, an IBAN, or a marker word (ЄДРПОУ/IBAN/
-// РНОКПП/ІПН). Used only to REFUSE such a message from the regular template with guidance — never to
-// parse it automatically; that still requires /requisites.
 export function hasMultipleOrdersOrRequisites(text: string): boolean {
+  const lines = text.split(/\r?\n/);
   const numbers = new Set(text.match(NUMBER_ANYWHERE) ?? []);
-  return numbers.size > 1 || CARD.test(text) || IBAN.test(text) || MARKERS.test(text);
+  const amountLines = lines.filter((line) =>
+    amountRegex().test(line.replace(NUMBER_ANYWHERE, ' ')),
+  ).length;
+  return (
+    numbers.size > 1 || amountLines >= 2 || CARD.test(text) || IBAN.test(text) || MARKERS.test(text)
+  );
 }
 
 function loneRate(line: string): string | null {
@@ -143,14 +130,11 @@ interface Scan {
   statedTotal: Prisma.Decimal | null;
   rate: string | null;
   comments: string[];
-  /** Lines nothing was read out of, in their order — the material requisites/comment are built from. */
   rest: RestLine[];
   cardsWithoutAmount: string[];
   duplicates: string[];
 }
 
-// A line that carries an amount and nothing that would make it something else (not a number, a
-// total, a rate, a comment, or a card/IBAN reference) — a bare "511,86 грн" line.
 function isBareAmountLine(trimmed: string): boolean {
   return (
     firstAmount(trimmed) !== null &&
@@ -175,8 +159,6 @@ function scan(lines: string[], allowNearMiss: boolean): Scan {
     duplicates: [],
   };
 
-  // A number with no amount of its own ("0000-068796" alone) can have it on the very next non-blank
-  // line ("511,86 грн"); that line is then part of the number, not a separate payment.
   const consumedByNumber = new Set<number>();
 
   for (let i = 0; i < lines.length; i += 1) {
@@ -271,8 +253,6 @@ function cleanName(line: string): string {
     .replace(/^[\s\-–—:,.;()]+|[\s\-–—:,;()]+$/g, '');
 }
 
-// A short caption for lists: the first line that reads like a name (a recipient, or the header of a
-// minus closing); purely cosmetic, the full text is kept as it was written.
 function guessLabel(lines: string[]): string {
   for (const line of lines) {
     const trimmed = line.trim();
@@ -295,8 +275,6 @@ function guessLabel(lines: string[]): string {
   return 'Оплата на реквізити';
 }
 
-// The header of a minus closing ("Закрила …", "Оплата мінусу клієнта …") is a description, not a
-// payment detail.
 function isHeader(text: string): boolean {
   const bare = text.trim().replace(/^["“«\s]+/u, '');
   return (
@@ -320,7 +298,7 @@ function buildComment(rest: RestLine[], comments: string[], kind: PlanKind): str
       remaining = remaining.filter((line) => line !== first);
     }
   }
-  // One lone date is the payment date; several belong to their own payments and are read inline.
+
   const dates = remaining.filter((line) => line.kind === 'date');
   if (dates.length === 1) {
     parts.push(dates[0]!.text.trim());
@@ -330,11 +308,6 @@ function buildComment(rest: RestLine[], comments: string[], kind: PlanKind): str
   return parts.length > 0 ? parts.join(' · ').slice(0, COMMENT_MAX_LENGTH) : null;
 }
 
-// Reads each individual payment out of the message: a text line carrying an amount becomes one
-// requisite (payer, account, amount, when). A card/IBAN is taken from the same line, or from the
-// next couple of lines if they only carry reference details (a common "name+amount" then a quoted
-// IBAN block pattern). A restated payment (the same amount, a name that echoes an earlier one) is
-// recognised and not counted twice.
 function deriveRequisiteLines(rest: RestLine[]): RequisiteInput[] {
   const lines = [...rest];
   const records: RequisiteInput[] = [];
@@ -456,9 +429,6 @@ export function parseRequisites(text: string): RequisitesResult {
     warnings.push(`У рядку з карткою «${card}» не знайшов суму.`);
   }
 
-  // Computed once for every kind: also lets a "group" number list catch a payment restated twice
-  // in the free text (e.g. the same transfer mentioned again as "виплата на …") when checking the
-  // total, even though a group's parts don't get requisite rows of their own.
   const lineRecords = deriveRequisiteLines(found.rest);
   const lineTotal = sum(lineRecords.map((r) => new Prisma.Decimal(r.amount)));
 
