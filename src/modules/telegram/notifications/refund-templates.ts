@@ -5,8 +5,8 @@ import { statusLabel } from '../orders-list/status-labels';
 export function managerRefundMessage({ refund, order, amountPaid }: RefundRecorded): string {
   return [
     '↩️ <b>Оформлено повернення</b>',
-    `Замовлення № <b>${escapeHtml(order.orderNumber)}</b>`,
-    `ФОП: ${escapeHtml(order.clientName)}`,
+    `ФОП: <b>${escapeHtml(order.clientName)}</b>`,
+    `Замовлення № ${escapeHtml(order.orderNumber)}`,
     `Сума замовлення: ${formatMoney(order.amountDue)} грн`,
     `Повернено: ${formatMoney(refund.amount)} грн`,
     `Сплачено чистими: ${formatMoney(amountPaid)} грн`,
@@ -18,8 +18,8 @@ export function managerRefundMessage({ refund, order, amountPaid }: RefundRecord
 export function managerCancelMessage({ order, initiator }: OrderCancelled): string {
   return [
     '❌ <b>Замовлення скасовано</b>',
-    `Замовлення № <b>${escapeHtml(order.orderNumber)}</b>`,
-    `ФОП: ${escapeHtml(order.clientName)}`,
+    `ФОП: <b>${escapeHtml(order.clientName)}</b>`,
+    `Замовлення № ${escapeHtml(order.orderNumber)}`,
     `Скасував(ла): ${escapeHtml(initiator.name)}`,
   ].join('\n');
 }

@@ -14,8 +14,8 @@ export function adminOrderCreatedMessage(order: Order, manager: Manager): string
         : '➕ <b>Нова частина замовлення</b>';
   return [
     title,
-    `№ <b>${escapeHtml(order.orderNumber)}</b>`,
-    `ФОП: ${escapeHtml(order.clientName)}`,
+    `ФОП: <b>${escapeHtml(order.clientName)}</b>`,
+    `№ ${escapeHtml(order.orderNumber)}`,
     `Сума: ${formatMoney(order.amountDue)} грн`,
     ...(order.exchangeRate ? [`Курс: ${formatRate(order.exchangeRate)}`] : []),
     ...(order.comment ? [`Коментар: ${escapeHtml(order.comment)}`] : []),

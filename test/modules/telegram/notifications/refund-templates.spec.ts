@@ -54,8 +54,8 @@ describe('managerRefundMessage', () => {
     expect(message).toBe(
       [
         '↩️ <b>Оформлено повернення</b>',
-        'Замовлення № <b>0000-066717</b>',
-        'ФОП: ФОП Гук В.С',
+        'ФОП: <b>ФОП Гук В.С</b>',
+        'Замовлення № 0000-066717',
         'Сума замовлення: 6 158,41 грн',
         'Повернено: 50 грн',
         'Сплачено чистими: 6 108,41 грн',
@@ -73,7 +73,7 @@ describe('managerRefundMessage', () => {
       amountPaid: d('0'),
     });
 
-    expect(message).toContain('ФОП: &lt;i&gt;y&lt;/i&gt;');
+    expect(message).toContain('ФОП: <b>&lt;i&gt;y&lt;/i&gt;</b>');
     expect(message).toContain('Оформив(ла): &lt;b&gt;x&lt;/b&gt;');
   });
 });
@@ -89,8 +89,8 @@ describe('managerCancelMessage', () => {
     expect(message).toBe(
       [
         '❌ <b>Замовлення скасовано</b>',
-        'Замовлення № <b>0000-066717</b>',
-        'ФОП: ФОП Гук В.С',
+        'ФОП: <b>ФОП Гук В.С</b>',
+        'Замовлення № 0000-066717',
         'Скасував(ла): Уляна',
       ].join('\n'),
     );
