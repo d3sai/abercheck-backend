@@ -25,7 +25,7 @@ import { BotUpdate } from '../../../../src/modules/telegram/core/bot.update';
 import { MENU_LABEL } from '../../../../src/modules/telegram/core/menu';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
-import { OrderCreationFlow } from '../../../../src/modules/telegram/order-draft/order-creation.flow';
+import { OrderCreationFlowService } from '../../../../src/modules/telegram/order-draft/order-creation-flow.service';
 import { OrderDraftService } from '../../../../src/modules/telegram/order-draft/order-draft.service';
 import { PartOfferStore } from '../../../../src/modules/telegram/order-draft/part-offer.store';
 import { PendingFilesStore } from '../../../../src/modules/telegram/order-draft/pending-files.store';
@@ -73,7 +73,7 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     AdminUpdate,
     TelegramSender,
     OrderDraftService,
-    OrderCreationFlow,
+    OrderCreationFlowService,
     RequisitesDraftService,
     PendingFilesStore,
     PartOfferStore,

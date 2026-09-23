@@ -10,7 +10,7 @@ import { BOT_RESTART_NOTICE, type BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { DraftAction } from './draft-action';
-import { OrderCreationFlow } from './order-creation.flow';
+import { OrderCreationFlowService } from './order-creation-flow.service';
 import { PartOfferStore } from './part-offer.store';
 import { PendingFilesStore } from './pending-files.store';
 import { multipleOrRequisitesGuard } from './requisites.messages';
@@ -18,13 +18,13 @@ import { RequisitesDraftService } from './requisites-draft.service';
 
 export { DraftAction };
 
-// Coordinates the two order-draft flows — the regular single-order template (OrderCreationFlow)
+// Coordinates the two order-draft flows — the regular single-order template (OrderCreationFlowService)
 // and the "кілька номерів / реквізити" mode (RequisitesDraftService) — plus the file buffer they
 // share: which one a message or upload goes to depends on whether the requisites mode is armed.
 @Injectable()
 export class OrderDraftService implements OnApplicationShutdown {
   constructor(
-    private readonly orderCreation: OrderCreationFlow,
+    private readonly orderCreation: OrderCreationFlowService,
     private readonly requisitesFlow: RequisitesDraftService,
     private readonly pendingFiles: PendingFilesStore,
     private readonly partOffers: PartOfferStore,

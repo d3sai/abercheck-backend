@@ -18,7 +18,7 @@ import { DailyReportJob } from './reports/daily-report.job';
 import { OrderNotifier } from './notifications/order-notifier';
 import { PaymentNotifier } from './notifications/payment-notifier';
 import { DraftAttachmentNotifier } from './order-draft/draft-attachment-notifier';
-import { OrderCreationFlow } from './order-draft/order-creation.flow';
+import { OrderCreationFlowService } from './order-draft/order-creation-flow.service';
 import { OrderDraftService } from './order-draft/order-draft.service';
 import { PartOfferStore } from './order-draft/part-offer.store';
 import { PendingFilesStore } from './order-draft/pending-files.store';
@@ -57,7 +57,7 @@ import { TelegramSender } from './core/telegram-sender';
     PartOfferStore,
     RequisitesDraftStore,
     DraftAttachmentNotifier,
-    OrderCreationFlow,
+    OrderCreationFlowService,
     RequisitesDraftService,
     OrderDraftService,
     OrderListService,

@@ -8,7 +8,7 @@ import type { BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
-import { OrderCreationFlow } from './order-creation.flow';
+import { OrderCreationFlowService } from './order-creation-flow.service';
 import { PartOfferStore } from './part-offer.store';
 import { PendingFilesStore } from './pending-files.store';
 import {
@@ -34,7 +34,7 @@ export class RequisitesDraftService {
   constructor(
     private readonly orders: OrdersService,
     private readonly requisites: RequisitesService,
-    private readonly orderCreation: OrderCreationFlow,
+    private readonly orderCreation: OrderCreationFlowService,
     private readonly pendingFiles: PendingFilesStore,
     private readonly partOffers: PartOfferStore,
     private readonly drafts: RequisitesDraftStore,

@@ -6,7 +6,7 @@ import { OrdersService } from '../../../../src/modules/orders/orders.service';
 import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
-import { OrderCreationFlow } from '../../../../src/modules/telegram/order-draft/order-creation.flow';
+import { OrderCreationFlowService } from '../../../../src/modules/telegram/order-draft/order-creation-flow.service';
 import {
   DraftAction,
   OrderDraftService,
@@ -82,7 +82,7 @@ describe('OrderDraftService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         OrderDraftService,
-        OrderCreationFlow,
+        OrderCreationFlowService,
         RequisitesDraftService,
         PendingFilesStore,
         PartOfferStore,

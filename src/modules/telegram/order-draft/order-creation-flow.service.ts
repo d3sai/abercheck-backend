@@ -59,7 +59,7 @@ function pluralizeFiles(count: number): string {
 // The regular single-order draft: parsing the labeled/freeform template, offering to add a part to
 // an already existing number, and creating the order once the data is valid.
 @Injectable()
-export class OrderCreationFlow {
+export class OrderCreationFlowService {
   constructor(
     private readonly orders: OrdersService,
     private readonly pendingFiles: PendingFilesStore,
