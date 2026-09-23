@@ -17,7 +17,7 @@ import {
 } from '../../refunds/refunds.errors';
 import { RefundsService } from '../../refunds/refunds.service';
 import { BOT_RESTART_NOTICE, type BotReply, button, mention } from '../core/bot-reply';
-import { escapeHtml, formatMoney } from '../core/format';
+import { escapeHtml, formatMoney, formatMoneyGrn as money } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { parseMoney } from '../order-draft/order-draft.parsers';
 import { statusLabel } from '../orders-list/status-labels';
@@ -37,7 +37,6 @@ export interface Admin extends Initiator {
   userId: number;
 }
 
-const money = (value: Prisma.Decimal) => `${formatMoney(value)} грн`;
 const dismissButton = button('Скасувати', AdminAction.Dismiss);
 const warn = (text: string): BotReply => ({ html: `⚠️ ${text}` });
 
