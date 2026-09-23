@@ -5,10 +5,16 @@ import { OrderNumberTakenError } from '../../../../src/modules/orders/orders.err
 import { OrdersService } from '../../../../src/modules/orders/orders.service';
 import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
+import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
+import { OrderCreationFlow } from '../../../../src/modules/telegram/order-draft/order-creation.flow';
 import {
   DraftAction,
   OrderDraftService,
 } from '../../../../src/modules/telegram/order-draft/order-draft.service';
+import { PartOfferStore } from '../../../../src/modules/telegram/order-draft/part-offer.store';
+import { PendingFilesStore } from '../../../../src/modules/telegram/order-draft/pending-files.store';
+import { RequisitesDraftService } from '../../../../src/modules/telegram/order-draft/requisites-draft.service';
+import { RequisitesDraftStore } from '../../../../src/modules/telegram/order-draft/requisites-draft.store';
 
 describe('OrderDraftService', () => {
   const USER = 5000000000n;
@@ -76,6 +82,12 @@ describe('OrderDraftService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         OrderDraftService,
+        OrderCreationFlow,
+        RequisitesDraftService,
+        PendingFilesStore,
+        PartOfferStore,
+        RequisitesDraftStore,
+        DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
         { provide: RequisitesService, useValue: requisites },
         { provide: AttachmentsService, useValue: attachments },
