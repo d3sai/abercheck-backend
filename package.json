@@ -23,6 +23,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
+    "test:integration": "jest --config jest.integration.config.js --runInBand",
     "prisma:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:migrate:status": "prisma migrate status"
