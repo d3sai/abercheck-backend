@@ -5,7 +5,13 @@ import {
   type Payment,
   Prisma,
 } from '../../../generated/prisma/client';
-import { escapeHtml, formatKyivDate, formatKyivDateTime, formatMoney } from '../core/format';
+import {
+  escapeHtml,
+  formatKyivDate,
+  formatKyivDateTime,
+  formatMoney,
+  formatMoneyGrn as money,
+} from '../core/format';
 
 export interface PaymentNotice {
   order: Order;
@@ -14,7 +20,6 @@ export interface PaymentNotice {
   amountPaid: Prisma.Decimal;
 }
 
-const money = (value: Prisma.Decimal) => `${formatMoney(value)} грн`;
 const recipient = (payment: Payment) =>
   escapeHtml(payment.receivingAccount ?? 'отримувач невідомий');
 

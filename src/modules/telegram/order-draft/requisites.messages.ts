@@ -6,7 +6,7 @@ import {
 } from '../../../generated/prisma/client';
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
-import { escapeHtml, formatKyivDateTime, formatMoney } from '../core/format';
+import { escapeHtml, formatKyivDateTime, formatMoneyGrn as money } from '../core/format';
 import { MENU_LABEL } from '../core/menu';
 import type { RequisitesPlan } from './requisites.parser';
 
@@ -15,8 +15,6 @@ export const RequisitesAction = {
   Edit: 'req:edit',
   Regular: 'req:regular',
 } as const;
-
-const money = (value: Prisma.Decimal): string => `${formatMoney(value)} грн`;
 
 // One requisite, one copyable block: every field on its own line inside <pre>, so tapping it copies
 // exactly the payer/account/amount/date — nothing else — instead of a whole run-on line.
@@ -205,8 +203,7 @@ export function adminRequisitesMessage(
   const numbers =
     orders.length > 1
       ? orders.map(
-          (order) =>
-            `№ <b>${escapeHtml(order.orderNumber)}</b> — ${formatMoney(order.amountDue)} грн`,
+          (order) => `№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amountDue)}`,
         )
       : isMinus
         ? []
@@ -214,7 +211,7 @@ export function adminRequisitesMessage(
   return [
     title,
     ...numbers,
-    orders.length > 1 ? `Разом: ${formatMoney(total)} грн` : `Сума: ${formatMoney(total)} грн`,
+    orders.length > 1 ? `Разом: ${money(total)}` : `Сума: ${money(total)}`,
     ...(first.exchangeRate
       ? [
           `Курс: ${first.exchangeRate.toFixed(4).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',')}`,

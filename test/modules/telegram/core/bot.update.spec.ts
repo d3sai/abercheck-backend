@@ -24,7 +24,13 @@ import { AdminUpdate } from '../../../../src/modules/telegram/admin/admin.update
 import { BotUpdate } from '../../../../src/modules/telegram/core/bot.update';
 import { MENU_LABEL } from '../../../../src/modules/telegram/core/menu';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
+import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
+import { OrderCreationFlowService } from '../../../../src/modules/telegram/order-draft/order-creation-flow.service';
 import { OrderDraftService } from '../../../../src/modules/telegram/order-draft/order-draft.service';
+import { PartOfferStore } from '../../../../src/modules/telegram/order-draft/part-offer.store';
+import { PendingFilesStore } from '../../../../src/modules/telegram/order-draft/pending-files.store';
+import { RequisitesDraftService } from '../../../../src/modules/telegram/order-draft/requisites-draft.service';
+import { RequisitesDraftStore } from '../../../../src/modules/telegram/order-draft/requisites-draft.store';
 import { OrderListService } from '../../../../src/modules/telegram/orders-list/order-list.service';
 import { DailyReportJob } from '../../../../src/modules/telegram/reports/daily-report.job';
 
@@ -67,6 +73,12 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     AdminUpdate,
     TelegramSender,
     OrderDraftService,
+    OrderCreationFlowService,
+    RequisitesDraftService,
+    PendingFilesStore,
+    PartOfferStore,
+    RequisitesDraftStore,
+    DraftAttachmentNotifier,
     OrderListService,
     {
       provide: ManagersService,

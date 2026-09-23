@@ -2,7 +2,7 @@ import { Prisma } from '../../../generated/prisma/client';
 import { MONEY_PATTERN } from '../../../common/money';
 import { kyivDateTime, kyivParts } from '../../../common/kyiv-time';
 import type { RequisiteInput } from '../../requisites/requisites.service';
-import { formatMoney } from '../core/format';
+import { formatMoneyGrn as money } from '../core/format';
 import { parseExchangeRate } from './order-draft.parsers';
 
 export interface PlanItem {
@@ -377,8 +377,6 @@ function deriveRequisiteLines(rest: RestLine[]): RequisiteInput[] {
 
 const sum = (values: Prisma.Decimal[]): Prisma.Decimal =>
   values.reduce((total, value) => total.plus(value), ZERO);
-
-const money = (value: Prisma.Decimal): string => `${formatMoney(value)} грн`;
 
 export function parseRequisites(text: string): RequisitesResult {
   if (text.trim().length > REQUISITES_MAX_LENGTH) {
