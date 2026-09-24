@@ -1,11 +1,15 @@
 import { Test } from '@nestjs/testing';
-import { type Manager, OrderType, Prisma } from '../../../../src/generated/prisma/client';
+import { type Manager, Prisma } from '../../../../src/generated/prisma/client';
 import { AttachmentsService } from '../../../../src/modules/attachments/attachments.service';
 import { OrderNumberTakenError } from '../../../../src/modules/orders/orders.errors';
 import { OrdersService } from '../../../../src/modules/orders/orders.service';
 import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
+import {
+  MinusClosingDraftService,
+  MinusDraftStore,
+} from '../../../../src/modules/telegram/order-draft/minus-closing-draft.service';
 import { OrderCreationFlowService } from '../../../../src/modules/telegram/order-draft/order-creation-flow.service';
 import {
   DraftAction,
@@ -84,9 +88,11 @@ describe('OrderDraftService', () => {
         OrderDraftService,
         OrderCreationFlowService,
         RequisitesDraftService,
+        MinusClosingDraftService,
         PendingFilesStore,
         PartOfferStore,
         RequisitesDraftStore,
+        MinusDraftStore,
         DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
         { provide: RequisitesService, useValue: requisites },
@@ -104,35 +110,15 @@ describe('OrderDraftService', () => {
   afterEach(() => jest.resetAllMocks());
 
   it('should star the number, name and amount in the regular hint', () => {
-    const reply = service.hint(OrderType.REGULAR);
+    const reply = service.hint();
 
-    expect(reply.html).toContain(
-      "Порядок рядків (* — обов'язкове):\nНомер*, ФОП*, Сума*, Курс, Коментар\n",
-    );
+    expect(reply.html).toContain("Номер*, ФОП*, Сума*, Курс, Коментар (* — обов'язкове).");
     expect(reply.html).toContain('0000-066717');
     expect(reply.buttons).toBeUndefined();
   });
 
-  it('should star only the name and amount in the minus-closing hint', () => {
-    const reply = service.hint(OrderType.MINUS_CLOSING);
-
-    expect(reply.html).toContain(
-      "Порядок рядків (* — обов'язкове):\nФОП*, Сума*, Курс, Коментар\n",
-    );
-    expect(reply.html).not.toContain('Номер');
-    expect(reply.html).not.toContain('0000-066717');
-    expect(reply.html).toContain('Закриття мінусу');
-  });
-
-  it('should tell managers what happens when the number is already taken, but not for a minus', () => {
-    expect(service.hint(OrderType.REGULAR).html).toContain('додати ще одну частину');
-    expect(service.hint(OrderType.MINUS_CLOSING).html).not.toContain('частину');
-  });
-
   it('should never label anything as optional', () => {
-    const html = [OrderType.REGULAR, OrderType.MINUS_CLOSING].map((t) => service.hint(t).html);
-
-    expect(html.join('\n')).not.toMatch(/необов/i);
+    expect(service.hint().html).not.toMatch(/необов/i);
   });
 
   it('should ignore plain chat text with no recognizable fields', async () => {
@@ -158,7 +144,7 @@ describe('OrderDraftService', () => {
         '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%',
       );
 
-      expect(reply?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
       expect(reply?.html).toContain('💳 Кілька номерів / реквізити');
       expect(reply?.html).toContain('/requisites');
       expect(orders.create).not.toHaveBeenCalled();
@@ -170,7 +156,7 @@ describe('OrderDraftService', () => {
         '0000-066092\nФОП Носенко Роман\n4441 1110 6964 5962 картка для довідки\n4 527,00 грн',
       );
 
-      expect(reply?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
       expect(orders.create).not.toHaveBeenCalled();
     });
 
@@ -184,8 +170,8 @@ describe('OrderDraftService', () => {
         'Закрила Любов Андрейчук\nЄДРПОУ 12345678\n4 890,00 грн',
       );
 
-      expect(withIban?.html).toContain('кілька номерів або оплату на чужі реквізити');
-      expect(withMarker?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(withIban?.html).toContain('кілька номерів або чужі реквізити');
+      expect(withMarker?.html).toContain('кілька номерів або чужі реквізити');
       expect(orders.create).not.toHaveBeenCalled();
     });
 
@@ -237,20 +223,14 @@ describe('OrderDraftService', () => {
       expect(orders.create).toHaveBeenCalled();
     });
 
-    it('should leave a normal minus-closing template alone', async () => {
-      orders.create.mockResolvedValue(createdOrder({ orderType: 'MINUS_CLOSING' }));
-
+    it('should refuse a template without a number instead of closing a minus', async () => {
       const reply = await service.handleText(
         MANAGER,
         ['Чернявський Владислав', '6 158,41 грн'].join('\n'),
       );
 
-      expect(reply?.html).toContain('створено');
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        expect.objectContaining({ orderType: 'MINUS_CLOSING' }),
-        { notify: true, addPart: false },
-      );
+      expect(reply?.html).toContain("«Номер» — поле обов'язкове.");
+      expect(orders.create).not.toHaveBeenCalled();
     });
   });
 
@@ -373,15 +353,6 @@ describe('OrderDraftService', () => {
         expect.anything(),
       );
     });
-
-    it('should not ask anything for a closing minus, which has no number', async () => {
-      orders.create.mockResolvedValue(createdOrder({ orderType: 'MINUS_CLOSING' }));
-
-      await service.handleText(MANAGER, template({ Номер: '' }));
-
-      expect(orders.findWithBalance).not.toHaveBeenCalled();
-      expect(orders.create).toHaveBeenCalled();
-    });
   });
 
   it('should create the order immediately once the message is complete', async () => {
@@ -405,19 +376,11 @@ describe('OrderDraftService', () => {
     expect(reply?.html).toContain('6 158,41');
   });
 
-  it('should treat a missing order number as a minus-closing order', async () => {
-    orders.create.mockResolvedValue(
-      createdOrder({ orderNumber: '9999-000001', orderType: 'MINUS_CLOSING' }),
-    );
-
+  it('should require the order number in the labelled template', async () => {
     const reply = await service.handleText(MANAGER, template({ Номер: '' }));
 
-    expect(orders.create).toHaveBeenCalledWith(
-      MANAGER.id,
-      expect.objectContaining({ orderType: 'MINUS_CLOSING' }),
-      { notify: true, addPart: false },
-    );
-    expect(reply?.html).toContain('Закриття мінусу');
+    expect(reply?.html).toContain("«Номер» — поле обов'язкове.");
+    expect(orders.create).not.toHaveBeenCalled();
   });
 
   describe('freeform, line-per-field messages', () => {
@@ -444,22 +407,14 @@ describe('OrderDraftService', () => {
       expect(reply?.html).toContain('створено');
     });
 
-    it('should treat a missing first line as a minus-closing order', async () => {
-      orders.create.mockResolvedValue(
-        createdOrder({ orderNumber: '9999-000001', orderType: 'MINUS_CLOSING' }),
-      );
-
+    it('should require the number line in a freeform message too', async () => {
       const reply = await service.handleText(
         MANAGER,
         ['Чернявський Владислав', '6 158,41 грн'].join('\n'),
       );
 
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        expect.objectContaining({ orderType: 'MINUS_CLOSING' }),
-        { notify: true, addPart: false },
-      );
-      expect(reply?.html).toContain('Закриття мінусу');
+      expect(reply?.html).toContain("«Номер» — поле обов'язкове.");
+      expect(orders.create).not.toHaveBeenCalled();
     });
 
     it('should surface a validation error for a malformed order number line', async () => {
@@ -699,7 +654,7 @@ UA549358710000067320000088286"`;
     it('should refuse a payment-report-shaped message with guidance when the mode was never armed', async () => {
       const reply = await service.handleText(MANAGER, GROUP);
 
-      expect(reply?.html).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
       expect(reply?.html).toContain('/requisites');
       expect(orders.createGroup).not.toHaveBeenCalled();
     });
@@ -777,35 +732,11 @@ UA549358710000067320000088286"`;
       expect(reply.html).toContain('№ <b>0000-068652</b>');
     });
 
-    it('should close a minus with no number and still attach its one requisite', async () => {
-      orders.create.mockResolvedValue(
-        createdOrder({ orderType: 'MINUS_CLOSING', clientName: 'Закрила Любов Андрейчук' }),
-      );
-      const preview = await begin(MINUS);
-      expect(preview?.html).toContain('закриття мінусу, номера немає');
+    it('should send a message with no number to the minus button instead of closing a minus', async () => {
+      const reply = await begin(MINUS);
 
-      await service.confirmRequisites(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        expect.objectContaining({
-          orderType: 'MINUS_CLOSING',
-          orderNumber: undefined,
-          amountDue: '4890.00',
-          clientName: 'Закрила Любов Андрейчук',
-        }),
-        { notify: false, addPart: false },
-      );
-      expect(requisites.addMany).toHaveBeenCalledWith(
-        expect.any(Number),
-        [
-          expect.objectContaining({
-            payerName: 'ФОП Солтик Олександра Олегівна',
-            account: 'UA549358710000067320000088286',
-          }),
-        ],
-        expect.anything(),
-      );
+      expect(reply?.html).toContain('/newminus');
+      expect(orders.create).not.toHaveBeenCalled();
     });
 
     it('should ask again when a message sent while armed has no amount', async () => {
@@ -863,14 +794,14 @@ UA549358710000067320000088286"`;
       expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
     });
 
-    it('should drop a pending preview when another flow starts (leaveRequisites)', async () => {
+    it('should drop a pending preview when another flow starts (leaveModes)', async () => {
       await begin(GROUP);
 
-      service.leaveRequisites(USER);
+      service.leaveModes(USER);
 
       expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
       expect((await service.handleText(MANAGER, GROUP))?.html).toContain(
-        'кілька номерів або оплату на чужі реквізити',
+        'кілька номерів або чужі реквізити',
       );
     });
 
@@ -989,6 +920,122 @@ UA549358710000067320000088286"`;
       expect(reply.html).toContain("щойно з'явився");
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
       expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Зрозумів так');
+    });
+  });
+
+  describe('closing a minus, armed by /newminus', () => {
+    const EXAMPLE = `Закриття мінусу клієнта Гук Руслан за підрахунком 31 серпня 2026
+0000-065607
+05.09.2026 12.:36
+27 409 грн. (з урахуванням 1%)
+ФОП берчатов м. М
+https://docs.google.com/spreadsheets/d/abc/edit`;
+
+    const closing = () =>
+      createdOrder({
+        orderNumber: '1789996839638',
+        baseNumber: '1789996839638',
+        orderType: 'MINUS_CLOSING',
+        clientName: 'Гук Руслан',
+        amountDue: new Prisma.Decimal('27409'),
+        exchangeRate: null,
+        comment: '№ 0000-065607 · з урахуванням 1%',
+        paidAt: new Date('2026-09-05T09:36:00Z'),
+        ourFop: 'берчатов м. М',
+        period: 'за підрахунком 31 серпня 2026',
+        sheetUrl: 'https://docs.google.com/spreadsheets/d/abc/edit',
+      });
+
+    const begin = async (text: string) => {
+      service.startMinus(USER);
+      return service.handleText(MANAGER, text);
+    };
+
+    it('should show the template and arm waiting for the very next message', () => {
+      const reply = service.startMinus(USER);
+
+      expect(reply.html).toContain('Закриття мінусу');
+      expect(reply.html).toContain('Таблиця:');
+    });
+
+    it('should preview the message in the template, then create the closing with every field', async () => {
+      orders.create.mockResolvedValue(closing());
+
+      const preview = await begin(EXAMPLE);
+      expect(preview?.html).toContain('Клієнт: <b>Гук Руслан</b> за підрахунком 31 серпня 2026');
+      expect(preview?.html).toContain('Наш ФОП: берчатов м. М');
+      expect(orders.create).not.toHaveBeenCalled();
+
+      const reply = await service.confirmMinus(MANAGER);
+
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        {
+          orderType: 'MINUS_CLOSING',
+          clientName: 'Гук Руслан',
+          amountDue: '27409.00',
+          exchangeRate: undefined,
+          comment: '№ 0000-065607 · з урахуванням 1%',
+          paidAt: new Date('2026-09-05T09:36:00Z'),
+          ourFop: 'берчатов м. М',
+          period: 'за підрахунком 31 серпня 2026',
+          sheetUrl: 'https://docs.google.com/spreadsheets/d/abc/edit',
+        },
+        { notify: false },
+      );
+      expect(requisites.addMany).not.toHaveBeenCalled();
+      expect(reply.html).toContain('Закриття мінусу № <b>1789996839638</b> створено');
+      const [[notice]] = sender.sendToAdmins.mock.calls as [[string]];
+      expect(notice).toContain('Закриття заборгованості клієнта</b>\n№ <b>1789996839638</b>');
+      expect(notice).toContain('№ <b>1789996839638</b>');
+    });
+
+    it('should store card payments as requisites of the closing', async () => {
+      orders.create.mockResolvedValue(closing());
+
+      await begin(
+        'Закриття мінусу Кожушко Игорь\n06.09.2025 11:47\n2 287,00 Грн\n5168 7451 7598 8366 Носенко Роман 2 287,00 Грн\nбез %',
+      );
+      await service.confirmMinus(MANAGER);
+
+      expect(requisites.addMany).toHaveBeenCalledWith(
+        1,
+        [
+          expect.objectContaining({
+            payerName: 'Носенко Роман',
+            account: '5168 7451 7598 8366',
+            amount: '2287.00',
+          }),
+        ],
+        { telegramId: USER, name: 'Христина' },
+      );
+    });
+
+    it('should read a message without a number as a closing only while armed', async () => {
+      const armed = await begin('Гук Руслан\n27 409 грн');
+      expect(armed?.html).toContain('Зрозумів так');
+
+      service.cancel(USER);
+      const plain = await service.handleText(MANAGER, 'Гук Руслан\n27 409 грн');
+      expect(plain?.html).toContain("«Номер» — поле обов'язкове.");
+    });
+
+    it('should never stay armed together with the requisites mode', async () => {
+      service.startMinus(USER);
+      service.startRequisites(USER);
+
+      expect(
+        (await service.handleText(MANAGER, 'Закриття мінусу Кожушко Игорь\nФОП А - 2 287 грн'))
+          ?.html,
+      ).toContain('/newminus');
+    });
+
+    it('should let the manager correct the message', async () => {
+      await begin(EXAMPLE);
+
+      expect(service.editMinus(USER).html).toContain('Надішліть виправлене');
+      expect((await service.confirmMinus(MANAGER)).html).toContain('Немає даних');
+      expect((await service.handleText(MANAGER, EXAMPLE))?.html).toContain('Зрозумів так');
     });
   });
 

@@ -107,6 +107,11 @@ export interface OrderGroupView {
 export interface OrderDetailView extends OrderSummaryView {
   exchangeRate: string | null;
   comment: string | null;
+  /** Minus closing only. */
+  paidAt: string | null;
+  ourFop: string | null;
+  period: string | null;
+  sheetUrl: string | null;
   group: OrderGroupView;
   payments: PaymentView[];
   refunds: RefundView[];
@@ -222,6 +227,10 @@ export function toOrderDetail(
     ...toOrderSummary(ledger),
     exchangeRate: order.exchangeRate?.toFixed(4) ?? null,
     comment: order.comment,
+    paidAt: order.paidAt?.toISOString() ?? null,
+    ourFop: order.ourFop,
+    period: order.period,
+    sheetUrl: order.sheetUrl,
     group: {
       baseNumber: ledger.group.baseNumber,
       amountDue: money(ledger.group.amountDue),

@@ -9,7 +9,6 @@ import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
 import { OrderCreationFlowService } from './order-creation-flow.service';
-import { PartOfferStore } from './part-offer.store';
 import { PendingFilesStore } from './pending-files.store';
 import {
   adminRequisitesMessage,
@@ -36,7 +35,6 @@ export class RequisitesDraftService {
     private readonly requisites: RequisitesService,
     private readonly orderCreation: OrderCreationFlowService,
     private readonly pendingFiles: PendingFilesStore,
-    private readonly partOffers: PartOfferStore,
     private readonly drafts: RequisitesDraftStore,
     private readonly sender: TelegramSender,
     private readonly notifier: DraftAttachmentNotifier,
@@ -45,7 +43,6 @@ export class RequisitesDraftService {
   // Arms the mode: only while armed does the very next message go through the requisites parser
   // instead of the regular single-order template.
   start(userId: bigint): BotReply {
-    this.partOffers.delete(userId);
     this.drafts.clearDraft(userId);
     this.drafts.arm(userId, Date.now() + REQUISITES_MODE_TTL_MS);
     return requisitesHint();
@@ -55,17 +52,9 @@ export class RequisitesDraftService {
     return this.drafts.isArmed(userId);
   }
 
-  // Another flow was started: the next message is no longer a requisites report, and any pending
-  // preview is dropped.
-  leave(userId: bigint): void {
-    this.drafts.leave(userId);
-  }
-
-  // Clears any armed mode or pending preview, reporting whether there was anything to clear.
-  clear(userId: bigint): boolean {
-    const hadWaiting = this.drafts.disarm(userId);
-    const hadDraft = this.drafts.clearDraft(userId);
-    return hadWaiting || hadDraft;
+  // Drops the armed mode and any pending preview, reporting whether there was anything to drop.
+  leave(userId: bigint): boolean {
+    return this.drafts.leave(userId);
   }
 
   edit(userId: bigint): BotReply {
@@ -190,7 +179,7 @@ export class RequisitesDraftService {
           manager.id,
           {
             ...common,
-            orderType: plan.kind === 'minus' ? OrderType.MINUS_CLOSING : OrderType.REGULAR,
+            orderType: OrderType.REGULAR,
             orderNumber: plan.items[0]?.number,
             amountDue: plan.total.toFixed(2),
           },

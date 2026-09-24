@@ -1,7 +1,7 @@
 import { type Manager, type Order, OrderType, type Prisma } from '../../../generated/prisma/client';
 import { escapeHtml, formatKyivDateTime, formatMoney } from '../core/format';
 
-function formatRate(value: Prisma.Decimal): string {
+export function formatRate(value: Prisma.Decimal): string {
   return value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
 }
 

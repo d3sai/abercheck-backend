@@ -9,7 +9,13 @@ const fail = (error: string): ParseResult => ({ ok: false, error });
 
 export function parseOrderNumber(input: string): ParseResult {
   const value = normalizeOrderNumber(input);
-  return /^\d{4}-\d{6}$/.test(value) ? ok(value) : fail('Номер має бути у форматі 0000-066717.');
+  if (/^\d{4}-\d{6}$/.test(value)) {
+    return ok(value);
+  }
+  // No preview here — the order is created at once — so a likely typo is pointed out, never fixed.
+  return /^\d{3}-\d{6}$/.test(value)
+    ? fail(`Бракує цифри. Може, 0${value}?`)
+    : fail('Номер має бути у форматі 0000-066717.');
 }
 
 function parseDecimal(input: string, suffix: RegExp): string | null {

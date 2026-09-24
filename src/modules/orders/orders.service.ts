@@ -70,6 +70,14 @@ export interface OrderGroupView {
   parts: OrderWithManager[];
 }
 
+// Filled only by the bot's minus-closing flow — deliberately not part of the public CreateOrderDto.
+export interface ClosingDetails {
+  paidAt?: Date;
+  ourFop?: string;
+  period?: string;
+  sheetUrl?: string;
+}
+
 export interface OrderLedger extends OrderWithPaid<OrderWithManager> {
   payments: Payment[];
   refunds: Refund[];
@@ -103,7 +111,7 @@ export class OrdersService {
   // another part of that number: it then gets the next "(n)" suffix and joins the group.
   async create(
     managerId: number,
-    dto: CreateOrderDto,
+    dto: CreateOrderDto & ClosingDetails,
     options?: { notify?: boolean; addPart?: boolean },
   ): Promise<Order> {
     const baseNumber = dto.orderNumber

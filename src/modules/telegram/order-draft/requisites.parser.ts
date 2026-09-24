@@ -11,7 +11,7 @@ export interface PlanItem {
   note: string | null;
 }
 
-export type PlanKind = 'minus' | 'single' | 'group';
+export type PlanKind = 'single' | 'group';
 
 export interface RequisitesPlan {
   kind: PlanKind;
@@ -32,7 +32,7 @@ const COMMENT_MAX_LENGTH = 2000;
 
 const ZERO = new Prisma.Decimal(0);
 
-const AMOUNT_SRC = String.raw`(?:\d{1,3}(?:[\u00a0\u202f ]\d{3})+|\d+)(?:[.,]\d{1,2})?`;
+export const AMOUNT_SRC = String.raw`(?:\d{1,3}(?:[\u00a0\u202f ]\d{3})+|\d+)(?:[.,]\d{1,2})?`;
 const AMOUNT = new RegExp(String.raw`(?<![\d.,:])(${AMOUNT_SRC})\s*грн\.?`, 'giu');
 const TOTAL_LABEL = new RegExp(
   String.raw`^\s*(?:загальна\s+сума|разом|всього|сума)\s*[:\-–—]?\s*(${AMOUNT_SRC})\s*(?:грн\.?)?\s*$`,
@@ -45,21 +45,44 @@ const DATE_ONLY = /^\s*\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:\s+\d{1,2}:\d{2})?\s*$/u;
 const NUMBER_AT_START = /^\s*(?:[№#]\s*)?(\d{4}-\d{6})(?!\d)(.*)$/u;
 const NEAR_MISS_AT_START = /^\s*(?:[№#]\s*)?(\d{3}-\d{6})(?!\d)(.*)$/u;
 const NUMBER_ANYWHERE = /(?<!\d)\d{4}-\d{6}(?!\d)/gu;
-const CARD = /(?<!\d)(?:\d{4}[\u00a0 -]){3}\d{4}(?!\d)/u;
-const IBAN = /(?<![A-Za-z\d])UA\d{27}(?!\d)/u;
+export const CARD = /(?<!\d)(?:\d{4}[\u00a0 -]){3}\d{4}(?!\d)/u;
+export const IBAN = /(?<![A-Za-z\d])UA\d{27}(?!\d)/u;
 const DATE = /\d{1,2}[./]\d{1,2}[./]\d{2,4}/gu;
 const TIME = /(?<!\d)\d{1,2}:\d{2}(?!\d)/gu;
 const NOT_A_NAME = /^["“«]?(?:призначення|iban|ібан|єдрпоу|іпн|рнокпп|платіжна|ua\d)/iu;
 const MARKERS = /(?<!\p{L})(?:iban|ібан|єдрпоу|рнокпп|іпн)(?!\p{L})/iu;
-const DATETIME = /^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:[ ,]+(\d{1,2}):(\d{2}))?$/;
+const DATETIME = /^(\d{1,2})[./](\d{1,2})[./](\d{4}|\d{2})(?:[ ,]+(\d{1,2}):(\d{2}))?$/;
+const MONTHS = [
+  'січня',
+  'лютого',
+  'березня',
+  'квітня',
+  'травня',
+  'червня',
+  'липня',
+  'серпня',
+  'вересня',
+  'жовтня',
+  'листопада',
+  'грудня',
+];
+const WORD_DATE = new RegExp(
+  String.raw`(?<!\d)(\d{1,2})\s+(${MONTHS.join('|')})\s+(\d{4})(?:\s*р(?:оку|\.)?)?`,
+  'giu',
+);
+// Only a payment line says which account it went through, so only there is a number without
+// "грн" taken for an amount — never in the ЄДРПОУ / ІПН / invoice lines copied around it.
+const PAYMENT_LINE = /^\s*(?:фоп|тов)\s/iu;
+const TRAILING_BARE_AMOUNT = new RegExp(String.raw`[\s\-–—:,;]*(?<![\d.,])${AMOUNT_SRC}$`, 'u');
+const TRAILING_AMOUNT = new RegExp(String.raw`\p{L}[^\d]*?(?<![\d.,])(${AMOUNT_SRC})\s*$`, 'u');
 
-function toDecimal(raw: string): Prisma.Decimal {
+export function toDecimal(raw: string): Prisma.Decimal {
   return new Prisma.Decimal(raw.replace(/[\s\u00a0\u202f]/g, '').replace(',', '.'));
 }
 
 const amountRegex = (): RegExp => new RegExp(AMOUNT.source, 'iu');
 
-function firstAmount(text: string): Prisma.Decimal | null {
+export function firstAmount(text: string): Prisma.Decimal | null {
   const match = amountRegex().exec(text);
   return match ? toDecimal(match[1]!) : null;
 }
@@ -72,14 +95,14 @@ function noteAfterAmount(text: string): string | null {
   return note === '' ? null : note;
 }
 
-function parseDateTime(raw: string): Date | null {
+export function parseDateTime(raw: string): Date | null {
   const match = DATETIME.exec(raw.trim());
   if (!match) {
     return null;
   }
   const day = Number(match[1]);
   const month = Number(match[2]);
-  const year = Number(match[3]);
+  const year = match[3]!.length === 2 ? 2000 + Number(match[3]) : Number(match[3]);
   const hour = match[4] ? Number(match[4]) : 0;
   const minute = match[5] ? Number(match[5]) : 0;
   if (hour > 23 || minute > 59) {
@@ -90,6 +113,30 @@ function parseDateTime(raw: string): Date | null {
   const roundTrips =
     Number(back.day) === day && Number(back.month) === month && Number(back.year) === year;
   return roundTrips ? date : null;
+}
+
+// "5 вересня 2026" → "05.09.2026", so a date written in words reads like any other.
+export function numericDates(text: string): string {
+  return text.replace(WORD_DATE, (_, day: string, month: string, year: string) => {
+    const index = MONTHS.indexOf(month.toLowerCase()) + 1;
+    return `${day.padStart(2, '0')}.${String(index).padStart(2, '0')}.${year}`;
+  });
+}
+
+// The amount of a payment line, with or without "грн": "5168 … Носенко Роман 2 287".
+export function paymentAmount(line: string): Prisma.Decimal | null {
+  const withCurrency = firstAmount(line);
+  if (withCurrency || !(CARD.test(line) || PAYMENT_LINE.test(line))) {
+    return withCurrency;
+  }
+  const bare = line
+    .replace(new RegExp(CARD.source, 'gu'), ' ')
+    .replace(new RegExp(IBAN.source, 'gu'), ' ')
+    .replace(DATE, ' ')
+    .replace(TIME, ' ')
+    .replace(/[\s\-–—,;.]+$/u, '');
+  const match = TRAILING_AMOUNT.exec(bare);
+  return match ? toDecimal(match[1]!) : null;
 }
 
 export function hasMultipleOrdersOrRequisites(text: string): boolean {
@@ -103,7 +150,7 @@ export function hasMultipleOrdersOrRequisites(text: string): boolean {
   );
 }
 
-function loneRate(line: string): string | null {
+export function loneRate(line: string): string | null {
   const match = RATE_LONE.exec(line);
   if (!match) {
     return null;
@@ -114,7 +161,7 @@ function loneRate(line: string): string | null {
 }
 
 type RestKind = 'blank' | 'date' | 'text';
-interface RestLine {
+export interface RestLine {
   text: string;
   kind: RestKind;
 }
@@ -135,9 +182,12 @@ interface Scan {
   duplicates: string[];
 }
 
+// Just an amount (maybe with a note after it) — not a payer's line, which starts with a name.
 function isBareAmountLine(trimmed: string): boolean {
+  const at = amountRegex().exec(trimmed)?.index;
   return (
-    firstAmount(trimmed) !== null &&
+    at !== undefined &&
+    !/\p{L}/u.test(trimmed.slice(0, at)) &&
     !NUMBER_AT_START.test(trimmed) &&
     !TOTAL_LABEL.test(trimmed) &&
     !RATE_LABELED.test(trimmed) &&
@@ -230,18 +280,20 @@ function scan(lines: string[], allowNearMiss: boolean): Scan {
 
     const amounts = [...trimmed.matchAll(AMOUNT)].map((match) => toDecimal(match[1]!));
     result.other.push(...amounts);
-    if (amounts.length === 0 && CARD.test(trimmed)) {
+    if (amounts.length === 0 && CARD.test(trimmed) && !paymentAmount(trimmed)) {
       result.cardsWithoutAmount.push(trimmed.slice(0, 40));
     }
-    result.rest.push({
-      text: line.replace(/\s+$/, ''),
-      kind: DATE_ONLY.test(trimmed) ? 'date' : 'text',
-    });
+    const asDate = numericDates(trimmed);
+    result.rest.push(
+      DATE_ONLY.test(asDate)
+        ? { text: asDate, kind: 'date' }
+        : { text: line.replace(/\s+$/, ''), kind: 'text' },
+    );
   }
   return result;
 }
 
-function cleanName(line: string): string {
+export function cleanName(line: string): string {
   return line
     .replace(AMOUNT, ' ')
     .replace(DATE, ' ')
@@ -275,31 +327,9 @@ function guessLabel(lines: string[]): string {
   return 'Оплата на реквізити';
 }
 
-function isHeader(text: string): boolean {
-  const bare = text.trim().replace(/^["“«\s]+/u, '');
-  return (
-    text.trim().length <= 200 &&
-    !NOT_A_NAME.test(bare) &&
-    !amountRegex().test(text) &&
-    !CARD.test(text) &&
-    !IBAN.test(text) &&
-    /\p{L}{3,}/u.test(text)
-  );
-}
-
-function buildComment(rest: RestLine[], comments: string[], kind: PlanKind): string | null {
-  let remaining = rest;
+function buildComment(rest: RestLine[], comments: string[]): string | null {
   const parts: string[] = [];
-
-  if (kind === 'minus') {
-    const first = remaining.find((line) => line.kind !== 'blank');
-    if (first?.kind === 'text' && isHeader(first.text)) {
-      parts.push(first.text.trim().replace(/[\s:]+$/, ''));
-      remaining = remaining.filter((line) => line !== first);
-    }
-  }
-
-  const dates = remaining.filter((line) => line.kind === 'date');
+  const dates = rest.filter((line) => line.kind === 'date');
   if (dates.length === 1) {
     parts.push(dates[0]!.text.trim());
   }
@@ -308,7 +338,8 @@ function buildComment(rest: RestLine[], comments: string[], kind: PlanKind): str
   return parts.length > 0 ? parts.join(' · ').slice(0, COMMENT_MAX_LENGTH) : null;
 }
 
-function deriveRequisiteLines(rest: RestLine[]): RequisiteInput[] {
+// `fallback` dates a payment that has no date of its own nor a date line above it.
+export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): RequisiteInput[] {
   const lines = [...rest];
   const records: RequisiteInput[] = [];
   const seen: { nameWord: string; amount: string }[] = [];
@@ -339,19 +370,23 @@ function deriveRequisiteLines(rest: RestLine[]): RequisiteInput[] {
     if (NOT_A_NAME.test(trimmed.replace(/^["“«\s]+/u, ''))) {
       return;
     }
-    const amount = firstAmount(trimmed);
+    const amount = paymentAmount(trimmed);
     if (!amount) {
       return;
     }
 
     const ownDate = new RegExp(DATE.source, 'u').exec(trimmed)?.[0];
     const ownTime = new RegExp(TIME.source, 'u').exec(trimmed)?.[0];
-    const dateText = ownDate ?? currentDateText;
+    // A payment's own time wins over the time on the date line above it.
+    const dateText =
+      ownDate ?? (ownTime ? currentDateText?.replace(TIME, '').trim() : currentDateText);
     const whenText = [dateText, ownTime].filter(Boolean).join(' ');
-    const paidAt = whenText ? (parseDateTime(whenText) ?? new Date()) : new Date();
+    const paidAt = (whenText ? parseDateTime(whenText) : null) ?? fallback ?? new Date();
 
     const account = findAccount(index);
-    const payerName = cleanName(trimmed) || 'Не вказано';
+    const cleaned = cleanName(trimmed);
+    const payerName =
+      (firstAmount(trimmed) ? cleaned : cleaned.replace(TRAILING_BARE_AMOUNT, '')) || 'Не вказано';
 
     const nameWord = payerName.split(' ')[0]?.toLowerCase() ?? '';
     const amountKey = amount.toFixed(2);
@@ -375,7 +410,7 @@ function deriveRequisiteLines(rest: RestLine[]): RequisiteInput[] {
   return records;
 }
 
-const sum = (values: Prisma.Decimal[]): Prisma.Decimal =>
+export const sum = (values: Prisma.Decimal[]): Prisma.Decimal =>
   values.reduce((total, value) => total.plus(value), ZERO);
 
 export function parseRequisites(text: string): RequisitesResult {
@@ -415,6 +450,13 @@ export function parseRequisites(text: string): RequisitesResult {
           'Знайшов кілька номерів у тексті, але не на початку рядків. Напишіть кожен номер з нового рядка разом із сумою.',
         ],
       };
+    } else {
+      return {
+        ok: false,
+        errors: [
+          'Немає номера. Якщо це мінус, натисніть «➖ Закрити мінус» (/newminus) і надішліть ще раз.',
+        ],
+      };
     }
   }
 
@@ -449,16 +491,7 @@ export function parseRequisites(text: string): RequisitesResult {
     }
   };
 
-  if (numbers.length === 0) {
-    kind = 'minus';
-    requisiteLines = lineRecords;
-    total =
-      statedTotal ?? (requisiteLines.length > 0 ? lineTotal : other.length > 0 ? sum(other) : null);
-    derivedTotal = statedTotal === null;
-    if (statedTotal && requisiteLines.length > 0) {
-      mismatch('Сума рядків', lineTotal, 'загальна', statedTotal);
-    }
-  } else if (numbers.length === 1) {
+  if (numbers.length === 1) {
     kind = 'single';
     const own = numbers[0]!.amount;
     requisiteLines = lineRecords;
@@ -528,7 +561,7 @@ export function parseRequisites(text: string): RequisitesResult {
 
   const label = guessLabel(lines);
   const normalizedRate = rate ? parseExchangeRate(rate) : null;
-  const comment = buildComment(found.rest, found.comments, kind);
+  const comment = buildComment(found.rest, found.comments);
 
   return {
     ok: true,

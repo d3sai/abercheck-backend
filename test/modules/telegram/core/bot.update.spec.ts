@@ -29,6 +29,10 @@ import { OrderCreationFlowService } from '../../../../src/modules/telegram/order
 import { OrderDraftService } from '../../../../src/modules/telegram/order-draft/order-draft.service';
 import { PartOfferStore } from '../../../../src/modules/telegram/order-draft/part-offer.store';
 import { PendingFilesStore } from '../../../../src/modules/telegram/order-draft/pending-files.store';
+import {
+  MinusClosingDraftService,
+  MinusDraftStore,
+} from '../../../../src/modules/telegram/order-draft/minus-closing-draft.service';
 import { RequisitesDraftService } from '../../../../src/modules/telegram/order-draft/requisites-draft.service';
 import { RequisitesDraftStore } from '../../../../src/modules/telegram/order-draft/requisites-draft.store';
 import { OrderListService } from '../../../../src/modules/telegram/orders-list/order-list.service';
@@ -75,9 +79,11 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     OrderDraftService,
     OrderCreationFlowService,
     RequisitesDraftService,
+    MinusClosingDraftService,
     PendingFilesStore,
     PartOfferStore,
     RequisitesDraftStore,
+    MinusDraftStore,
     DraftAttachmentNotifier,
     OrderListService,
     {
@@ -280,12 +286,12 @@ describe('BotUpdate', () => {
       expect(replies[0]!.text).toContain('Номер*');
     });
 
-    it('should answer "close minus" with the format that has no order number', async () => {
+    it('should answer "close minus" with the debt-closing template', async () => {
       const replies = await say(MENU_LABEL.NewMinus);
 
       expect(replies).toHaveLength(1);
       expect(replies[0]!.text).toContain('Закриття мінусу');
-      expect(replies[0]!.text).not.toContain('Номер');
+      expect(replies[0]!.text).not.toContain('0000-066717');
     });
 
     it('should answer "list" with the manager\'s open orders', async () => {
@@ -438,7 +444,7 @@ describe('BotUpdate', () => {
       const replies = await say(GROUP);
 
       expect(replies[0]!.text).not.toContain('кілька номерів однією оплатою');
-      expect(replies[0]!.text).toContain('кілька номерів або оплату на чужі реквізити');
+      expect(replies[0]!.text).toContain('кілька номерів або чужі реквізити');
       expect(replies[0]!.text).toContain(MENU_LABEL.Requisites);
       expect(replies[0]!.text).toContain('/requisites');
       expect(ordersMock.createGroup).not.toHaveBeenCalled();

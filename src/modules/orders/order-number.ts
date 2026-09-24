@@ -30,6 +30,8 @@ export function partNumber(baseNumber: string, index: number): string {
   return index === 0 ? baseNumber : `${baseNumber}(${index})`;
 }
 
+// A minus closing has no 1C number of its own. Plain digits, so admins can copy it into /attach or
+// /refund exactly as shown; it can never look like a 1C number (0000-000000).
 export function generateClosingOrderNumber(): string {
-  return `МІНУС-${Date.now()}`;
+  return String(Date.now());
 }

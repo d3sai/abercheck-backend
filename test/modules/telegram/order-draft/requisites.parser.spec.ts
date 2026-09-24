@@ -343,67 +343,57 @@ describe('parseRequisites', () => {
     });
   });
 
-  describe('closing a minus (no number)', () => {
-    it('should add up three real payments (a restated one dropped), keep the IBANs, and warn about the untotalled card line', () => {
-      const plan = planOf(SAMPLES.minusFourPayments);
-
-      expect(plan.kind).toBe('minus');
-      expect(plan.items).toEqual([]);
-      expect(plan.total.toFixed(2)).toBe('37764.00');
-      expect(plan.derivedTotal).toBe(true);
-      expect(plan.rate).toBeNull();
-      expect(plan.label).toBe('Оплата мінусу клієнта Вівчарук Валентин за 12.09');
-      expect(plan.comment).toBe('Оплата мінусу клієнта Вівчарук Валентин за 12.09');
-      expect(requisites(plan)).toEqual([
-        'ФОП Чулінда Вадим Павлович|UA383052990000026004001606383|29500.00',
-        'ФОП Івченко Євгеній Вадимович|UA573052990000026005031228837|6961.00',
-        'ФОП Чегринець Ангеліна Олександрівна|UA983220010000026001350007371|1303.00',
-      ]);
-      expect(has(plan, '4149 4975 2362 4981')).toBe(true);
-      expect(has(plan, 'порахував')).toBe(true);
-    });
-
-    it.each([
-      [
-        SAMPLES.minusTimeBeforeDate,
-        '4890.00',
-        'ФОП Солтик Олександра Олегівна',
-        'UA549358710000067320000088286',
-      ],
-      [SAMPLES.minusPayerInBrackets, '1954.00', null, 'UA263052990000026005005934414'],
-    ])(
-      'should read a payment with the time before the date and pick up its IBAN',
-      (text, total, name, iban) => {
-        const plan = planOf(text);
-
-        expect(plan.kind).toBe('minus');
-        expect(plan.total.toFixed(2)).toBe(total);
-        expect(plan.label).toBe('Закрила Любов Андрейчук');
-        expect(plan.requisiteLines).toHaveLength(1);
-        expect(plan.requisiteLines[0]!.account).toBe(iban);
-        if (name) {
-          expect(plan.requisiteLines[0]!.payerName).toBe(name);
-        }
-      },
-    );
-
-    it('should never take an IBAN, a tax id or a court number for an amount', () => {
-      const plan = planOf(SAMPLES.minusTimeBeforeDate);
-
-      expect(plan.requisiteLines.map((r) => r.amount)).toEqual(['4890.00']);
-    });
-
-    it('should prefer a written total over the sum of the lines', () => {
+  describe('dates and amounts written loosely', () => {
+    it('should read a two-digit year, a date in words, and a card payment without "грн"', () => {
       const plan = planOf(
-        'Оплата мінусу\nЗагальна сума: 5 000 грн\nФОП А - 3 000 грн\nФОП Б - 1 900 грн',
+        [
+          '0000-066092',
+          '5 вересня 2026',
+          '5168 7451 7598 8366 Носенко Роман 4 527 14:57',
+          '07.09.26',
+          'ФОП Андріанов Олександр - 2 140,00 14:59',
+        ].join('\n'),
       );
 
-      expect(plan.total.toFixed(2)).toBe('5000.00');
-      expect(plan.derivedTotal).toBe(false);
-      expect(plan.warnings).toEqual([
-        'Сума рядків 4 900 грн, а загальна 5 000 грн — різниця 100 грн.',
+      expect(plan.total.toFixed(2)).toBe('6667.00');
+      expect(plan.warnings).toContain(
+        'Загальної суми в тексті немає — я порахував її з рядків, перевірте.',
+      );
+      expect(plan.requisiteLines).toEqual([
+        {
+          payerName: 'Носенко Роман',
+          account: '5168 7451 7598 8366',
+          amount: '4527.00',
+          paidAt: new Date('2026-09-05T11:57:00Z'),
+        },
+        {
+          payerName: 'ФОП Андріанов Олександр',
+          account: null,
+          amount: '2140.00',
+          paidAt: new Date('2026-09-07T11:59:00Z'),
+        },
       ]);
     });
+
+    it('should never take a tax id or an invoice number for an amount without "грн"', () => {
+      const plan = planOf(
+        '0000-066092\nФОП Носенко Роман 100 грн\nЄДРПОУ 2181702573\nОплата згідно рахунку 187',
+      );
+
+      expect(plan.requisiteLines.map((r) => r.amount)).toEqual(['100.00']);
+    });
+  });
+
+  describe('a message with no number', () => {
+    it.each([SAMPLES.minusFourPayments, SAMPLES.minusTimeBeforeDate, SAMPLES.minusPayerInBrackets])(
+      'should point at the minus-closing button instead of closing a minus here',
+      (text) => {
+        const result = parseRequisites(text);
+
+        expect(result.ok).toBe(false);
+        expect(!result.ok && result.errors.join(' ')).toContain('/newminus');
+      },
+    );
   });
 
   describe('one number split between a FOP and a card holder', () => {

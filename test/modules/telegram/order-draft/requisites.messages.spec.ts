@@ -49,6 +49,10 @@ const order = (overrides: Partial<Order> = {}): Order => ({
   exchangeRate: null,
   comment: null,
   requisites: null,
+  paidAt: null,
+  ourFop: null,
+  period: null,
+  sheetUrl: null,
   orderType: OrderType.REGULAR,
   status: 'AWAITING_PAYMENT',
   managerId: 7,
@@ -108,8 +112,6 @@ describe('requisitesPreview — requisite rendering', () => {
   it('should omit the account line entirely when there is none', () => {
     const reply = requisitesPreview(
       plan({
-        kind: 'minus',
-        items: [],
         requisiteLines: [
           {
             payerName: 'ФОП Солтик Олександра Олегівна',

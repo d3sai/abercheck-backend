@@ -150,8 +150,8 @@ describe('OrdersService', () => {
 
       expect(tx.order.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          orderNumber: expect.stringMatching(/^МІНУС-\d+$/) as unknown,
-          baseNumber: expect.stringMatching(/^МІНУС-\d+$/) as unknown,
+          orderNumber: expect.stringMatching(/^\d{13}$/) as unknown,
+          baseNumber: expect.stringMatching(/^\d{13}$/) as unknown,
         }) as unknown,
       });
       const [[{ data }]] = tx.order.create.mock.calls as unknown as [

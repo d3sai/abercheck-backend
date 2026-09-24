@@ -2,13 +2,14 @@ import type { OnApplicationBootstrap } from '@nestjs/common';
 import { Action, Command, Ctx, Help, Next, On, Start, Update } from 'nestjs-telegraf';
 import type { Context } from 'telegraf';
 import type { TelegramFileRef } from '../../attachments/attachments.service';
-import { type Manager, OrderType } from '../../../generated/prisma/client';
+import type { Manager } from '../../../generated/prisma/client';
 import { ManagersService } from '../../managers/managers.service';
 import { HELP, NOT_A_MANAGER, newManagerNotice, startReply } from '../access/access.messages';
 import { ADMIN_HELP } from '../admin/admin.update';
 import { MENU_LABEL } from './menu';
 import { OrderListService } from '../orders-list/order-list.service';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
+import { MinusAction } from '../order-draft/minus-closing.messages';
 import { RequisitesAction } from '../order-draft/requisites.messages';
 import { type CommandContext, edit, fullName, isPrivate, reply } from './telegram-context';
 import { TelegramSender } from './telegram-sender';
@@ -27,11 +28,11 @@ export class BotUpdate implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     await this.sender.registerCommands(
       [
-        { command: 'new', description: 'Формат нового замовлення' },
-        { command: 'newminus', description: 'Формат закриття мінусу (без номера)' },
-        { command: 'requisites', description: 'Кілька номерів або оплата на чужі реквізити' },
+        { command: 'new', description: 'Нове замовлення' },
+        { command: 'newminus', description: 'Закрити мінус' },
+        { command: 'requisites', description: 'Кілька номерів або чужі реквізити' },
         { command: 'list', description: 'Мої відкриті замовлення' },
-        { command: 'cancel', description: 'Забути прикріплені файли' },
+        { command: 'cancel', description: 'Скасувати' },
         { command: 'help', description: 'Що вміє бот' },
       ],
       { type: 'all_private_chats' },
@@ -97,17 +98,17 @@ export class BotUpdate implements OnApplicationBootstrap {
   async newOrder(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);
     if (manager) {
-      this.drafts.leaveRequisites(manager.telegramId);
-      await reply(ctx, this.drafts.hint(OrderType.REGULAR));
+      this.drafts.leaveModes(manager.telegramId);
+      await reply(ctx, this.drafts.hint());
     }
   }
 
+  // Arms the "закрити мінус" mode: only the very next message is read as a debt closing.
   @Command('newminus')
   async newMinusOrder(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);
     if (manager) {
-      this.drafts.leaveRequisites(manager.telegramId);
-      await reply(ctx, this.drafts.hint(OrderType.MINUS_CLOSING));
+      await reply(ctx, this.drafts.startMinus(manager.telegramId));
     }
   }
 
@@ -168,6 +169,23 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (manager) {
       await ctx.answerCbQuery();
       await edit(ctx, await this.drafts.regularFromRequisites(manager));
+    }
+  }
+
+  @Action(MinusAction.Send)
+  async sendMinus(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      await edit(ctx, await this.drafts.confirmMinus(manager));
+    }
+  }
+
+  @Action(MinusAction.Edit)
+  async editMinus(@Ctx() ctx: Context): Promise<void> {
+    if (isPrivate(ctx) && ctx.from) {
+      await ctx.answerCbQuery();
+      await edit(ctx, this.drafts.editMinus(BigInt(ctx.from.id)));
     }
   }
 

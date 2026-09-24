@@ -1,13 +1,9 @@
-import {
-  type Order,
-  OrderType,
-  type OrderRequisite,
-  Prisma,
-} from '../../../generated/prisma/client';
+import { type Order, type OrderRequisite, Prisma } from '../../../generated/prisma/client';
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatMoneyGrn as money } from '../core/format';
 import { MENU_LABEL } from '../core/menu';
+import { formatRate } from '../notifications/order-templates';
 import type { RequisitesPlan } from './requisites.parser';
 
 export const RequisitesAction = {
@@ -16,9 +12,7 @@ export const RequisitesAction = {
   Regular: 'req:regular',
 } as const;
 
-// One requisite, one copyable block: every field on its own line inside <pre>, so tapping it copies
-// exactly the payer/account/amount/date — nothing else — instead of a whole run-on line.
-function requisiteBlock(
+export function requisiteBlock(
   payerName: string,
   account: string | null,
   amount: Prisma.Decimal,
@@ -37,32 +31,27 @@ export function requisitesHint(): BotReply {
   const example = [
     '0000-066092',
     '07.09.2026',
-    'ФОП Носенко Роман - 4 527,00 грн 14:57',
-    '4441 1110 6964 5962 Андріанов Олександр - 2 140,00 грн 14:59',
+    'ФОП Носенко Роман 4 527 грн 14:57',
+    '4441 1110 6964 5962 Андріанов Олександр 2 140 грн 14:59',
     '45',
   ].join('\n');
   return {
     html: [
-      '💳 <b>Кілька номерів або реквізити — одним повідомленням</b>',
-      'Пишіть у будь-якому порядку: номер(и), суми, реквізити (картки, ФОП, IBAN), курс, дату чи коментар.',
-      '• Кілька номерів однією оплатою — кожен з нового рядка разом із сумою.',
-      '• Немає номера — це закриття мінусу.',
-      '• Не порахували загальну суму — порахую сам, а ви перевірте.',
-      `Файли (до ${MAX_FILES_PER_UPLOAD}) — разом із повідомленням або перед ним.`,
+      '💳 <b>Кілька номерів або чужі реквізити</b>',
+      'Усе одним повідомленням, порядок не важливий. Кожен номер з нового рядка разом із сумою.',
       '',
-      'Наприклад:',
       `<pre>${example}</pre>`,
+      '',
+      `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
     ].join('\n'),
   };
 }
 
-// The regular single-order template never guesses at this — it refuses and points at the button, so
-// a message with several numbers or someone else's requisites is never silently misread.
 export function multipleOrRequisitesGuard(): BotReply {
   return {
     html: [
-      '⚠️ Це схоже на кілька номерів або оплату на чужі реквізити.',
-      `Спочатку натисніть кнопку «${escapeHtml(MENU_LABEL.Requisites)}» (або команду /requisites), а тоді надішліть це саме повідомлення ще раз.`,
+      '⚠️ Схоже на кілька номерів або чужі реквізити.',
+      `Натисніть «${escapeHtml(MENU_LABEL.Requisites)}» (/requisites) і надішліть це повідомлення ще раз.`,
     ].join('\n'),
   };
 }
@@ -70,10 +59,9 @@ export function multipleOrRequisitesGuard(): BotReply {
 export function requisitesErrors(errors: string[]): BotReply {
   return {
     html: [
-      '⚠️ Не вдалося прийняти повідомлення:',
+      '⚠️ Не вийшло прочитати:',
       ...errors.map((error) => `• ${escapeHtml(error)}`),
-      '',
-      'Виправте та надішліть ще раз.',
+      'Виправте й надішліть ще раз.',
     ].join('\n'),
   };
 }
@@ -90,9 +78,7 @@ export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext)
   const lines: string[] = [
     plan.kind === 'group'
       ? '<b>Зрозумів так</b> — кілька номерів однією оплатою:'
-      : plan.kind === 'minus'
-        ? '<b>Зрозумів так</b> — закриття мінусу, номера немає:'
-        : '<b>Зрозумів так</b>:',
+      : '<b>Зрозумів так</b>:',
   ];
 
   if (plan.kind === 'group') {
@@ -163,15 +149,6 @@ export function requisitesCreatedReply(orders: Order[], skipped: string[]): BotR
   if (!first) {
     return { html: '⚠️ Нічого не створено.' };
   }
-  if (first.orderType === OrderType.MINUS_CLOSING) {
-    return {
-      html: [
-        `➖ Закриття мінусу створено · ${money(total)}`,
-        escapeHtml(first.clientName),
-        ...skippedNote,
-      ].join('\n'),
-    };
-  }
   const head =
     orders.length > 1
       ? `✅ Оплату зареєстровано: ${orders.length} номерів · ${money(total)}`
@@ -181,8 +158,6 @@ export function requisitesCreatedReply(orders: Order[], skipped: string[]): BotR
   };
 }
 
-// One notice for the whole payment: numbers/amount, rate, comment, then every requisite that was
-// read out of the message, then who and when — same layout as a regular order notice.
 export function adminRequisitesMessage(
   orders: Order[],
   managerName: string,
@@ -194,10 +169,8 @@ export function adminRequisitesMessage(
     return '';
   }
   const total = orders.reduce((sum, order) => sum.plus(order.amountDue), new Prisma.Decimal(0));
-  const isMinus = first.orderType === OrderType.MINUS_CLOSING;
-  const title = isMinus
-    ? '➖ <b>Закриття мінусу</b>'
-    : first.orderNumber === first.baseNumber
+  const title =
+    first.orderNumber === first.baseNumber
       ? '💳 <b>Оплата на реквізити</b>'
       : '➕ <b>Оплата на реквізити · нова частина</b>';
   const numbers =
@@ -205,18 +178,12 @@ export function adminRequisitesMessage(
       ? orders.map(
           (order) => `№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amountDue)}`,
         )
-      : isMinus
-        ? []
-        : [`№ <b>${escapeHtml(first.orderNumber)}</b>`];
+      : [`№ <b>${escapeHtml(first.orderNumber)}</b>`];
   return [
     title,
     ...numbers,
     orders.length > 1 ? `Разом: ${money(total)}` : `Сума: ${money(total)}`,
-    ...(first.exchangeRate
-      ? [
-          `Курс: ${first.exchangeRate.toFixed(4).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',')}`,
-        ]
-      : []),
+    ...(first.exchangeRate ? [`Курс: ${formatRate(first.exchangeRate)}`] : []),
     ...(first.comment ? [`Коментар: ${escapeHtml(first.comment)}`] : []),
     ...(requisites.length > 0
       ? [

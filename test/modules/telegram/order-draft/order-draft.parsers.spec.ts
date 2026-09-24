@@ -19,6 +19,13 @@ describe('order draft parsers', () => {
     expect(value(parseOrderNumber(input))).toBe(expected);
   });
 
+  it('should point out a number that is one digit short instead of fixing it', () => {
+    expect(parseOrderNumber('000-066717')).toEqual({
+      ok: false,
+      error: 'Бракує цифри. Може, 0000-066717?',
+    });
+  });
+
   it.each([
     ['6 158,41 грн', '6158.41'],
     ['6158.41', '6158.41'],

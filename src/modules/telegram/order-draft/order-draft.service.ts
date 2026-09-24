@@ -5,11 +5,12 @@ import {
   MAX_FILE_SIZE_BYTES,
 } from '../../attachments/attachments.constants';
 import type { TelegramFileRef } from '../../attachments/attachments.service';
-import type { Manager, OrderType } from '../../../generated/prisma/client';
+import type { Manager } from '../../../generated/prisma/client';
 import { BOT_RESTART_NOTICE, type BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { DraftAction } from './draft-action';
+import { MinusClosingDraftService } from './minus-closing-draft.service';
 import { OrderCreationFlowService } from './order-creation-flow.service';
 import { PartOfferStore } from './part-offer.store';
 import { PendingFilesStore } from './pending-files.store';
@@ -18,14 +19,16 @@ import { RequisitesDraftService } from './requisites-draft.service';
 
 export { DraftAction };
 
-// Coordinates the two order-draft flows — the regular single-order template (OrderCreationFlowService)
-// and the "кілька номерів / реквізити" mode (RequisitesDraftService) — plus the file buffer they
-// share: which one a message or upload goes to depends on whether the requisites mode is armed.
+// Coordinates the order-draft flows — the regular single-order template (OrderCreationFlowService),
+// the "кілька номерів / реквізити" mode (RequisitesDraftService) and the "закрити мінус" mode
+// (MinusClosingDraftService) — plus the file buffer they share: which one a message or upload goes
+// to depends on which mode, if any, is armed.
 @Injectable()
 export class OrderDraftService implements OnApplicationShutdown {
   constructor(
     private readonly orderCreation: OrderCreationFlowService,
     private readonly requisitesFlow: RequisitesDraftService,
+    private readonly minusFlow: MinusClosingDraftService,
     private readonly pendingFiles: PendingFilesStore,
     private readonly partOffers: PartOfferStore,
     private readonly sender: TelegramSender,
@@ -39,23 +42,34 @@ export class OrderDraftService implements OnApplicationShutdown {
       ...this.pendingFiles.pendingUserIds(),
       ...this.partOffers.pendingUserIds(now),
       ...this.requisitesFlow.pendingUserIds(now),
+      ...this.minusFlow.pendingUserIds(now),
     ]);
     await Promise.all([...ids].map((id) => this.sender.send(id, BOT_RESTART_NOTICE)));
   }
 
-  hint(type: OrderType): BotReply {
-    return this.orderCreation.hint(type);
+  hint(): BotReply {
+    return this.orderCreation.hint();
   }
 
   // Arms the "кілька номерів / реквізити" mode: only while it's armed does the very next message go
   // through the requisites parser instead of the regular single-order template.
   startRequisites(userId: bigint): BotReply {
+    this.partOffers.delete(userId);
+    this.minusFlow.leave(userId);
     return this.requisitesFlow.start(userId);
   }
 
+  // Arms the "закрити мінус" mode the same way; the two modes never stay armed together.
+  startMinus(userId: bigint): BotReply {
+    this.partOffers.delete(userId);
+    this.requisitesFlow.leave(userId);
+    return this.minusFlow.start(userId);
+  }
+
   async handleText(manager: Manager, text: string): Promise<BotReply | null> {
-    if (this.requisitesFlow.isArmed(manager.telegramId)) {
-      return this.requisitesFlow.handle(manager, text);
+    const armed = await this.handleArmed(manager, text);
+    if (armed) {
+      return armed;
     }
     if (this.orderCreation.needsRequisitesButton(text)) {
       return multipleOrRequisitesGuard();
@@ -85,8 +99,9 @@ export class OrderDraftService implements OnApplicationShutdown {
         html: `📎 Додано «${escapeHtml(file.filename)}» (${files.length}/${MAX_FILES_PER_UPLOAD}).`,
       };
     }
-    if (this.requisitesFlow.isArmed(manager.telegramId)) {
-      return this.requisitesFlow.handle(manager, text);
+    const armed = await this.handleArmed(manager, text);
+    if (armed) {
+      return armed;
     }
     if (this.orderCreation.needsRequisitesButton(text)) {
       return multipleOrRequisitesGuard();
@@ -103,16 +118,27 @@ export class OrderDraftService implements OnApplicationShutdown {
   cancel(userId: bigint): BotReply {
     const hadFiles = this.pendingFiles.clear(userId);
     const hadOffer = this.partOffers.delete(userId);
-    const hadRequisites = this.requisitesFlow.clear(userId);
+    const hadRequisites = this.requisitesFlow.leave(userId);
+    const hadMinus = this.minusFlow.leave(userId);
     return {
-      html: hadFiles || hadOffer || hadRequisites ? 'Скасовано.' : 'Нема чого скасовувати.',
+      html:
+        hadFiles || hadOffer || hadRequisites || hadMinus ? 'Скасовано.' : 'Нема чого скасовувати.',
     };
   }
 
-  // Another flow was started: the next message is no longer a requisites report, and any pending
+  // Another flow was started: the next message is no longer read by an armed mode, and any pending
   // preview is dropped.
-  leaveRequisites(userId: bigint): void {
+  leaveModes(userId: bigint): void {
     this.requisitesFlow.leave(userId);
+    this.minusFlow.leave(userId);
+  }
+
+  editMinus(userId: bigint): BotReply {
+    return this.minusFlow.edit(userId);
+  }
+
+  async confirmMinus(manager: Manager): Promise<BotReply> {
+    return this.minusFlow.confirm(manager);
   }
 
   editRequisites(userId: bigint): BotReply {
@@ -140,5 +166,15 @@ export class OrderDraftService implements OnApplicationShutdown {
   skipPart(userId: bigint): BotReply {
     this.partOffers.delete(userId);
     return { html: 'Скасовано.' };
+  }
+
+  private async handleArmed(manager: Manager, text: string): Promise<BotReply | null> {
+    if (this.minusFlow.isArmed(manager.telegramId)) {
+      return this.minusFlow.handle(manager, text);
+    }
+    if (this.requisitesFlow.isArmed(manager.telegramId)) {
+      return this.requisitesFlow.handle(manager, text);
+    }
+    return null;
   }
 }
