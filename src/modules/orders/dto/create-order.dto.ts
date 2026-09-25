@@ -9,7 +9,7 @@ import {
 } from 'class-validator';
 import { MONEY_PATTERN } from '../../../common/money';
 import { Trim } from '../../../common/trim.decorator';
-import { OrderType } from '../../../generated/prisma/client';
+import { Currency, OrderType } from '../../../generated/prisma/client';
 
 export const EXCHANGE_RATE_PATTERN = /^(?!0+(\.0+)?$)\d{1,4}(\.\d{1,4})?$/;
 
@@ -34,6 +34,10 @@ export class CreateOrderDto {
   @Trim()
   @Matches(MONEY_PATTERN, { message: 'amountDue must be a positive amount with up to 2 decimals' })
   amountDue!: string;
+
+  @IsOptional()
+  @IsEnum(Currency)
+  currency?: Currency;
 
   @Trim()
   @IsOptional()

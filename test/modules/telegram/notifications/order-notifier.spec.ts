@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { Prisma } from '../../../../src/generated/prisma/client';
+import { Currency, Prisma } from '../../../../src/generated/prisma/client';
 import type { OrderCreated } from '../../../../src/modules/orders/order.events';
 import { PrismaService } from '../../../../src/common/prisma/prisma.service';
 import { OrderNotifier } from '../../../../src/modules/telegram/notifications/order-notifier';
@@ -17,6 +17,7 @@ describe('OrderNotifier', () => {
       baseNumber: '0000-067968',
       clientName: 'ФОП Берчатова Лариса',
       amountDue: new Prisma.Decimal('170.10'),
+      currency: Currency.UAH,
       exchangeRate: null,
       comment: null,
       requisites: null,

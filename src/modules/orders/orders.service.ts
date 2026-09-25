@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
+  Currency,
   type Manager,
   type Order,
   OrderType,
@@ -31,7 +32,11 @@ import {
 } from './order-number';
 import { type OrderCreated, OrderEvents } from './order.events';
 import { UNPAID_STATUSES } from './order-status';
-import { OrderNotFoundError, OrderNumberTakenError } from './orders.errors';
+import {
+  OrderCurrencyMismatchError,
+  OrderNotFoundError,
+  OrderNumberTakenError,
+} from './orders.errors';
 
 export interface OrderFilter {
   managerId?: number;
@@ -123,6 +128,9 @@ export class OrdersService {
         const parts = await lockGroup(tx, baseNumber);
         if (parts.length > 0 && !options?.addPart) {
           throw new OrderNumberTakenError(baseNumber);
+        }
+        if (parts.some((part) => part.currency !== (dto.currency ?? Currency.UAH))) {
+          throw new OrderCurrencyMismatchError(baseNumber);
         }
         const orderNumber = partNumber(baseNumber, nextPartIndex(parts));
         const created = await tx.order.create({

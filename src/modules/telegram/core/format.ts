@@ -1,5 +1,5 @@
 import { kyivParts } from '../../../common/kyiv-time';
-import type { Prisma } from '../../../generated/prisma/client';
+import { Currency, type Prisma } from '../../../generated/prisma/client';
 
 export function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -13,6 +13,10 @@ export function formatMoney(value: Prisma.Decimal): string {
 
 export function formatMoneyGrn(value: Prisma.Decimal): string {
   return `${formatMoney(value)} грн`;
+}
+
+export function formatMoneyIn(value: Prisma.Decimal, currency: Currency): string {
+  return `${formatMoney(value)} ${currency === Currency.USD ? '$' : 'грн'}`;
 }
 
 export function formatKyivDateTime(date: Date): string {

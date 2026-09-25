@@ -25,6 +25,11 @@ describe('DailyReportJob', () => {
     },
     refundsCount: 0,
     refundsAmount: new Prisma.Decimal(0),
+    usd: {
+      paymentsAmount: new Prisma.Decimal(0),
+      refundsCount: 0,
+      refundsAmount: new Prisma.Decimal(0),
+    },
   });
 
   beforeEach(async () => {

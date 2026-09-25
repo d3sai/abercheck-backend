@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { kyivDayStartOf, nextKyivDayStart } from '../../../src/common/kyiv-time';
-import { OrderStatus, Prisma } from '../../../src/generated/prisma/client';
+import { Currency, OrderStatus, Prisma } from '../../../src/generated/prisma/client';
 import { PrismaService } from '../../../src/common/prisma/prisma.service';
 import { StatsService } from '../../../src/modules/reports/stats.service';
 
@@ -65,7 +65,13 @@ describe('StatsService', () => {
         _count: { _all: true },
       });
       expect(payment.aggregate).toHaveBeenCalledWith({
-        where: { order: { status: { in: expect.any(Array) as unknown }, managerId: 7 } },
+        where: {
+          order: {
+            status: { in: expect.any(Array) as unknown },
+            managerId: 7,
+            currency: Currency.UAH,
+          },
+        },
         _sum: { amount: true },
       });
     });
@@ -124,17 +130,47 @@ describe('StatsService', () => {
       ]);
     });
 
+    it('should add up hryvnia money only, never mixing in dollars', async () => {
+      await service.period(range);
+
+      expect(payment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ currency: Currency.UAH }) as unknown,
+        }),
+      );
+      expect(refund.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            order: expect.objectContaining({ currency: Currency.UAH }) as unknown,
+          }) as unknown,
+        }),
+      );
+      expect(order.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ currency: Currency.UAH }) as unknown,
+        }),
+      );
+    });
+
     it('should look only at the orders of the given manager', async () => {
       await service.period(range, 7);
 
       expect(payment.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { paidAt: { gte: range.start, lt: range.end }, order: { managerId: 7 } },
+          where: {
+            paidAt: { gte: range.start, lt: range.end },
+            currency: Currency.UAH,
+            order: { managerId: 7 },
+          },
         }),
       );
       expect(order.aggregate).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { createdAt: { gte: range.start, lt: range.end }, managerId: 7 },
+          where: {
+            createdAt: { gte: range.start, lt: range.end },
+            managerId: 7,
+            currency: Currency.UAH,
+          },
         }),
       );
     });

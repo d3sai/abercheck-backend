@@ -1,7 +1,11 @@
 import { Injectable, Logger, type OnApplicationShutdown } from '@nestjs/common';
 import { OrderStatus, type Payment, Prisma } from '../../../generated/prisma/client';
 import { calculateOrderStatus } from '../../orders/order-status';
-import { OrderCancelledError, OrderNotFoundError } from '../../orders/orders.errors';
+import {
+  OrderCancelledError,
+  OrderCurrencyMismatchError,
+  OrderNotFoundError,
+} from '../../orders/orders.errors';
 import {
   type OrderWithManager,
   type OrderWithPaid,
@@ -17,7 +21,7 @@ import {
 } from '../../refunds/refunds.errors';
 import { RefundsService } from '../../refunds/refunds.service';
 import { BOT_RESTART_NOTICE, type BotReply, button, mention } from '../core/bot-reply';
-import { escapeHtml, formatMoney, formatMoneyGrn as money } from '../core/format';
+import { escapeHtml, formatMoney, formatMoneyIn as money } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { parseMoney } from '../order-draft/order-draft.parsers';
 import { statusLabel } from '../orders-list/status-labels';
@@ -55,7 +59,7 @@ interface RefundPrompt {
 }
 
 function paymentSummary(payment: Payment): string {
-  return `#${payment.id} · ${money(payment.amount)} · ${escapeHtml(payment.payerName ?? '—')}`;
+  return `#${payment.id} · ${money(payment.amount, payment.currency)} · ${escapeHtml(payment.payerName ?? '—')}`;
 }
 
 @Injectable()
@@ -128,13 +132,19 @@ export class AdminFlowService implements OnApplicationShutdown {
       );
     }
 
+    if (order.currency !== payment.currency) {
+      return warn(
+        `Платіж #${paymentId} і замовлення № ${escapeHtml(order.orderNumber)} у різних валютах — прив'язати не можна.`,
+      );
+    }
+
     const after = amountPaid.plus(payment.amount);
     return {
       html: [
         `🔗 Прив'язати платіж ${paymentSummary(payment)} до замовлення № <b>${escapeHtml(order.orderNumber)}</b>?`,
         `ФОП: ${escapeHtml(order.clientName)} · менеджер ${escapeHtml(order.manager.name)}`,
-        `Сума замовлення: ${money(order.amountDue)} · сплачено ${money(amountPaid)}`,
-        `Після прив'язки: сплачено ${money(after)} → ${statusLabel(calculateOrderStatus(order.amountDue, after, order.status))}`,
+        `Сума замовлення: ${money(order.amountDue, order.currency)} · сплачено ${money(amountPaid, order.currency)}`,
+        `Після прив'язки: сплачено ${money(after, order.currency)} → ${statusLabel(calculateOrderStatus(order.amountDue, after, order.status))}`,
       ].join('\n'),
       buttons: [
         [button("✅ Прив'язати", `attach:ok:${payment.id}:${order.orderNumber}`), dismissButton],
@@ -148,7 +158,7 @@ export class AdminFlowService implements OnApplicationShutdown {
       return {
         html:
           `✅ Платіж #${paymentId} прив'язано до № <b>${escapeHtml(order.orderNumber)}</b> · ${escapeHtml(admin.name)}\n` +
-          `Сплачено ${money(amountPaid)} з ${money(order.amountDue)} → ${statusLabel(order.status)}`,
+          `Сплачено ${money(amountPaid, order.currency)} з ${money(order.amountDue, order.currency)} → ${statusLabel(order.status)}`,
       };
     } catch (error) {
       return this.explain(error);
@@ -179,8 +189,8 @@ export class AdminFlowService implements OnApplicationShutdown {
     const lines = [
       `↩️ <b>Повернення · № ${escapeHtml(order.orderNumber)}</b>`,
       `ФОП: ${escapeHtml(order.clientName)} · менеджер ${escapeHtml(order.manager.name)}`,
-      `Сума замовлення: ${money(order.amountDue)}`,
-      `Сплачено: ${money(amountPaid)}`,
+      `Сума замовлення: ${money(order.amountDue, order.currency)}`,
+      `Сплачено: ${money(amountPaid, order.currency)}`,
       `Статус: ${statusLabel(order.status)}`,
     ];
 
@@ -232,7 +242,7 @@ export class AdminFlowService implements OnApplicationShutdown {
     });
     return {
       html:
-        `${mention(admin.userId, escapeHtml(admin.name))}, ↩️ Часткове повернення · № ${escapeHtml(found.order.orderNumber)} · сплачено ${money(found.amountPaid)}\n` +
+        `${mention(admin.userId, escapeHtml(admin.name))}, ↩️ Часткове повернення · № ${escapeHtml(found.order.orderNumber)} · сплачено ${money(found.amountPaid, found.order.currency)}\n` +
         'Надішліть суму повернення у відповідь на це повідомлення.',
       forceReply: { placeholder: '1 250,50' },
     };
@@ -265,8 +275,8 @@ export class AdminFlowService implements OnApplicationShutdown {
       const { order, refund, amountPaid } = await this.refunds.refund(orderId, amount, admin);
       return {
         html:
-          `✅ Повернення ${money(refund.amount)} за № <b>${escapeHtml(order.orderNumber)}</b> оформлено · ${escapeHtml(admin.name)}\n` +
-          `Сплачено чистими: ${money(amountPaid)} → ${statusLabel(order.status)}`,
+          `✅ Повернення ${money(refund.amount, order.currency)} за № <b>${escapeHtml(order.orderNumber)}</b> оформлено · ${escapeHtml(admin.name)}\n` +
+          `Сплачено чистими: ${money(amountPaid, order.currency)} → ${statusLabel(order.status)}`,
       };
     } catch (error) {
       return this.explain(error);
@@ -308,7 +318,7 @@ export class AdminFlowService implements OnApplicationShutdown {
   ): BotReply {
     const value = new Prisma.Decimal(amount);
     if (!value.greaterThan(0) || value.greaterThan(amountPaid)) {
-      return warn(`Повернути можна від 0,01 до ${money(amountPaid)}.`);
+      return warn(`Повернути можна від 0,01 до ${money(amountPaid, order.currency)}.`);
     }
     const after = amountPaid.minus(value);
     const status = after.isZero()
@@ -316,8 +326,8 @@ export class AdminFlowService implements OnApplicationShutdown {
       : calculateOrderStatus(order.amountDue, after, order.status);
     return {
       html: [
-        `Підтвердіть повернення <b>${money(value)}</b> за № <b>${escapeHtml(order.orderNumber)}</b>.`,
-        `Після повернення: сплачено ${money(after)} з ${money(order.amountDue)} → ${statusLabel(status)}`,
+        `Підтвердіть повернення <b>${money(value, order.currency)}</b> за № <b>${escapeHtml(order.orderNumber)}</b>.`,
+        `Після повернення: сплачено ${money(after, order.currency)} з ${money(order.amountDue, order.currency)} → ${statusLabel(status)}`,
       ].join('\n'),
       buttons: [
         [
@@ -341,15 +351,17 @@ export class AdminFlowService implements OnApplicationShutdown {
       return warn(`Замовлення № ${escapeHtml(error.orderNumber)} не знайдено.`);
     if (error instanceof OrderCancelledError)
       return warn(`Замовлення № ${escapeHtml(error.orderNumber)} уже скасоване.`);
+    if (error instanceof OrderCurrencyMismatchError)
+      return warn(`Платіж і замовлення № ${escapeHtml(error.orderNumber)} у різних валютах.`);
     if (error instanceof RefundAmountError)
       return warn(
-        `Повернути можна від 0,01 до ${money(error.available)}. Баланс змінився — відкрийте /refund ${escapeHtml(error.orderNumber)} ще раз.`,
+        `Повернути можна від 0,01 до ${money(error.available, error.currency)}. Баланс змінився — відкрийте /refund ${escapeHtml(error.orderNumber)} ще раз.`,
       );
     if (error instanceof NothingToRefundError)
       return warn(`За замовленням № ${escapeHtml(error.orderNumber)} повертати нічого.`);
     if (error instanceof OrderHasPaymentsError)
       return warn(
-        `За замовленням № ${escapeHtml(error.orderNumber)} сплачено ${money(error.paid)} — спершу оформіть повернення: /refund ${escapeHtml(error.orderNumber)}`,
+        `За замовленням № ${escapeHtml(error.orderNumber)} сплачено ${money(error.paid, error.currency)} — спершу оформіть повернення: /refund ${escapeHtml(error.orderNumber)}`,
       );
     this.logger.error('Unexpected error in an admin action', error);
     return warn('Щось пішло не так. Спробуйте ще раз.');

@@ -1,9 +1,13 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
-import { MatchType, OrderStatus, Prisma } from '../../../src/generated/prisma/client';
+import { Currency, MatchType, OrderStatus, Prisma } from '../../../src/generated/prisma/client';
 import { PrismaService } from '../../../src/common/prisma/prisma.service';
 import type { CreatePaymentDto } from '../../../src/modules/payments/dto/create-payment.dto';
-import { OrderCancelledError, OrderNotFoundError } from '../../../src/modules/orders/orders.errors';
+import {
+  OrderCancelledError,
+  OrderCurrencyMismatchError,
+  OrderNotFoundError,
+} from '../../../src/modules/orders/orders.errors';
 import { PaymentEvents } from '../../../src/modules/payments/payment-ingestion.types';
 import {
   PaymentAlreadyAttachedError,
@@ -27,6 +31,7 @@ describe('PaymentsService', () => {
     baseNumber: '0000-066717',
     clientName: 'Чернявський Владислав',
     amountDue: new Prisma.Decimal('6158.41'),
+    currency: Currency.UAH as Currency,
     status: OrderStatus.AWAITING_PAYMENT,
   };
 
@@ -111,6 +116,41 @@ describe('PaymentsService', () => {
     const result = await service.ingest({ ...dto, external_transaction_id: 'tx-2' });
 
     expect(result).toMatchObject({ kind: 'recorded', order: { status: OrderStatus.PAID } });
+  });
+
+  it('should record the currency of the payment, hryvnias by default', async () => {
+    paidSoFar('3614.32');
+
+    await service.ingest(dto);
+
+    expect(tx.payment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ currency: Currency.UAH }) as unknown,
+    });
+  });
+
+  it('should apply a dollar payment to a dollar order', async () => {
+    withParts([{ ...order, currency: Currency.USD }]);
+    paidSoFar('150');
+
+    const result = await service.ingest({ ...dto, amount: '150', currency: Currency.USD });
+
+    expect(result).toMatchObject({ kind: 'recorded', payment: { currency: Currency.USD } });
+  });
+
+  it('should leave a dollar payment for a hryvnia order unmatched instead of mixing them', async () => {
+    const result = await service.ingest({ ...dto, amount: '150', currency: Currency.USD });
+
+    expect(result).toMatchObject({
+      kind: 'unmatched',
+      payment: {
+        orderId: null,
+        currency: Currency.USD,
+        reportedOrderNumber: '№А 0000-066717',
+        matchType: MatchType.MANUAL,
+      },
+    });
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(events.emit).toHaveBeenCalledWith(PaymentEvents.Unmatched, result);
   });
 
   it('should not rewrite the order when its status stays the same', async () => {
@@ -257,7 +297,7 @@ describe('PaymentsService', () => {
     });
 
     it('should attach a manual payment through any number of the group as well', async () => {
-      tx.payment.findUnique.mockResolvedValue({ id: 15, orderId: null });
+      tx.payment.findUnique.mockResolvedValue({ id: 15, orderId: null, currency: Currency.UAH });
       tx.payment.update.mockImplementation(({ data }: { data: object }) => ({ id: 15, ...data }));
       tx.order.findUnique.mockResolvedValue({ baseNumber: '0000-000001' });
       withParts([order, second]);
@@ -279,7 +319,12 @@ describe('PaymentsService', () => {
   });
 
   describe('attach', () => {
-    const unmatched = { id: 15, orderId: null, amount: new Prisma.Decimal('2544.09') };
+    const unmatched = {
+      id: 15,
+      orderId: null,
+      amount: new Prisma.Decimal('2544.09'),
+      currency: Currency.UAH,
+    };
 
     beforeEach(() => {
       tx.payment.findUnique.mockResolvedValue(unmatched);
@@ -303,6 +348,16 @@ describe('PaymentsService', () => {
         order: { status: OrderStatus.PARTIALLY_PAID },
       });
       expect(events.emit).toHaveBeenCalledWith(PaymentEvents.Recorded, result);
+    });
+
+    it('should refuse to attach a payment to an order in another currency', async () => {
+      tx.payment.findUnique.mockResolvedValue({ ...unmatched, currency: Currency.USD });
+
+      await expect(service.attach(15, '0000-066717')).rejects.toBeInstanceOf(
+        OrderCurrencyMismatchError,
+      );
+      expect(tx.payment.update).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('should refuse a payment that is already attached', async () => {

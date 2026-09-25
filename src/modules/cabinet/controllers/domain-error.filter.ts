@@ -10,6 +10,7 @@ import { MAX_FILE_SIZE_BYTES, MAX_FILES_PER_UPLOAD } from '../../attachments/att
 import { ApiError } from '../../../common/api-error';
 import {
   OrderCancelledError,
+  OrderCurrencyMismatchError,
   OrderNotFoundError,
   OrderNumberTakenError,
 } from '../../orders/orders.errors';
@@ -19,12 +20,13 @@ import {
   OrderHasPaymentsError,
   RefundAmountError,
 } from '../../refunds/refunds.errors';
-import { formatMoney } from '../../telegram/core/format';
+import { formatMoneyIn } from '../../telegram/core/format';
 
 type DomainError =
   | OrderNotFoundError
   | OrderNumberTakenError
   | OrderCancelledError
+  | OrderCurrencyMismatchError
   | PaymentNotFoundError
   | PaymentAlreadyAttachedError
   | RefundAmountError
@@ -57,6 +59,13 @@ export function toApiError(error: DomainError): ApiError {
       `Замовлення № ${error.orderNumber} скасоване`,
     );
   }
+  if (error instanceof OrderCurrencyMismatchError) {
+    return new ApiError(
+      HttpStatus.CONFLICT,
+      'ORDER_CURRENCY_MISMATCH',
+      `Платіж і замовлення № ${error.orderNumber} у різних валютах`,
+    );
+  }
   if (error instanceof PaymentNotFoundError) {
     return new ApiError(
       HttpStatus.NOT_FOUND,
@@ -75,7 +84,7 @@ export function toApiError(error: DomainError): ApiError {
     return new ApiError(
       HttpStatus.UNPROCESSABLE_ENTITY,
       'REFUND_AMOUNT_INVALID',
-      `Повернути можна від 0,01 до ${formatMoney(error.available)} грн`,
+      `Повернути можна від 0,01 до ${formatMoneyIn(error.available, error.currency)}`,
     );
   }
   if (error instanceof NothingToRefundError) {
@@ -126,7 +135,7 @@ export function toApiError(error: DomainError): ApiError {
   return new ApiError(
     HttpStatus.CONFLICT,
     'ORDER_HAS_PAYMENTS',
-    `За замовленням № ${error.orderNumber} сплачено ${formatMoney(error.paid)} грн — спершу оформіть повернення`,
+    `За замовленням № ${error.orderNumber} сплачено ${formatMoneyIn(error.paid, error.currency)} — спершу оформіть повернення`,
   );
 }
 
@@ -134,6 +143,7 @@ export function toApiError(error: DomainError): ApiError {
   OrderNotFoundError,
   OrderNumberTakenError,
   OrderCancelledError,
+  OrderCurrencyMismatchError,
   PaymentNotFoundError,
   PaymentAlreadyAttachedError,
   RefundAmountError,

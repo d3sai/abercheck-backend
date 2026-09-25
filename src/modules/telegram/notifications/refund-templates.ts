@@ -1,5 +1,5 @@
 import type { OrderCancelled, RefundRecorded } from '../../refunds/refund.events';
-import { escapeHtml, formatMoney } from '../core/format';
+import { escapeHtml, formatMoneyIn as money } from '../core/format';
 import { statusLabel } from '../orders-list/status-labels';
 
 export function managerRefundMessage({ refund, order, amountPaid }: RefundRecorded): string {
@@ -7,9 +7,9 @@ export function managerRefundMessage({ refund, order, amountPaid }: RefundRecord
     '↩️ <b>Оформлено повернення</b>',
     `ФОП: <b>${escapeHtml(order.clientName)}</b>`,
     `Замовлення № ${escapeHtml(order.orderNumber)}`,
-    `Сума замовлення: ${formatMoney(order.amountDue)} грн`,
-    `Повернено: ${formatMoney(refund.amount)} грн`,
-    `Сплачено чистими: ${formatMoney(amountPaid)} грн`,
+    `Сума замовлення: ${money(order.amountDue, order.currency)}`,
+    `Повернено: ${money(refund.amount, order.currency)}`,
+    `Сплачено чистими: ${money(amountPaid, order.currency)}`,
     `Статус: ${statusLabel(order.status)}`,
     `Оформив(ла): ${escapeHtml(refund.initiatedByName)}`,
   ].join('\n');

@@ -29,6 +29,14 @@ describe('CreateOrderDto', () => {
     },
   );
 
+  it.each([undefined, 'UAH', 'USD'])('should accept currency %p', (currency) => {
+    expect(validate({ ...valid, currency })).toEqual([]);
+  });
+
+  it.each(['EUR', 'usd', '$'])('should reject currency %p', (currency) => {
+    expect(validate({ ...valid, currency })).toEqual(['currency']);
+  });
+
   it.each(['44.9', '44.95', '41.1234'])('should accept exchange rate %s', (exchangeRate) => {
     expect(validate({ ...valid, exchangeRate })).toEqual([]);
   });

@@ -1,4 +1,6 @@
+import { Currency } from '../../../../src/generated/prisma/client';
 import {
+  detectCurrency,
   parseExchangeRate,
   parseFreeform,
   parseMoney,
@@ -38,8 +40,37 @@ describe('order draft parsers', () => {
     ['-100', null],
     ['12,345', null],
     ['сто', null],
+    ['150 $', '150'],
+    ['$150', '150'],
+    ['1 250,50$', '1250.50'],
+    ['150 USD', '150'],
+    ['150usd', '150'],
+    ['150 дол.', '150'],
+    ['150 доларів', '150'],
+    ['$', null],
   ])('parseMoney(%p) → %p', (input, expected) => {
     expect(value(parseMoney(input))).toBe(expected);
+  });
+
+  it.each([
+    ['6 158,41 грн', Currency.UAH],
+    ['6158.41', Currency.UAH],
+    ['150 $', Currency.USD],
+    ['$150', Currency.USD],
+    ['150 usd', Currency.USD],
+    ['150 дол.', Currency.USD],
+    ['150 Доларів', Currency.USD],
+  ])('detectCurrency(%p) → %p', (input, expected) => {
+    expect(detectCurrency(input)).toBe(expected);
+  });
+
+  it('should find the amount line of a freeform message written in dollars', () => {
+    expect(parseFreeform('0000-066717\nЧернявський Владислав\n150 $\nТерміново')).toEqual({
+      orderNumber: '0000-066717',
+      clientName: 'Чернявський Владислав',
+      amountDue: '150 $',
+      comment: 'Терміново',
+    });
   });
 
   it.each([

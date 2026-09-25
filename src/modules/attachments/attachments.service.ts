@@ -7,10 +7,10 @@ import type { EnvironmentVariables } from '../../common/config/env.validation';
 import type { Order, OrderAttachment } from '../../generated/prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Initiator } from '../refunds/refund.events';
-import { escapeHtml, formatMoney } from '../telegram/core/format';
+import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
 import { AttachmentNotFoundError, AttachmentStorageError } from './attachments.errors';
 
-type CaptionOrder = Pick<Order, 'orderNumber' | 'clientName' | 'amountDue'>;
+type CaptionOrder = Pick<Order, 'orderNumber' | 'clientName' | 'amountDue' | 'currency'>;
 
 export interface TelegramFileRef {
   fileId: string;
@@ -30,7 +30,7 @@ function caption(order: CaptionOrder, uploader: Initiator): string {
   return [
     `📎 ФОП: <b>${escapeHtml(order.clientName)}</b>`,
     `Замовлення № ${escapeHtml(order.orderNumber)}`,
-    `Сума до оплати: ${formatMoney(order.amountDue)} грн`,
+    `Сума до оплати: ${formatMoneyIn(order.amountDue, order.currency)}`,
     `Додав: ${escapeHtml(uploader.name)}`,
   ].join('\n');
 }

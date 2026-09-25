@@ -1,10 +1,11 @@
-import type { OrderStatus } from '../../../generated/prisma/client';
+import type { Currency, OrderStatus } from '../../../generated/prisma/client';
 import type { OrderWithPaid } from '../orders.service';
 
 export interface UnpaidOrderResponse {
   order_number: string;
   order_numbers: string[];
   client_name: string;
+  currency: Currency;
   amount_due: string;
   amount_paid: string;
   amount_remaining: string;
@@ -21,6 +22,7 @@ export function toUnpaidOrderResponse({
     order_number: order.orderNumber,
     order_numbers: orderNumbers ?? [order.orderNumber],
     client_name: order.clientName,
+    currency: order.currency,
     amount_due: order.amountDue.toFixed(2),
     amount_paid: amountPaid.toFixed(2),
     amount_remaining: order.amountDue.minus(amountPaid).toFixed(2),

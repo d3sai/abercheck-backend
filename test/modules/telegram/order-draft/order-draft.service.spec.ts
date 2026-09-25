@@ -58,6 +58,7 @@ describe('OrderDraftService', () => {
     baseNumber: '0000-066717',
     clientName: 'Чернявський Владислав',
     amountDue: new Prisma.Decimal('6158.41'),
+    currency: 'UAH',
     exchangeRate: new Prisma.Decimal('44.9'),
     comment: 'Терміново',
     orderType: 'REGULAR',
@@ -240,6 +241,7 @@ describe('OrderDraftService', () => {
         orderNumber: '0000-066717',
         clientName: 'Чернявський Владислав',
         amountDue: new Prisma.Decimal('6158.41'),
+        currency: 'UAH',
       },
       amountPaid: new Prisma.Decimal('1000'),
     };
@@ -367,6 +369,7 @@ describe('OrderDraftService', () => {
         orderNumber: '0000-066717',
         clientName: 'Чернявський Владислав',
         amountDue: '6158.41',
+        currency: 'UAH',
         exchangeRate: '44.9',
         comment: 'Терміново',
       },
@@ -374,6 +377,39 @@ describe('OrderDraftService', () => {
     );
     expect(reply?.html).toContain('створено');
     expect(reply?.html).toContain('6 158,41');
+  });
+
+  it('should create a dollar order when the sum is written with $', async () => {
+    orders.create.mockResolvedValue(
+      createdOrder({ amountDue: new Prisma.Decimal('150'), currency: 'USD' }),
+    );
+
+    const reply = await service.handleText(MANAGER, template({ Сума: '150 $' }));
+
+    expect(orders.create).toHaveBeenCalledWith(
+      MANAGER.id,
+      expect.objectContaining({ amountDue: '150', currency: 'USD' }),
+      { notify: true, addPart: false },
+    );
+    expect(reply?.html).toContain('150 $');
+    expect(reply?.html).not.toContain('грн');
+  });
+
+  it('should not offer a part in another currency than the number already has', async () => {
+    orders.findWithBalance.mockResolvedValue({
+      order: { orderNumber: '0000-066717', clientName: 'Чернявський Владислав', currency: 'UAH' },
+      amountPaid: new Prisma.Decimal('0'),
+    });
+
+    const reply = await service.handleText(MANAGER, template({ Сума: '$150' }));
+
+    expect(reply?.html).toContain('в іншій валюті');
+    expect(reply?.buttons).toBeUndefined();
+    expect(orders.create).not.toHaveBeenCalled();
+  });
+
+  it('should tell how to write a sum in dollars in the /new hint', () => {
+    expect(service.hint().html).toContain('150 $');
   });
 
   it('should require the order number in the labelled template', async () => {
@@ -399,6 +435,7 @@ describe('OrderDraftService', () => {
           orderNumber: '0000-066717',
           clientName: 'Чернявський Владислав',
           amountDue: '6158.41',
+          currency: 'UAH',
           exchangeRate: '44.9',
           comment: 'Терміново',
         },
@@ -778,6 +815,7 @@ UA549358710000067320000088286"`;
           orderNumber: '0000-066092',
           clientName: 'Носенко Роман',
           amountDue: '4527.00',
+          currency: 'UAH',
           exchangeRate: '44.9',
           comment: 'Терміново',
         },
@@ -1057,6 +1095,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
           orderNumber: '0000-066717',
           clientName: 'Чернявський Владислав',
           amountDue: new Prisma.Decimal('6158.41'),
+          currency: 'UAH',
         },
         amountPaid: new Prisma.Decimal('0'),
       });
@@ -1073,6 +1112,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
           orderNumber: '0000-066717',
           clientName: 'Чернявський Владислав',
           amountDue: new Prisma.Decimal('6158.41'),
+          currency: 'UAH',
         },
         amountPaid: new Prisma.Decimal('0'),
       });

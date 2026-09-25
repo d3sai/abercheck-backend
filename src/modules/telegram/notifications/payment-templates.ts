@@ -1,4 +1,5 @@
 import {
+  Currency,
   type Manager,
   type Order,
   OrderStatus,
@@ -10,7 +11,7 @@ import {
   formatKyivDate,
   formatKyivDateTime,
   formatMoney,
-  formatMoneyGrn as money,
+  formatMoneyIn as money,
 } from '../core/format';
 
 export interface PaymentNotice {
@@ -27,12 +28,16 @@ function orderHeader(order: Order): string[] {
   return [
     `ФОП: <b>${escapeHtml(order.clientName)}</b>`,
     `Замовлення № ${escapeHtml(order.orderNumber)}`,
-    `Сума замовлення: ${money(order.amountDue)}`,
+    `Сума замовлення: ${money(order.amountDue, order.currency)}`,
   ];
 }
 
 function paymentLine(payment: Payment): string {
-  return `${recipient(payment)} - ${formatMoney(payment.amount)} ${formatKyivDateTime(payment.paidAt)}`;
+  const amount =
+    payment.currency === Currency.USD
+      ? money(payment.amount, payment.currency)
+      : formatMoney(payment.amount);
+  return `${recipient(payment)} - ${amount} ${formatKyivDateTime(payment.paidAt)}`;
 }
 
 function paidInFull({ order, payments }: PaymentNotice): string {
@@ -42,7 +47,7 @@ function paidInFull({ order, payments }: PaymentNotice): string {
     '',
     ...payments.map(paymentLine),
     '',
-    'Залишок: 0 грн',
+    `Залишок: ${money(new Prisma.Decimal(0), order.currency)}`,
     'Статус: ОПЛАЧЕНО ✅',
   ].join('\n');
 }
@@ -51,9 +56,9 @@ function partial({ order, payment, payments, amountPaid }: PaymentNotice): strin
   return [
     '🔵 <b>Отримано часткову оплату</b>',
     ...orderHeader(order),
-    `Отримано: ${money(payment.amount)} на ${recipient(payment)}`,
-    ...(payments.length > 1 ? [`Сплачено всього: ${money(amountPaid)}`] : []),
-    `Залишок: ${money(order.amountDue.minus(amountPaid))}`,
+    `Отримано: ${money(payment.amount, order.currency)} на ${recipient(payment)}`,
+    ...(payments.length > 1 ? [`Сплачено всього: ${money(amountPaid, order.currency)}`] : []),
+    `Залишок: ${money(order.amountDue.minus(amountPaid), order.currency)}`,
     'Статус: ЧАСТКОВА ОПЛАТА',
   ].join('\n');
 }
@@ -62,8 +67,8 @@ function overpaid({ order, amountPaid }: PaymentNotice): string {
   return [
     '🟠 <b>Виявлено переплату</b>',
     ...orderHeader(order),
-    `Отримано: ${money(amountPaid)}`,
-    `Переплата: ${money(amountPaid.minus(order.amountDue))} ⚠️ Потрібна перевірка.`,
+    `Отримано: ${money(amountPaid, order.currency)}`,
+    `Переплата: ${money(amountPaid.minus(order.amountDue), order.currency)} ⚠️ Потрібна перевірка.`,
   ].join('\n');
 }
 
@@ -71,7 +76,7 @@ function paidAfterCancel({ order, payment }: PaymentNotice): string {
   return [
     '❌ <b>Платіж за скасованим замовленням</b>',
     ...orderHeader(order),
-    `Отримано: ${money(payment.amount)} на ${recipient(payment)}`,
+    `Отримано: ${money(payment.amount, order.currency)} на ${recipient(payment)}`,
     '⚠️ Потрібна перевірка.',
   ].join('\n');
 }
@@ -100,7 +105,7 @@ export function adminPaymentMessage(notice: PaymentNotice, manager: Manager): st
 export function unknownPaymentMessage(payment: Payment): string {
   return [
     '⚠️ <b>Невідомий платіж</b>',
-    `Сума: ${money(payment.amount)}`,
+    `Сума: ${money(payment.amount, payment.currency)}`,
     `Платник: ${escapeHtml(payment.payerName ?? '—')}`,
     `Отримувач: ${recipient(payment)}`,
     `Дата: ${formatKyivDate(payment.paidAt)}`,

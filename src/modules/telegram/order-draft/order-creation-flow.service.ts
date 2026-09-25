@@ -12,10 +12,11 @@ import {
 } from '../../orders/orders.service';
 import type { BotReply } from '../core/bot-reply';
 import { button } from '../core/bot-reply';
-import { escapeHtml, formatMoney } from '../core/format';
+import { escapeHtml, formatMoneyIn } from '../core/format';
 import { adminOrderCreatedMessage } from '../notifications/order-templates';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
 import {
+  detectCurrency,
   parseExchangeRate,
   parseFreeform,
   parseMoney,
@@ -80,6 +81,7 @@ export class OrderCreationFlowService {
         `${fields} (* — обов'язкове).`,
         '',
         `<pre>${example}</pre>`,
+        'Суму в доларах пишіть зі знаком $: <code>150 $</code>.',
         '',
         `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
       ].join('\n'),
@@ -123,7 +125,13 @@ export class OrderCreationFlowService {
       };
     }
 
+    data.currency = detectCurrency(raw.amountDue ?? '');
     const existing = data.orderNumber ? await this.orders.findWithBalance(data.orderNumber) : null;
+    if (existing && existing.order.currency !== data.currency) {
+      return {
+        html: `⚠️ Номер № ${escapeHtml(existing.order.orderNumber)} вже є в системі в іншій валюті — частину в іншій валюті додати не можна.`,
+      };
+    }
     return existing
       ? this.offerPart(manager, data, existing)
       : this.createOrder(manager, data, false);
@@ -179,7 +187,7 @@ export class OrderCreationFlowService {
     return {
       html: [
         `⚠️ Номер № <b>${escapeHtml(order.orderNumber)}</b> вже є в системі.`,
-        `${escapeHtml(order.clientName)} · ${formatMoney(order.amountDue)} грн · сплачено ${formatMoney(amountPaid)} грн`,
+        `${escapeHtml(order.clientName)} · ${formatMoneyIn(order.amountDue, order.currency)} · сплачено ${formatMoneyIn(amountPaid, order.currency)}`,
         '',
         'Додати це замовлення ще однією частиною цього номера? Оплата за номером покриє всі частини.',
       ].join('\n'),
@@ -198,7 +206,7 @@ export class OrderCreationFlowService {
     return {
       html: [
         `${label} № <b>${escapeHtml(order.orderNumber)}</b> створено — повідомлю про оплату.`,
-        `${escapeHtml(order.clientName)} · ${formatMoney(order.amountDue)} грн`,
+        `${escapeHtml(order.clientName)} · ${formatMoneyIn(order.amountDue, order.currency)}`,
       ].join('\n'),
     };
   }

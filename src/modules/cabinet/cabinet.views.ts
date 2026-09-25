@@ -1,5 +1,6 @@
 import { toMeResponse, type MeResponse } from '../auth/dto/session.response';
 import type {
+  Currency,
   Manager,
   ManagerStatus,
   MatchType,
@@ -34,6 +35,7 @@ export interface OrderSummaryView {
   id: number;
   orderNumber: string;
   clientName: string;
+  currency: Currency;
   amountDue: string;
   amountPaid: string;
   amountRemaining: string;
@@ -47,6 +49,7 @@ export interface PaymentView {
   id: number;
   externalTransactionId: string;
   amount: string;
+  currency: Currency;
   payerName: string | null;
   receivingAccount: string | null;
   purposeText: string | null;
@@ -146,6 +149,7 @@ export interface ActivityView {
   at: string;
   orderNumber: string | null;
   amount: string;
+  currency: Currency;
   status: OrderStatus | null;
   who: string | null;
 }
@@ -158,6 +162,7 @@ export function toOrderSummary({
     id: order.id,
     orderNumber: order.orderNumber,
     clientName: order.clientName,
+    currency: order.currency,
     amountDue: money(order.amountDue),
     amountPaid: money(amountPaid),
     amountRemaining: money(order.amountDue.minus(amountPaid)),
@@ -173,6 +178,7 @@ export function toPaymentView(payment: Payment): PaymentView {
     id: payment.id,
     externalTransactionId: payment.externalTransactionId,
     amount: money(payment.amount),
+    currency: payment.currency,
     payerName: payment.payerName,
     receivingAccount: payment.receivingAccount,
     purposeText: payment.purposeText,
@@ -293,6 +299,7 @@ export function toActivityView(activity: Activity): ActivityView {
     at: activity.at.toISOString(),
     orderNumber: activity.orderNumber,
     amount: money(activity.amount),
+    currency: activity.currency,
     status: activity.status,
     who: activity.who,
   };

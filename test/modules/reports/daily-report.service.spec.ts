@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { OrderStatus, Prisma } from '../../../src/generated/prisma/client';
+import { Currency, OrderStatus, Prisma } from '../../../src/generated/prisma/client';
 import { OrdersService } from '../../../src/modules/orders/orders.service';
 import { PrismaService } from '../../../src/common/prisma/prisma.service';
 import { DailyReportService } from '../../../src/modules/reports/daily-report.service';
@@ -9,7 +9,7 @@ const d = (value: string) => new Prisma.Decimal(value);
 describe('DailyReportService', () => {
   const prisma = {
     payment: { findMany: jest.fn() },
-    refund: { aggregate: jest.fn() },
+    refund: { findMany: jest.fn() },
     $queryRaw: jest.fn(),
   };
   const orders = { findGroupsByOrderIds: jest.fn() };
@@ -32,8 +32,9 @@ describe('DailyReportService', () => {
   afterEach(() => jest.resetAllMocks());
 
   it('should count the day payments by the current status of their orders', async () => {
-    const paid = (amount: string, status: OrderStatus | null) => ({
+    const paid = (amount: string, status: OrderStatus | null, currency = Currency.UAH) => ({
       amount: d(amount),
+      currency,
       order: status ? { status } : null,
     });
     prisma.payment.findMany.mockResolvedValue([
@@ -43,13 +44,15 @@ describe('DailyReportService', () => {
       paid('50', OrderStatus.OVERPAID),
       paid('2500', null),
     ]);
-    prisma.refund.aggregate.mockResolvedValue({ _count: 1, _sum: { amount: d('50') } });
+    prisma.refund.findMany.mockResolvedValue([
+      { amount: d('50'), order: { currency: Currency.UAH } },
+    ]);
 
     const report = await service.build(dayStart);
 
     expect(prisma.payment.findMany).toHaveBeenCalledWith({
       where: { paidAt: { gte: dayStart, lt: new Date('2026-09-03T21:00:00Z') } },
-      select: { amount: true, order: { select: { status: true } } },
+      select: { amount: true, currency: true, order: { select: { status: true } } },
     });
     expect(report.paymentsCount).toBe(5);
     expect(report.totalAmount.toFixed(2)).toBe('9708.41');
@@ -62,9 +65,36 @@ describe('DailyReportService', () => {
     expect(report.refundsCount).toBe(1);
   });
 
+  it('should keep dollars out of the hryvnia totals and report them on their own', async () => {
+    const paid = (amount: string, currency: Currency) => ({
+      amount: d(amount),
+      currency,
+      order: { status: OrderStatus.PAID },
+    });
+    prisma.payment.findMany.mockResolvedValue([
+      paid('1000', Currency.UAH),
+      paid('150', Currency.USD),
+      paid('50.50', Currency.USD),
+    ]);
+    prisma.refund.findMany.mockResolvedValue([
+      { amount: d('20'), order: { currency: Currency.UAH } },
+      { amount: d('5'), order: { currency: Currency.USD } },
+    ]);
+
+    const report = await service.build(dayStart);
+
+    expect(report.paymentsCount).toBe(3);
+    expect(report.totalAmount.toFixed(2)).toBe('1000.00');
+    expect(report.refundsCount).toBe(1);
+    expect(report.refundsAmount.toFixed(2)).toBe('20.00');
+    expect(report.usd.paymentsAmount.toFixed(2)).toBe('200.50');
+    expect(report.usd.refundsCount).toBe(1);
+    expect(report.usd.refundsAmount.toFixed(2)).toBe('5.00');
+  });
+
   it('should report an empty day', async () => {
     prisma.payment.findMany.mockResolvedValue([]);
-    prisma.refund.aggregate.mockResolvedValue({ _count: 0, _sum: { amount: null } });
+    prisma.refund.findMany.mockResolvedValue([]);
 
     const report = await service.build(dayStart);
 

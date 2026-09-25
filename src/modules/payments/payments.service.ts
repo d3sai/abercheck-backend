@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { MatchType, type Order, type Payment, Prisma } from '../../generated/prisma/client';
+import {
+  Currency,
+  MatchType,
+  type Order,
+  type Payment,
+  Prisma,
+} from '../../generated/prisma/client';
 import { liveParts, pickAnchor, rollUp } from '../orders/order-group';
 import {
   groupNetPaid,
@@ -9,7 +15,11 @@ import {
   syncGroupStatus,
 } from '../orders/order-ledger';
 import { normalizeBaseNumber } from '../orders/order-number';
-import { OrderCancelledError, OrderNotFoundError } from '../orders/orders.errors';
+import {
+  OrderCancelledError,
+  OrderCurrencyMismatchError,
+  OrderNotFoundError,
+} from '../orders/orders.errors';
 import { isUniqueViolation } from '../../common/prisma/prisma-errors';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { CreatePaymentDto } from './dto/create-payment.dto';
@@ -77,6 +87,9 @@ export class PaymentsService {
       if (liveParts(parts).length === 0) {
         throw new OrderCancelledError(number);
       }
+      if (pickAnchor(parts).currency !== payment.currency) {
+        throw new OrderCurrencyMismatchError(number);
+      }
 
       const attached = await tx.payment.update({
         where: { id: paymentId },
@@ -143,12 +156,16 @@ export class PaymentsService {
     const parts = reportedOrderNumber
       ? await lockGroup(tx, await resolveBaseNumber(tx, reportedOrderNumber))
       : [];
-    const anchor = parts.length > 0 ? pickAnchor(parts) : null;
+    const currency = dto.currency ?? Currency.UAH;
+    // A payment in another currency than the order is never applied to it — an admin sorts it out.
+    const found = parts.length > 0 ? pickAnchor(parts) : null;
+    const anchor = found?.currency === currency ? found : null;
 
     const payment = await tx.payment.create({
       data: {
         externalTransactionId: dto.external_transaction_id,
         amount: dto.amount,
+        currency,
         payerName: dto.payer_name,
         receivingAccount: dto.receiving_account,
         purposeText: dto.purpose_text,

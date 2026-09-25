@@ -1,4 +1,5 @@
 import {
+  Currency,
   type Manager,
   type Order,
   OrderType,
@@ -14,6 +15,7 @@ const order = (overrides: Partial<Order> = {}): Order => ({
   baseNumber: '0000-067968',
   clientName: 'ФОП Берчатова Лариса',
   amountDue: d('170.10'),
+  currency: Currency.UAH,
   exchangeRate: null,
   comment: null,
   requisites: null,
@@ -65,6 +67,16 @@ describe('adminOrderCreatedMessage', () => {
         'Створено: 12:57 12.09.2026',
       ].join('\n'),
     );
+  });
+
+  it('should show the amount of a dollar order in dollars', () => {
+    const message = adminOrderCreatedMessage(
+      order({ amountDue: d('150'), currency: Currency.USD }),
+      manager,
+    );
+
+    expect(message).toContain('Сума: 150 $\n');
+    expect(message).not.toContain('грн');
   });
 
   it('should add the rate without trailing zeros', () => {

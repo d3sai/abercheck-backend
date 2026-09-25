@@ -1,4 +1,5 @@
 import {
+  Currency,
   OrderType,
   Prisma,
   type Order,
@@ -46,6 +47,7 @@ const order = (overrides: Partial<Order> = {}): Order => ({
   baseNumber: '0000-066092',
   clientName: 'Носенко Роман',
   amountDue: d('6667.00'),
+  currency: Currency.UAH,
   exchangeRate: null,
   comment: null,
   requisites: null,

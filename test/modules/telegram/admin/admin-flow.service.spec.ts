@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { OrderStatus, Prisma } from '../../../../src/generated/prisma/client';
+import { Currency, OrderStatus, Prisma } from '../../../../src/generated/prisma/client';
 import { OrderCancelledError } from '../../../../src/modules/orders/orders.errors';
 import { OrdersService } from '../../../../src/modules/orders/orders.service';
 import { PaymentAlreadyAttachedError } from '../../../../src/modules/payments/payments.errors';
@@ -29,6 +29,7 @@ describe('AdminFlowService', () => {
       baseNumber: '0000-066717',
       clientName: 'Петренко',
       amountDue: d('6158.41'),
+      currency: Currency.UAH as Currency,
       status,
       manager: { name: 'Христина' },
     },
@@ -38,6 +39,7 @@ describe('AdminFlowService', () => {
     id: 15,
     orderId: null,
     amount: d('2544.09'),
+    currency: Currency.UAH as Currency,
     payerName: 'Сидоренко Олена',
   };
 
@@ -121,6 +123,36 @@ describe('AdminFlowService', () => {
 
       expect(reply?.html).toContain('Запит застарів');
       now.mockRestore();
+    });
+
+    it('should refuse to attach a payment to an order in another currency', async () => {
+      payments.findById.mockResolvedValue({ ...unknownPayment, currency: Currency.USD });
+      orders.findWithBalance.mockResolvedValue(order(OrderStatus.PARTIALLY_PAID, '3614.32'));
+
+      const preview = await flow.attachPreview(15, '0000-066717');
+
+      expect(preview.html).toContain('у різних валютах');
+      expect(preview.buttons).toBeUndefined();
+    });
+
+    it('should show a dollar payment and a dollar order in dollars', async () => {
+      payments.findById.mockResolvedValue({
+        ...unknownPayment,
+        amount: d('150'),
+        currency: Currency.USD,
+      });
+      const usdOrder = order(OrderStatus.AWAITING_PAYMENT, '0');
+      orders.findWithBalance.mockResolvedValue({
+        ...usdOrder,
+        order: { ...usdOrder.order, amountDue: d('150'), currency: Currency.USD },
+      });
+
+      const preview = await flow.attachPreview(15, '0000-066717');
+
+      expect(preview.html).toContain('#15 · 150 $');
+      expect(preview.html).toContain('Сума замовлення: 150 $ · сплачено 0 $');
+      expect(preview.html).toContain('сплачено 150 $ → 🟢 Оплачено');
+      expect(preview.html).not.toContain('грн');
     });
 
     it('should refuse to preview an attach to a cancelled order', async () => {
@@ -248,7 +280,9 @@ describe('AdminFlowService', () => {
     });
 
     it('should report a stale amount when the balance changed before confirmation', async () => {
-      refunds.refund.mockRejectedValue(new RefundAmountError('0000-066717', d('100')));
+      refunds.refund.mockRejectedValue(
+        new RefundAmountError('0000-066717', d('100'), Currency.UAH),
+      );
 
       const result = await flow.refund(3, '6208.41', admin);
 

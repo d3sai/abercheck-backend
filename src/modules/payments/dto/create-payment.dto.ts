@@ -1,7 +1,16 @@
 import { Transform } from 'class-transformer';
-import { IsISO8601, IsNotEmpty, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import {
+  IsEnum,
+  IsISO8601,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { MONEY_PATTERN } from '../../../common/money';
 import { Trim } from '../../../common/trim.decorator';
+import { Currency } from '../../../generated/prisma/client';
 
 const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:\d{2})$/;
 
@@ -25,6 +34,11 @@ export class CreatePaymentDto {
   )
   @Matches(MONEY_PATTERN, { message: 'amount must be a positive amount with up to 2 decimals' })
   amount!: string;
+
+  // Absent means hryvnias, so senders that predate the field keep working.
+  @IsOptional()
+  @IsEnum(Currency)
+  currency?: Currency;
 
   @Trim()
   @IsString()

@@ -35,7 +35,7 @@ export class RefundsService {
 
       const value = amount === null ? paid : new Prisma.Decimal(amount);
       if (!value.greaterThan(0) || value.greaterThan(paid)) {
-        throw new RefundAmountError(order.baseNumber, paid);
+        throw new RefundAmountError(order.baseNumber, paid, order.currency);
       }
 
       const remaining = paid.minus(value);
@@ -82,7 +82,7 @@ export class RefundsService {
       const parts = await lockGroup(tx, order.baseNumber);
       const paid = await groupNetPaid(tx, order.baseNumber);
       if (!paid.isZero()) {
-        throw new OrderHasPaymentsError(order.baseNumber, paid);
+        throw new OrderHasPaymentsError(order.baseNumber, paid, order.currency);
       }
 
       const targets = options?.wholeNumber ? liveParts(parts) : [order];

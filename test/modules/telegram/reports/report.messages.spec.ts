@@ -26,6 +26,7 @@ const report = (overrides: Partial<DailyReport> = {}): DailyReport => ({
   },
   refundsCount: 0,
   refundsAmount: d('0'),
+  usd: { paymentsAmount: d('0'), refundsCount: 0, refundsAmount: d('0') },
   ...overrides,
 });
 
@@ -78,5 +79,19 @@ describe('dailyReportMessage', () => {
 describe('underpaidMessage', () => {
   it('should show what is still owed', () => {
     expect(underpaidMessage(underpaidOrder)).toContain('Сплачено: 6 157 грн\nЗалишок: 1,41 грн');
+  });
+
+  it('should show dollars on their own lines, and only when there are any', () => {
+    expect(dailyReportMessage(report())).not.toContain('$');
+
+    const message = dailyReportMessage(
+      report({
+        usd: { paymentsAmount: d('200.5'), refundsCount: 1, refundsAmount: d('5') },
+      }),
+    );
+
+    expect(message).toContain('💰 Загальна сума надходжень: 486 350 грн');
+    expect(message).toContain('💵 Надходження в доларах: 200,50 $');
+    expect(message).toContain('↩️ Повернення в доларах: 1 на 5 $');
   });
 });

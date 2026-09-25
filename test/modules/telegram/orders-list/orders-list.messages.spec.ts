@@ -1,4 +1,4 @@
-import { OrderStatus, Prisma } from '../../../../src/generated/prisma/client';
+import { Currency, OrderStatus, Prisma } from '../../../../src/generated/prisma/client';
 import type {
   OrderWithManager,
   OrderWithPaid,
@@ -31,6 +31,19 @@ describe('orderList', () => {
     item('0000-066717', OrderStatus.PARTIALLY_PAID, '6158.41', '3614.32'),
     item('0000-066718', OrderStatus.OVERPAID, '1000', '1050'),
   ];
+
+  it('should show a dollar order in dollars', () => {
+    const usd = item('0000-066719', OrderStatus.PARTIALLY_PAID, '150', '100');
+    const { html } = orderList({
+      title: 'Мої відкриті замовлення',
+      items: [{ ...usd, order: { ...usd.order, currency: Currency.USD } }],
+      total: 1,
+      withManager: false,
+    });
+
+    expect(html).toContain('150 $ · сплачено 100 · залишок 50');
+    expect(html).not.toContain('грн');
+  });
 
   it('should show each order with its balance like the admin cabinet', () => {
     const { html, buttons } = orderList({

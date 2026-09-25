@@ -1,4 +1,5 @@
 import { MONEY_PATTERN } from '../../../common/money';
+import { Currency } from '../../../generated/prisma/client';
 import { EXCHANGE_RATE_PATTERN } from '../../orders/dto/create-order.dto';
 import { normalizeOrderNumber } from '../../orders/order-number';
 
@@ -26,8 +27,15 @@ function parseDecimal(input: string, suffix: RegExp): string | null {
   return compact.replace(',', '.');
 }
 
+const USD_MARK = /\$|usd|дол(?:ар\p{L}*)?\.?/iu;
+
+// "150 $", "$150", "150 usd", "150 дол." — anything without a dollar mark is hryvnias.
+export function detectCurrency(input: string): Currency {
+  return USD_MARK.test(input) ? Currency.USD : Currency.UAH;
+}
+
 export function parseMoney(input: string): ParseResult {
-  const value = parseDecimal(input, /грн\.?/gi);
+  const value = parseDecimal(input, new RegExp(`грн\\.?|${USD_MARK.source}`, 'giu'));
   return value !== null && MONEY_PATTERN.test(value)
     ? ok(value)
     : fail('Вкажіть суму числом, до копійок: 6 158,41');

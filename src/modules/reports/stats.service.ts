@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { kyivDate, nextKyivDayStart } from '../../common/kyiv-time';
-import { OrderStatus, Prisma } from '../../generated/prisma/client';
+import { Currency, OrderStatus, Prisma } from '../../generated/prisma/client';
 import { UNPAID_STATUSES } from '../orders/order-status';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { ReportBucket } from './daily-report.service';
@@ -49,14 +49,15 @@ export class StatsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async snapshot(managerId?: number): Promise<Snapshot> {
-    const unpaid = { status: { in: UNPAID_STATUSES }, managerId };
+    // Money totals are hryvnias only: dollars are a separate currency and never added to them.
+    const unpaid = { status: { in: UNPAID_STATUSES }, managerId, currency: Currency.UAH };
     const [groups, due, paid, refunded, unmatched] = await Promise.all([
       this.prisma.order.groupBy({ by: ['status'], where: { managerId }, _count: { _all: true } }),
       this.prisma.order.aggregate({ where: unpaid, _count: true, _sum: { amountDue: true } }),
       this.prisma.payment.aggregate({ where: { order: unpaid }, _sum: { amount: true } }),
       this.prisma.refund.aggregate({ where: { order: unpaid }, _sum: { amount: true } }),
       this.prisma.payment.aggregate({
-        where: { orderId: null },
+        where: { orderId: null, currency: Currency.UAH },
         _count: true,
         _sum: { amount: true },
       }),
@@ -82,7 +83,7 @@ export class StatsService {
     const ofManager = managerId === undefined ? {} : { order: { managerId } };
     const [payments, refunds, created] = await Promise.all([
       this.prisma.payment.findMany({
-        where: { paidAt: window, ...ofManager },
+        where: { paidAt: window, currency: Currency.UAH, ...ofManager },
         select: {
           amount: true,
           paidAt: true,
@@ -90,12 +91,12 @@ export class StatsService {
         },
       }),
       this.prisma.refund.aggregate({
-        where: { createdAt: window, ...ofManager },
+        where: { createdAt: window, order: { managerId, currency: Currency.UAH } },
         _count: true,
         _sum: { amount: true },
       }),
       this.prisma.order.aggregate({
-        where: { createdAt: window, managerId },
+        where: { createdAt: window, managerId, currency: Currency.UAH },
         _count: true,
         _sum: { amountDue: true },
       }),

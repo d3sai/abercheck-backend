@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { nextKyivDayStart } from '../../common/kyiv-time';
-import { OrderStatus, Prisma } from '../../generated/prisma/client';
+import { Currency, OrderStatus, Prisma } from '../../generated/prisma/client';
 import { type OrderWithManager, type OrderWithPaid, OrdersService } from '../orders/orders.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
@@ -13,6 +13,8 @@ export interface DailyReport {
   byBucket: Record<ReportBucket, number>;
   refundsCount: number;
   refundsAmount: Prisma.Decimal;
+  // The dollar side of the same figures; the fields above are hryvnias only.
+  usd: { paymentsAmount: Prisma.Decimal; refundsCount: number; refundsAmount: Prisma.Decimal };
 }
 
 const emptyBuckets = (): Record<ReportBucket, number> => ({
@@ -37,20 +39,36 @@ export class DailyReportService {
     const [payments, refunds] = await Promise.all([
       this.prisma.payment.findMany({
         where: { paidAt: window },
-        select: { amount: true, order: { select: { status: true } } },
+        select: { amount: true, currency: true, order: { select: { status: true } } },
       }),
-      this.prisma.refund.aggregate({
+      this.prisma.refund.findMany({
         where: { createdAt: window },
-        _sum: { amount: true },
-        _count: true,
+        select: { amount: true, order: { select: { currency: true } } },
       }),
     ]);
 
+    const zero = new Prisma.Decimal(0);
+    const usd = { paymentsAmount: zero, refundsCount: 0, refundsAmount: zero };
     const byBucket = emptyBuckets();
-    let totalAmount = new Prisma.Decimal(0);
+    let totalAmount = zero;
     for (const payment of payments) {
       byBucket[payment.order?.status ?? 'UNMATCHED'] += 1;
-      totalAmount = totalAmount.plus(payment.amount);
+      if (payment.currency === Currency.USD) {
+        usd.paymentsAmount = usd.paymentsAmount.plus(payment.amount);
+      } else {
+        totalAmount = totalAmount.plus(payment.amount);
+      }
+    }
+    let refundsCount = 0;
+    let refundsAmount = zero;
+    for (const refund of refunds) {
+      if (refund.order.currency === Currency.USD) {
+        usd.refundsCount += 1;
+        usd.refundsAmount = usd.refundsAmount.plus(refund.amount);
+      } else {
+        refundsCount += 1;
+        refundsAmount = refundsAmount.plus(refund.amount);
+      }
     }
 
     return {
@@ -58,8 +76,9 @@ export class DailyReportService {
       paymentsCount: payments.length,
       totalAmount,
       byBucket,
-      refundsCount: refunds._count,
-      refundsAmount: refunds._sum.amount ?? new Prisma.Decimal(0),
+      refundsCount,
+      refundsAmount,
+      usd,
     };
   }
 

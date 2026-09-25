@@ -343,6 +343,7 @@ describe('BotUpdate', () => {
         baseNumber: '0000-066717',
         clientName: 'Чернявський Владислав',
         amountDue: new Prisma.Decimal('6158.41'),
+        currency: 'UAH',
       },
       amountPaid: new Prisma.Decimal('0'),
     };

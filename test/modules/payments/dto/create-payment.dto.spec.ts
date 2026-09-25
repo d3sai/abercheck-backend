@@ -28,6 +28,14 @@ describe('CreatePaymentDto', () => {
     expect(dto.order_number ?? null).toBeNull();
   });
 
+  it.each([undefined, null, 'UAH', 'USD'])('should accept currency %p', (currency) => {
+    expect(invalidFields({ ...valid, currency })).toEqual([]);
+  });
+
+  it.each(['EUR', 'usd', '$', 1])('should reject currency %p', (currency) => {
+    expect(invalidFields({ ...valid, currency })).toEqual(['currency']);
+  });
+
   it('should accept a numeric amount and keep it as a string', () => {
     const dto = toDto({ ...valid, amount: 3614.32 });
 

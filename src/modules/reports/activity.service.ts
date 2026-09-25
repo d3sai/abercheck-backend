@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { OrderStatus, Prisma } from '../../generated/prisma/client';
+import type { Currency, OrderStatus, Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 export type ActivityKind = 'ORDER_CREATED' | 'PAYMENT' | 'UNMATCHED_PAYMENT' | 'REFUND';
@@ -9,12 +9,13 @@ export interface Activity {
   at: Date;
   orderNumber: string | null;
   amount: Prisma.Decimal;
+  currency: Currency;
   status: OrderStatus | null;
   who: string | null;
 }
 
 const newestFirst = [{ createdAt: 'desc' as const }, { id: 'desc' as const }];
-const orderRef = { select: { orderNumber: true, status: true } };
+const orderRef = { select: { orderNumber: true, status: true, currency: true } };
 
 @Injectable()
 export class ActivityService {
@@ -44,6 +45,7 @@ export class ActivityService {
         at: order.createdAt,
         orderNumber: order.orderNumber,
         amount: order.amountDue,
+        currency: order.currency,
         status: order.status,
         who: order.clientName,
       })),
@@ -52,6 +54,7 @@ export class ActivityService {
         at: payment.createdAt,
         orderNumber: payment.order?.orderNumber ?? null,
         amount: payment.amount,
+        currency: payment.currency,
         status: payment.order?.status ?? null,
         who: payment.payerName,
       })),
@@ -60,6 +63,7 @@ export class ActivityService {
         at: refund.createdAt,
         orderNumber: refund.order.orderNumber,
         amount: refund.amount,
+        currency: refund.order.currency,
         status: refund.order.status,
         who: refund.initiatedByName,
       })),

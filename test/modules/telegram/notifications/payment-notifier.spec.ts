@@ -1,5 +1,11 @@
 import { Test } from '@nestjs/testing';
-import { MatchType, OrderStatus, OrderType, Prisma } from '../../../../src/generated/prisma/client';
+import {
+  Currency,
+  MatchType,
+  OrderStatus,
+  OrderType,
+  Prisma,
+} from '../../../../src/generated/prisma/client';
 import type { PaymentRecorded } from '../../../../src/modules/payments/payment-ingestion.types';
 import { PrismaService } from '../../../../src/common/prisma/prisma.service';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
@@ -17,6 +23,7 @@ describe('PaymentNotifier', () => {
     id: 5,
     externalTransactionId: 'tx-5',
     amount: new Prisma.Decimal('3614.32'),
+    currency: Currency.UAH,
     payerName: 'Платник',
     receivingAccount: 'ФОП Гук В.С',
     purposeText: '',
@@ -37,6 +44,7 @@ describe('PaymentNotifier', () => {
       baseNumber: '0000-066717',
       clientName: 'Клієнт',
       amountDue: new Prisma.Decimal('3000'),
+      currency: Currency.UAH,
       exchangeRate: null,
       comment: null,
       requisites: null,

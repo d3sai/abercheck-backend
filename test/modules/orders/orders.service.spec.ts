@@ -1,10 +1,11 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
-import { OrderStatus, Prisma } from '../../../src/generated/prisma/client';
+import { Currency, OrderStatus, Prisma } from '../../../src/generated/prisma/client';
 import { PrismaService } from '../../../src/common/prisma/prisma.service';
 import type { CreateOrderDto } from '../../../src/modules/orders/dto/create-order.dto';
 import { OrderEvents } from '../../../src/modules/orders/order.events';
 import {
+  OrderCurrencyMismatchError,
   OrderNotFoundError,
   OrderNumberTakenError,
 } from '../../../src/modules/orders/orders.errors';
@@ -27,6 +28,7 @@ const part = (
   baseNumber,
   clientName: `ФОП ${id}`,
   amountDue: d(amountDue),
+  currency: Currency.UAH,
   status,
   manager: { id: 7, name: 'Олена' },
 });
@@ -109,6 +111,14 @@ describe('OrdersService', () => {
       });
     });
 
+    it('should store the currency of the order', async () => {
+      await service.create(7, { ...dto, currency: Currency.USD });
+
+      expect(tx.order.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ currency: Currency.USD }) as unknown,
+      });
+    });
+
     it('should emit an event once the order is created', async () => {
       await service.create(7, dto);
 
@@ -171,6 +181,19 @@ describe('OrdersService', () => {
         );
         expect(tx.order.create).not.toHaveBeenCalled();
         expect(events.emit).not.toHaveBeenCalled();
+      });
+
+      it('should refuse a part in another currency than the number already has', async () => {
+        tx.order.findMany.mockResolvedValue(existing);
+
+        await expect(
+          service.create(
+            7,
+            { ...dto, orderNumber: '0000-066717', currency: Currency.USD },
+            { addPart: true },
+          ),
+        ).rejects.toBeInstanceOf(OrderCurrencyMismatchError);
+        expect(tx.order.create).not.toHaveBeenCalled();
       });
 
       it('should add the next part with a (n) suffix when asked to', async () => {

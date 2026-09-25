@@ -1,4 +1,5 @@
 import {
+  Currency,
   type Manager,
   MatchType,
   type Order,
@@ -23,6 +24,7 @@ const order = (status: OrderStatus): Order => ({
   baseNumber: '0000-066717',
   clientName: 'Чернявський Владислав',
   amountDue: d('6158.41'),
+  currency: Currency.UAH,
   exchangeRate: d('44.9'),
   comment: null,
   requisites: null,
@@ -46,6 +48,7 @@ const payment = (
   id,
   externalTransactionId: `tx-${id}`,
   amount: d(amount),
+  currency: Currency.UAH,
   payerName: 'Чернявський Владислав',
   receivingAccount,
   purposeText: 'Оплата за товар',
@@ -163,5 +166,47 @@ describe('admin messages', () => {
         '🔎 Не вдалося автоматично визначити замовлення. Платіж #42.',
       ].join('\n'),
     );
+  });
+});
+
+describe('dollar payments', () => {
+  const usdOrder: Order = {
+    ...order(OrderStatus.PARTIALLY_PAID),
+    amountDue: d('150'),
+    currency: Currency.USD,
+  };
+  const usdPayment: Payment = {
+    ...payment(4, '100', 'ФОП Гук В.С', '2026-09-03T12:00:00Z'),
+    currency: Currency.USD,
+  };
+
+  it('should show every figure of a partial payment in dollars', () => {
+    const message = managerPaymentMessage({
+      order: usdOrder,
+      payment: usdPayment,
+      payments: [usdPayment],
+      amountPaid: d('100'),
+    });
+
+    expect(message).toContain('Сума замовлення: 150 $');
+    expect(message).toContain('Отримано: 100 $ на ФОП Гук В.С');
+    expect(message).toContain('Залишок: 50 $');
+    expect(message).not.toContain('грн');
+  });
+
+  it('should mark the dollar sign on every transfer line and the zero balance when paid in full', () => {
+    const message = managerPaymentMessage({
+      order: { ...usdOrder, status: OrderStatus.PAID },
+      payment: usdPayment,
+      payments: [usdPayment],
+      amountPaid: d('150'),
+    });
+
+    expect(message).toContain('ФОП Гук В.С - 100 $ 15:00 03.09.2026');
+    expect(message).toContain('Залишок: 0 $');
+  });
+
+  it('should show the amount of an unknown dollar payment in dollars', () => {
+    expect(unknownPaymentMessage({ ...usdPayment, orderId: null })).toContain('Сума: 100 $');
   });
 });

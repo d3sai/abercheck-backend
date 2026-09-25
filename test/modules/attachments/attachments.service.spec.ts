@@ -1,4 +1,4 @@
-import { Prisma } from '../../../src/generated/prisma/client';
+import { Currency, Prisma } from '../../../src/generated/prisma/client';
 import {
   AttachmentsService,
   type TelegramFileRef,
@@ -27,6 +27,7 @@ describe('AttachmentsService.saveFromTelegram', () => {
     baseNumber: '0000-066717',
     clientName: 'Test',
     amountDue: new Prisma.Decimal('1'),
+    currency: Currency.UAH,
   };
   const uploader: Initiator = { telegramId: 5000000000n, name: 'Христина' };
 

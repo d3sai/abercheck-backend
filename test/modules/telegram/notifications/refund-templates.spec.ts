@@ -1,4 +1,5 @@
 import {
+  Currency,
   type Order,
   OrderStatus,
   OrderType,
@@ -19,6 +20,7 @@ const order = (overrides: Partial<Order> = {}): Order => ({
   baseNumber: '0000-066717',
   clientName: 'ФОП Гук В.С',
   amountDue: d('6158.41'),
+  currency: Currency.UAH,
   exchangeRate: null,
   comment: null,
   requisites: null,
@@ -47,6 +49,20 @@ const refund = (overrides: Partial<Refund> = {}): Refund => ({
 });
 
 describe('managerRefundMessage', () => {
+  it('should state a refund of a dollar order in dollars', () => {
+    const message = managerRefundMessage({
+      refund: refund({ amount: d('20') }),
+      order: order({ amountDue: d('150'), currency: Currency.USD }),
+      previousStatus: OrderStatus.PAID,
+      amountPaid: d('130'),
+    });
+
+    expect(message).toContain('Сума замовлення: 150 $');
+    expect(message).toContain('Повернено: 20 $');
+    expect(message).toContain('Сплачено чистими: 130 $');
+    expect(message).not.toContain('грн');
+  });
+
   it('should describe the refund, the resulting balance and who did it', () => {
     const message = managerRefundMessage({
       refund: refund(),
