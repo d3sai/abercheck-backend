@@ -18,6 +18,7 @@ import { DailyReportJob } from './reports/daily-report.job';
 import { OrderNotifier } from './notifications/order-notifier';
 import { PaymentNotifier } from './notifications/payment-notifier';
 import { DraftAttachmentNotifier } from './order-draft/draft-attachment-notifier';
+import { KitDraftService, KitDraftStore } from './order-draft/kit-draft.service';
 import {
   MinusClosingDraftService,
   MinusDraftStore,
@@ -61,10 +62,12 @@ import { TelegramSender } from './core/telegram-sender';
     PartOfferStore,
     RequisitesDraftStore,
     MinusDraftStore,
+    KitDraftStore,
     DraftAttachmentNotifier,
     OrderCreationFlowService,
     RequisitesDraftService,
     MinusClosingDraftService,
+    KitDraftService,
     OrderDraftService,
     OrderListService,
     AdminFlowService,

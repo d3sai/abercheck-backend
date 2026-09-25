@@ -75,7 +75,7 @@ export interface OrderGroupView {
   parts: OrderWithManager[];
 }
 
-// Filled only by the bot's minus-closing flow — deliberately not part of the public CreateOrderDto.
+// Filled only by the bot's minus-closing (and, for paidAt, Кит) flow — deliberately not part of the public CreateOrderDto.
 export interface ClosingDetails {
   paidAt?: Date;
   ourFop?: string;
@@ -160,7 +160,13 @@ export class OrdersService {
   async createGroup(
     managerId: number,
     items: GroupOrderItem[],
-    common: { clientName: string; currency?: Currency; exchangeRate?: string; comment?: string },
+    common: {
+      clientName: string;
+      currency?: Currency;
+      exchangeRate?: string;
+      comment?: string;
+      paidAt?: Date;
+    },
     options?: { notify?: boolean },
   ): Promise<Order[]> {
     const numbers = items.map((item) => baseNumberOf(normalizeBaseNumber(item.orderNumber)));
@@ -191,6 +197,7 @@ export class OrdersService {
                 amountDue: item.amountDue,
                 currency: common.currency,
                 exchangeRate: common.exchangeRate,
+                paidAt: common.paidAt,
                 comment: index === 0 ? common.comment : `Оплата разом із № ${baseNumber}`,
                 managerId,
               },

@@ -3,9 +3,14 @@ import { type Manager, Prisma } from '../../../../src/generated/prisma/client';
 import { AttachmentsService } from '../../../../src/modules/attachments/attachments.service';
 import { OrderNumberTakenError } from '../../../../src/modules/orders/orders.errors';
 import { OrdersService } from '../../../../src/modules/orders/orders.service';
+import { PaymentsService } from '../../../../src/modules/payments/payments.service';
 import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
+import {
+  KitDraftService,
+  KitDraftStore,
+} from '../../../../src/modules/telegram/order-draft/kit-draft.service';
 import {
   MinusClosingDraftService,
   MinusDraftStore,
@@ -40,6 +45,7 @@ describe('OrderDraftService', () => {
     createGroup: jest.fn(),
   };
   const requisites = { addMany: jest.fn(), list: jest.fn() };
+  const payments = { findByExternalId: jest.fn(), ingest: jest.fn() };
   const attachments = { saveFromTelegram: jest.fn() };
   const sender = { sendToAdmins: jest.fn(), send: jest.fn() };
   let service: OrderDraftService;
@@ -94,9 +100,12 @@ describe('OrderDraftService', () => {
         PartOfferStore,
         RequisitesDraftStore,
         MinusDraftStore,
+        KitDraftService,
+        KitDraftStore,
         DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
         { provide: RequisitesService, useValue: requisites },
+        { provide: PaymentsService, useValue: payments },
         { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
       ],
@@ -1159,6 +1168,88 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(service.editMinus(USER).html).toContain('Надішліть виправлене');
       expect((await service.confirmMinus(MANAGER)).html).toContain('Немає даних');
       expect((await service.handleText(MANAGER, EXAMPLE))?.html).toContain('Зрозумів так');
+    });
+  });
+
+  describe('a transfer to Кит, armed by /kit', () => {
+    const EXAMPLE = `Оплата на Кит
+Код доступу : 647143353
+Загальна сума : 3500 дол
+0000-062265 2 696,71 дол
+0000-062937 480,00 дол
+залишок 323,29 дол внести в це замволення 0000-065651
+Дата та час : 21.08.2026 14:44`;
+    const existing = (status = 'PARTIALLY_PAID', currency = 'USD') => ({
+      order: createdOrder({ orderNumber: '0000-065651', status, currency }),
+      amountPaid: new Prisma.Decimal(0),
+    });
+
+    const begin = async (text = EXAMPLE) => {
+      service.startKit(USER);
+      return service.handleText(MANAGER, text);
+    };
+
+    beforeEach(() => {
+      payments.findByExternalId.mockResolvedValue(null);
+      orders.findWithBalance.mockImplementation((number: string) =>
+        Promise.resolve(number === '0000-065651' ? existing() : null),
+      );
+    });
+
+    it('should create the new numbers and pay every number, the existing one included', async () => {
+      orders.createGroup.mockResolvedValue([createdOrder({ orderNumber: '0000-062265' })]);
+      payments.ingest.mockResolvedValue({ kind: 'recorded', order: createdOrder() });
+
+      const preview = await begin();
+      expect(preview?.html).toContain('0000-065651</b> — 323,29 $ (уже є в системі)');
+
+      const reply = await service.confirmKit(MANAGER);
+
+      expect(orders.createGroup).toHaveBeenCalledWith(
+        MANAGER.id,
+        [
+          { orderNumber: '0000-062265', amountDue: '2696.71' },
+          { orderNumber: '0000-062937', amountDue: '480.00' },
+        ],
+        expect.objectContaining({
+          currency: 'USD',
+          comment: 'Оплата на Кит · код доступу 647143353',
+        }),
+      );
+      expect(payments.ingest).toHaveBeenCalledTimes(3);
+      [
+        ['0000-062265', '2696.71'],
+        ['0000-062937', '480.00'],
+        ['0000-065651', '323.29'],
+      ].forEach(([number, amount], index) => {
+        expect(payments.ingest).toHaveBeenNthCalledWith(
+          index + 1,
+          expect.objectContaining({
+            external_transaction_id: `kit:647143353:${number}`,
+            order_number: number,
+            amount,
+            currency: 'USD',
+            paid_at: '2026-08-21T11:44:00.000Z',
+          }),
+        );
+      });
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('647143353'));
+      expect(reply.html).toContain('Оплату на Кит записано · 3 500 $');
+    });
+
+    it('should refuse the same transfer sent twice', async () => {
+      payments.findByExternalId.mockResolvedValue({ id: 1 });
+
+      expect((await begin())?.html).toContain('уже зареєстровано');
+    });
+
+    it('should refuse to pay a cancelled or hryvnia number', async () => {
+      orders.findWithBalance.mockResolvedValue(existing('CANCELLED'));
+      expect((await begin())?.html).toContain('0000-065651 скасовано');
+
+      orders.findWithBalance.mockResolvedValue(existing('AWAITING_PAYMENT', 'UAH'));
+      expect((await begin())?.html).toContain('у гривнях');
+      expect(payments.ingest).not.toHaveBeenCalled();
     });
   });
 

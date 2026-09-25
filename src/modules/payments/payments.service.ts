@@ -106,6 +106,10 @@ export class PaymentsService {
     return this.prisma.payment.findUnique({ where: { id } });
   }
 
+  findByExternalId(externalTransactionId: string): Promise<Payment | null> {
+    return this.prisma.payment.findUnique({ where: { externalTransactionId } });
+  }
+
   async findUnmatched(limit: number): Promise<{ payments: Payment[]; total: number }> {
     const where = { orderId: null };
     const [payments, total] = await Promise.all([
@@ -195,9 +199,5 @@ export class PaymentsService {
       previousStatus,
       amountPaid,
     };
-  }
-
-  private findByExternalId(externalTransactionId: string): Promise<Payment | null> {
-    return this.prisma.payment.findUnique({ where: { externalTransactionId } });
   }
 }

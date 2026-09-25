@@ -59,6 +59,7 @@ export function multipleOrRequisitesGuard(): BotReply {
     html: [
       '⚠️ Схоже на кілька номерів або чужі реквізити.',
       `Натисніть «${escapeHtml(MENU_LABEL.Requisites)}» (/requisites) і надішліть це повідомлення ще раз.`,
+      `Якщо це оплата на Кит, натисніть «${escapeHtml(MENU_LABEL.Kit)}» (/kit).`,
     ].join('\n'),
   };
 }

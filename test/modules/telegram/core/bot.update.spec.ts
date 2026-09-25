@@ -25,6 +25,10 @@ import { BotUpdate } from '../../../../src/modules/telegram/core/bot.update';
 import { MENU_LABEL } from '../../../../src/modules/telegram/core/menu';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
+import {
+  KitDraftService,
+  KitDraftStore,
+} from '../../../../src/modules/telegram/order-draft/kit-draft.service';
 import { OrderCreationFlowService } from '../../../../src/modules/telegram/order-draft/order-creation-flow.service';
 import { OrderDraftService } from '../../../../src/modules/telegram/order-draft/order-draft.service';
 import { PartOfferStore } from '../../../../src/modules/telegram/order-draft/part-offer.store';
@@ -84,6 +88,8 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     PartOfferStore,
     RequisitesDraftStore,
     MinusDraftStore,
+    KitDraftService,
+    KitDraftStore,
     DraftAttachmentNotifier,
     OrderListService,
     {
@@ -266,12 +272,12 @@ describe('BotUpdate', () => {
 
   describe('the main menu', () => {
     it.each(['/start', '/help', 'привіт'])(
-      'should show the five buttons in reply to %s',
+      'should show the six buttons in reply to %s',
       async (text) => {
         const replies = await say(text);
 
         expect(replies).toHaveLength(1);
-        expect(menuOf(replies[0]!)).toHaveLength(5);
+        expect(menuOf(replies[0]!)).toHaveLength(6);
         expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
       },
     );

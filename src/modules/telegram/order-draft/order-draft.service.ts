@@ -10,6 +10,7 @@ import { BOT_RESTART_NOTICE, type BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { DraftAction } from './draft-action';
+import { KitDraftService } from './kit-draft.service';
 import { MinusClosingDraftService } from './minus-closing-draft.service';
 import { OrderCreationFlowService } from './order-creation-flow.service';
 import { PartOfferStore } from './part-offer.store';
@@ -20,8 +21,8 @@ import { RequisitesDraftService } from './requisites-draft.service';
 export { DraftAction };
 
 // Coordinates the order-draft flows — the regular single-order template (OrderCreationFlowService),
-// the "кілька номерів / реквізити" mode (RequisitesDraftService) and the "закрити мінус" mode
-// (MinusClosingDraftService) — plus the file buffer they share: which one a message or upload goes
+// the "кілька номерів / реквізити" mode (RequisitesDraftService), the "закрити мінус" mode
+// (MinusClosingDraftService) and the "оплата на Кит" mode (KitDraftService) — plus the file buffer they share: which one a message or upload goes
 // to depends on which mode, if any, is armed.
 @Injectable()
 export class OrderDraftService implements OnApplicationShutdown {
@@ -29,6 +30,7 @@ export class OrderDraftService implements OnApplicationShutdown {
     private readonly orderCreation: OrderCreationFlowService,
     private readonly requisitesFlow: RequisitesDraftService,
     private readonly minusFlow: MinusClosingDraftService,
+    private readonly kitFlow: KitDraftService,
     private readonly pendingFiles: PendingFilesStore,
     private readonly partOffers: PartOfferStore,
     private readonly sender: TelegramSender,
@@ -43,6 +45,7 @@ export class OrderDraftService implements OnApplicationShutdown {
       ...this.partOffers.pendingUserIds(now),
       ...this.requisitesFlow.pendingUserIds(now),
       ...this.minusFlow.pendingUserIds(now),
+      ...this.kitFlow.pendingUserIds(now),
     ]);
     await Promise.all([...ids].map((id) => this.sender.send(id, BOT_RESTART_NOTICE)));
   }
@@ -56,14 +59,23 @@ export class OrderDraftService implements OnApplicationShutdown {
   startRequisites(userId: bigint): BotReply {
     this.partOffers.delete(userId);
     this.minusFlow.leave(userId);
+    this.kitFlow.leave(userId);
     return this.requisitesFlow.start(userId);
   }
 
-  // Arms the "закрити мінус" mode the same way; the two modes never stay armed together.
+  // Arms the "закрити мінус" mode the same way; no two modes ever stay armed together.
   startMinus(userId: bigint): BotReply {
     this.partOffers.delete(userId);
     this.requisitesFlow.leave(userId);
+    this.kitFlow.leave(userId);
     return this.minusFlow.start(userId);
+  }
+
+  startKit(userId: bigint): BotReply {
+    this.partOffers.delete(userId);
+    this.requisitesFlow.leave(userId);
+    this.minusFlow.leave(userId);
+    return this.kitFlow.start(userId);
   }
 
   async handleText(manager: Manager, text: string): Promise<BotReply | null> {
@@ -120,9 +132,12 @@ export class OrderDraftService implements OnApplicationShutdown {
     const hadOffer = this.partOffers.delete(userId);
     const hadRequisites = this.requisitesFlow.leave(userId);
     const hadMinus = this.minusFlow.leave(userId);
+    const hadKit = this.kitFlow.leave(userId);
     return {
       html:
-        hadFiles || hadOffer || hadRequisites || hadMinus ? 'Скасовано.' : 'Нема чого скасовувати.',
+        hadFiles || hadOffer || hadRequisites || hadMinus || hadKit
+          ? 'Скасовано.'
+          : 'Нема чого скасовувати.',
     };
   }
 
@@ -131,6 +146,15 @@ export class OrderDraftService implements OnApplicationShutdown {
   leaveModes(userId: bigint): void {
     this.requisitesFlow.leave(userId);
     this.minusFlow.leave(userId);
+    this.kitFlow.leave(userId);
+  }
+
+  editKit(userId: bigint): BotReply {
+    return this.kitFlow.edit(userId);
+  }
+
+  async confirmKit(manager: Manager): Promise<BotReply> {
+    return this.kitFlow.confirm(manager);
   }
 
   editMinus(userId: bigint): BotReply {
@@ -174,6 +198,9 @@ export class OrderDraftService implements OnApplicationShutdown {
     }
     if (this.requisitesFlow.isArmed(manager.telegramId)) {
       return this.requisitesFlow.handle(manager, text);
+    }
+    if (this.kitFlow.isArmed(manager.telegramId)) {
+      return this.kitFlow.handle(manager, text);
     }
     return null;
   }
