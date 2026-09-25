@@ -9,6 +9,7 @@ import { ADMIN_HELP } from '../admin/admin.update';
 import { MENU_LABEL } from './menu';
 import { OrderListService } from '../orders-list/order-list.service';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
+import { CashAction } from '../order-draft/cash.messages';
 import { KitAction } from '../order-draft/kit.messages';
 import { MinusAction } from '../order-draft/minus-closing.messages';
 import { RequisitesAction } from '../order-draft/requisites.messages';
@@ -33,6 +34,7 @@ export class BotUpdate implements OnApplicationBootstrap {
         { command: 'newminus', description: 'Закрити мінус' },
         { command: 'requisites', description: 'Кілька номерів або чужі реквізити' },
         { command: 'kit', description: 'Оплата на Кит' },
+        { command: 'cash', description: 'Оплата готівкою' },
         { command: 'list', description: 'Мої відкриті замовлення' },
         { command: 'cancel', description: 'Скасувати' },
         { command: 'help', description: 'Що вміє бот' },
@@ -133,6 +135,15 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
+  // Arms the "оплата готівкою" mode: the next message is read as the cash template.
+  @Command('cash')
+  async cash(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await reply(ctx, this.drafts.startCash(manager.telegramId));
+    }
+  }
+
   @Command('cancel')
   async cancel(@Ctx() ctx: Context): Promise<void> {
     if (isPrivate(ctx) && ctx.from) {
@@ -217,6 +228,23 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
+  @Action(CashAction.Send)
+  async sendCash(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      await edit(ctx, await this.drafts.confirmCash(manager));
+    }
+  }
+
+  @Action(CashAction.Edit)
+  async editCash(@Ctx() ctx: Context): Promise<void> {
+    if (isPrivate(ctx) && ctx.from) {
+      await ctx.answerCbQuery();
+      await edit(ctx, this.drafts.editCash(BigInt(ctx.from.id)));
+    }
+  }
+
   @On('text')
   async text(@Ctx() ctx: Context, @Next() next: Next): Promise<void> {
     if (!isPrivate(ctx) || !ctx.from || !ctx.text || ctx.text.startsWith('/')) {
@@ -231,6 +259,8 @@ export class BotUpdate implements OnApplicationBootstrap {
         return this.requisites(ctx);
       case MENU_LABEL.Kit:
         return this.kit(ctx);
+      case MENU_LABEL.Cash:
+        return this.cash(ctx);
       case MENU_LABEL.List:
         return this.list(ctx);
       case MENU_LABEL.Cancel:

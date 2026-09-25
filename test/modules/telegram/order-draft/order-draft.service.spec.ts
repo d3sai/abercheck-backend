@@ -6,6 +6,11 @@ import { OrdersService } from '../../../../src/modules/orders/orders.service';
 import { PaymentsService } from '../../../../src/modules/payments/payments.service';
 import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
+import {
+  CashDraftService,
+  CashDraftStore,
+} from '../../../../src/modules/telegram/order-draft/cash-draft.service';
+import { ReportedPaymentService } from '../../../../src/modules/telegram/order-draft/reported-payment.service';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
 import {
   KitDraftService,
@@ -102,6 +107,9 @@ describe('OrderDraftService', () => {
         MinusDraftStore,
         KitDraftService,
         KitDraftStore,
+        CashDraftService,
+        CashDraftStore,
+        ReportedPaymentService,
         DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
         { provide: RequisitesService, useValue: requisites },
@@ -1250,6 +1258,87 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       orders.findWithBalance.mockResolvedValue(existing('AWAITING_PAYMENT', 'UAH'));
       expect((await begin())?.html).toContain('у гривнях');
       expect(payments.ingest).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('cash, armed by /cash', () => {
+    const SAMPLE = `0000-066498
+01.09.2026 15:20
+4260 грн
+44,9
+Христина Павлів передала готівку Христині Вихопень ( Саджениці)`;
+
+    const begin = async (text = SAMPLE) => {
+      service.startCash(USER);
+      return service.handleText(MANAGER, text);
+    };
+
+    beforeEach(() => {
+      payments.findByExternalId.mockResolvedValue(null);
+      payments.ingest.mockResolvedValue({ kind: 'recorded', order: createdOrder() });
+    });
+
+    it('should create a new number and record the cash on it', async () => {
+      orders.createGroup.mockResolvedValue([createdOrder({ orderNumber: '0000-066498' })]);
+
+      const preview = await begin();
+      expect(preview?.html).toContain('Створю це замовлення');
+
+      const reply = await service.confirmCash(MANAGER);
+
+      expect(orders.createGroup).toHaveBeenCalledWith(
+        MANAGER.id,
+        [{ orderNumber: '0000-066498', amountDue: '4260.00' }],
+        expect.objectContaining({
+          clientName: 'Оплата готівкою',
+          currency: 'UAH',
+          exchangeRate: '44.9',
+        }),
+      );
+      expect(payments.ingest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          external_transaction_id: 'cash:0000-066498:2026-09-01T12:20:00.000Z:4260.00',
+          order_number: '0000-066498',
+          amount: '4260.00',
+          currency: 'UAH',
+          payer_name: 'Христина Павлів передала готівку Христині Вихопень ( Саджениці)',
+        }),
+      );
+      expect(reply.html).toContain('Оплату готівкою записано');
+    });
+
+    it('should only record dollars on an existing dollar number', async () => {
+      orders.findWithBalance.mockResolvedValue({
+        order: createdOrder({ orderNumber: '0000-066498', currency: 'USD' }),
+        amountPaid: new Prisma.Decimal(0),
+      });
+
+      expect((await begin('0000-066498\n150 $'))?.html).toContain('(уже є в системі)');
+      await service.confirmCash(MANAGER);
+
+      expect(orders.createGroup).not.toHaveBeenCalled();
+      expect(payments.ingest).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: '150.00', currency: 'USD' }),
+      );
+    });
+
+    it('should refuse hryvnias on a dollar number, and the same cash twice', async () => {
+      orders.findWithBalance.mockResolvedValue({
+        order: createdOrder({ orderNumber: '0000-066498', currency: 'USD' }),
+        amountPaid: new Prisma.Decimal(0),
+      });
+      expect((await begin())?.html).toContain('у доларах, а оплата в гривнях');
+
+      payments.findByExternalId.mockResolvedValue({ id: 1 });
+      expect((await begin())?.html).toContain('Цю оплату вже зареєстровано');
+    });
+
+    it('should refuse the sample outside the button instead of taking the date for the ФОП', async () => {
+      const reply = await service.handleText(MANAGER, SAMPLE);
+
+      expect(reply?.html).toContain('схоже на дату');
+      expect(reply?.html).toContain('/cash');
+      expect(orders.create).not.toHaveBeenCalled();
     });
   });
 

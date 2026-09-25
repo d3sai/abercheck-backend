@@ -17,6 +17,7 @@ import { BotUpdate } from './core/bot.update';
 import { DailyReportJob } from './reports/daily-report.job';
 import { OrderNotifier } from './notifications/order-notifier';
 import { PaymentNotifier } from './notifications/payment-notifier';
+import { CashDraftService, CashDraftStore } from './order-draft/cash-draft.service';
 import { DraftAttachmentNotifier } from './order-draft/draft-attachment-notifier';
 import { KitDraftService, KitDraftStore } from './order-draft/kit-draft.service';
 import {
@@ -27,6 +28,7 @@ import { OrderCreationFlowService } from './order-draft/order-creation-flow.serv
 import { OrderDraftService } from './order-draft/order-draft.service';
 import { PartOfferStore } from './order-draft/part-offer.store';
 import { PendingFilesStore } from './order-draft/pending-files.store';
+import { ReportedPaymentService } from './order-draft/reported-payment.service';
 import { RequisitesDraftService } from './order-draft/requisites-draft.service';
 import { RequisitesDraftStore } from './order-draft/requisites-draft.store';
 import { OrderListService } from './orders-list/order-list.service';
@@ -63,11 +65,14 @@ import { TelegramSender } from './core/telegram-sender';
     RequisitesDraftStore,
     MinusDraftStore,
     KitDraftStore,
+    CashDraftStore,
     DraftAttachmentNotifier,
     OrderCreationFlowService,
     RequisitesDraftService,
     MinusClosingDraftService,
+    ReportedPaymentService,
     KitDraftService,
+    CashDraftService,
     OrderDraftService,
     OrderListService,
     AdminFlowService,

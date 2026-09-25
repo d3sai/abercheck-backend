@@ -24,6 +24,11 @@ import { AdminUpdate } from '../../../../src/modules/telegram/admin/admin.update
 import { BotUpdate } from '../../../../src/modules/telegram/core/bot.update';
 import { MENU_LABEL } from '../../../../src/modules/telegram/core/menu';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
+import {
+  CashDraftService,
+  CashDraftStore,
+} from '../../../../src/modules/telegram/order-draft/cash-draft.service';
+import { ReportedPaymentService } from '../../../../src/modules/telegram/order-draft/reported-payment.service';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
 import {
   KitDraftService,
@@ -90,6 +95,9 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     MinusDraftStore,
     KitDraftService,
     KitDraftStore,
+    CashDraftService,
+    CashDraftStore,
+    ReportedPaymentService,
     DraftAttachmentNotifier,
     OrderListService,
     {
@@ -272,12 +280,12 @@ describe('BotUpdate', () => {
 
   describe('the main menu', () => {
     it.each(['/start', '/help', 'привіт'])(
-      'should show the six buttons in reply to %s',
+      'should show the seven buttons in reply to %s',
       async (text) => {
         const replies = await say(text);
 
         expect(replies).toHaveLength(1);
-        expect(menuOf(replies[0]!)).toHaveLength(6);
+        expect(menuOf(replies[0]!)).toHaveLength(7);
         expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
       },
     );

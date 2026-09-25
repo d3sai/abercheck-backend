@@ -1,55 +1,55 @@
 import { Injectable } from '@nestjs/common';
-import { Currency, type Manager, type Order } from '../../../generated/prisma/client';
+import type { Manager, Order } from '../../../generated/prisma/client';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
 import type { BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
+import { adminCashMessage, cashCreatedReply, cashHint, cashPreview } from './cash.messages';
+import { type CashPlan, cashPaymentId, parseCash } from './cash.parser';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
 import { DraftModeStore } from './draft-mode.store';
-import { adminKitMessage, kitCreatedReply, kitHint, kitPreview } from './kit.messages';
-import { type KitPlan, parseKit } from './kit.parser';
 import { PendingFilesStore } from './pending-files.store';
 import { type ReportedItem, ReportedPaymentService } from './reported-payment.service';
 import { requisitesErrors } from './requisites.messages';
 
-export interface KitDraft {
-  plan: KitPlan;
-  /** Numbers already in the system: they only get the payment, nothing is created for them. */
-  existing: string[];
+export interface CashDraft {
+  plan: CashPlan;
+  /** The number is already in the system: it only gets the payment. */
+  exists: boolean;
   expiresAt: number;
 }
 
 @Injectable()
-export class KitDraftStore extends DraftModeStore<KitDraft> {}
+export class CashDraftStore extends DraftModeStore<CashDraft> {}
 
 // How long a manager has to answer the preview.
-const KIT_DRAFT_TTL_MS = 10 * 60_000;
+const CASH_DRAFT_TTL_MS = 10 * 60_000;
 
 // How long the mode waits for the message after the button/command.
-const KIT_MODE_TTL_MS = 30 * 60_000;
+const CASH_MODE_TTL_MS = 30 * 60_000;
 
-const KIT_LABEL = 'Оплата на Кит';
+const CASH_LABEL = 'Оплата готівкою';
 
-// One payment per number and transfer, so sending the same message twice never pays twice.
-const kitItems = (plan: KitPlan): ReportedItem[] =>
-  plan.items.map((item) => ({ ...item, paymentId: `kit:${plan.accessCode}:${item.number}` }));
+const cashItems = (plan: CashPlan): ReportedItem[] => [
+  { number: plan.number, amount: plan.amount, paymentId: cashPaymentId(plan) },
+];
 
-// "💵 Оплата на Кит": arming the mode, reading one message in the Кит template into a preview, then
-// recording the transfer's share on every number (ReportedPaymentService).
+// "💰 Оплата готівкою": arming the mode, reading one message in the cash template into a preview,
+// then recording the cash on its number (ReportedPaymentService).
 @Injectable()
-export class KitDraftService {
+export class CashDraftService {
   constructor(
     private readonly reported: ReportedPaymentService,
     private readonly pendingFiles: PendingFilesStore,
-    private readonly drafts: KitDraftStore,
+    private readonly drafts: CashDraftStore,
     private readonly sender: TelegramSender,
     private readonly notifier: DraftAttachmentNotifier,
   ) {}
 
   start(userId: bigint): BotReply {
     this.drafts.clearDraft(userId);
-    this.drafts.arm(userId, Date.now() + KIT_MODE_TTL_MS);
-    return kitHint();
+    this.drafts.arm(userId, Date.now() + CASH_MODE_TTL_MS);
+    return cashHint();
   }
 
   isArmed(userId: bigint): boolean {
@@ -63,28 +63,29 @@ export class KitDraftService {
 
   edit(userId: bigint): BotReply {
     this.drafts.clearDraft(userId);
-    this.drafts.arm(userId, Date.now() + KIT_MODE_TTL_MS);
+    this.drafts.arm(userId, Date.now() + CASH_MODE_TTL_MS);
     return { html: 'Гаразд. Надішліть виправлене повідомлення.' };
   }
 
   async handle(manager: Manager, text: string): Promise<BotReply> {
-    const parsed = parseKit(text.trim());
+    const parsed = parseCash(text.trim());
     if (!parsed.ok) {
       return requisitesErrors(parsed.errors);
     }
     const { plan } = parsed;
-    const check = await this.reported.check(kitItems(plan), Currency.USD);
+    const check = await this.reported.check(cashItems(plan), plan.currency);
     if (!check.ok) {
       return check.alreadyRecorded
-        ? { html: '⚠️ Цей переказ уже зареєстровано.' }
+        ? { html: '⚠️ Цю оплату вже зареєстровано.' }
         : requisitesErrors(check.errors);
     }
+    const exists = check.existing.length > 0;
     this.drafts.setDraft(manager.telegramId, {
       plan,
-      existing: check.existing,
-      expiresAt: Date.now() + KIT_DRAFT_TTL_MS,
+      exists,
+      expiresAt: Date.now() + CASH_DRAFT_TTL_MS,
     });
-    return kitPreview(plan, check.existing, this.pendingFiles.list(manager.telegramId).length);
+    return cashPreview(plan, exists, this.pendingFiles.list(manager.telegramId).length);
   }
 
   async confirm(manager: Manager): Promise<BotReply> {
@@ -92,26 +93,30 @@ export class KitDraftService {
     if (!draft || draft.expiresAt < Date.now()) {
       return { html: '⚠️ Немає даних для відправки. Надішліть повідомлення ще раз.' };
     }
-    const { plan, existing } = draft;
+    const { plan, exists } = draft;
+    const details = [
+      CASH_LABEL,
+      ...(plan.handedBy ? [plan.handedBy] : []),
+      ...(plan.rate ? [`курс ${plan.rate.replace('.', ',')}`] : []),
+    ].join(' · ');
 
     let fileOrder: Order | undefined;
     try {
       fileOrder = await this.reported.record(manager, {
-        label: KIT_LABEL,
-        currency: Currency.USD,
-        items: kitItems(plan),
-        existing,
+        label: CASH_LABEL,
+        currency: plan.currency,
+        items: cashItems(plan),
+        existing: exists ? [plan.number] : [],
         paidAt: plan.paidAt,
-        payerName: KIT_LABEL,
-        receivingAccount: 'Кит',
-        purpose: `Код доступу ${plan.accessCode}`,
-        comment: [`${KIT_LABEL} · код доступу ${plan.accessCode}`, plan.comment]
-          .filter(Boolean)
-          .join(' · '),
+        payerName: plan.handedBy ?? CASH_LABEL,
+        receivingAccount: 'Готівка',
+        purpose: details,
+        comment: details,
+        exchangeRate: plan.rate ?? undefined,
       });
     } catch (error) {
       if (error instanceof OrderNumberTakenError) {
-        this.drafts.arm(manager.telegramId, Date.now() + KIT_MODE_TTL_MS);
+        this.drafts.arm(manager.telegramId, Date.now() + CASH_MODE_TTL_MS);
         return {
           html: `⚠️ Номер ${escapeHtml(error.orderNumber)} щойно з'явився в системі. Надішліть повідомлення ще раз.`,
         };
@@ -121,13 +126,13 @@ export class KitDraftService {
     this.drafts.disarm(manager.telegramId);
 
     const files = this.pendingFiles.take(manager.telegramId);
-    const notice = adminKitMessage(plan, existing, manager.name);
+    const notice = adminCashMessage(plan, exists, manager.name);
     if (files.length > 0 && fileOrder) {
       await this.notifier.notify(fileOrder, manager, files, notice);
     } else {
       await this.sender.sendToAdmins(notice);
     }
-    return kitCreatedReply(plan);
+    return cashCreatedReply(plan);
   }
 
   pendingUserIds(now: number): bigint[] {

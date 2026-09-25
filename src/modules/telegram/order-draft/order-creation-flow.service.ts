@@ -12,6 +12,7 @@ import {
 } from '../../orders/orders.service';
 import type { BotReply } from '../core/bot-reply';
 import { button } from '../core/bot-reply';
+import { MENU_LABEL } from '../core/menu';
 import { escapeHtml, formatMoneyIn } from '../core/format';
 import { adminOrderCreatedMessage } from '../notifications/order-templates';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
@@ -27,7 +28,7 @@ import {
 } from './order-draft.parsers';
 import { type DraftField, type PartOffer, PartOfferStore } from './part-offer.store';
 import { PendingFilesStore } from './pending-files.store';
-import { hasMultipleOrdersOrRequisites } from './requisites.parser';
+import { hasMultipleOrdersOrRequisites, numericDates, parseDateTime } from './requisites.parser';
 import { DraftAction } from './draft-action';
 
 interface FieldSpec {
@@ -39,11 +40,22 @@ interface FieldSpec {
 
 const FIELDS: readonly FieldSpec[] = [
   { field: 'orderNumber', label: 'Номер', optional: false, parse: parseOrderNumber },
-  { field: 'clientName', label: 'ФОП', optional: false, parse: parseText(255) },
+  { field: 'clientName', label: 'ФОП', optional: false, parse: parseClientName },
   { field: 'amountDue', label: 'Сума', optional: false, parse: parseMoney },
   { field: 'exchangeRate', label: 'Курс', optional: true, parse: parseExchangeRate },
   { field: 'comment', label: 'Коментар', optional: true, parse: parseText(2000) },
 ];
+
+// A cash report sent without its button has the date where the unlabelled template expects the
+// ФОП. The order is created at once, with no preview, so that shape is refused, never guessed.
+function parseClientName(input: string): ParseResult {
+  return parseDateTime(numericDates(input.trim()))
+    ? {
+        ok: false,
+        error: `схоже на дату, а не на ФОП. Якщо це оплата готівкою, натисніть «${MENU_LABEL.Cash}» (/cash).`,
+      }
+    : parseText(255)(input);
+}
 
 const PART_OFFER_TTL_MS = 10 * 60_000;
 

@@ -9,6 +9,7 @@ import type { Manager } from '../../../generated/prisma/client';
 import { BOT_RESTART_NOTICE, type BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
+import { CashDraftService } from './cash-draft.service';
 import { DraftAction } from './draft-action';
 import { KitDraftService } from './kit-draft.service';
 import { MinusClosingDraftService } from './minus-closing-draft.service';
@@ -20,10 +21,10 @@ import { RequisitesDraftService } from './requisites-draft.service';
 
 export { DraftAction };
 
-// Coordinates the order-draft flows — the regular single-order template (OrderCreationFlowService),
-// the "кілька номерів / реквізити" mode (RequisitesDraftService), the "закрити мінус" mode
-// (MinusClosingDraftService) and the "оплата на Кит" mode (KitDraftService) — plus the file buffer they share: which one a message or upload goes
-// to depends on which mode, if any, is armed.
+// Coordinates the order-draft flows — the regular single-order template (OrderCreationFlowService)
+// and the button-armed modes: "кілька номерів / реквізити", "закрити мінус", "оплата на Кит" and
+// "оплата готівкою" — plus the file buffer they share: which one a message or upload goes to
+// depends on which mode, if any, is armed. At most one mode is armed at a time.
 @Injectable()
 export class OrderDraftService implements OnApplicationShutdown {
   constructor(
@@ -31,6 +32,7 @@ export class OrderDraftService implements OnApplicationShutdown {
     private readonly requisitesFlow: RequisitesDraftService,
     private readonly minusFlow: MinusClosingDraftService,
     private readonly kitFlow: KitDraftService,
+    private readonly cashFlow: CashDraftService,
     private readonly pendingFiles: PendingFilesStore,
     private readonly partOffers: PartOfferStore,
     private readonly sender: TelegramSender,
@@ -43,9 +45,7 @@ export class OrderDraftService implements OnApplicationShutdown {
     const ids = new Set<bigint>([
       ...this.pendingFiles.pendingUserIds(),
       ...this.partOffers.pendingUserIds(now),
-      ...this.requisitesFlow.pendingUserIds(now),
-      ...this.minusFlow.pendingUserIds(now),
-      ...this.kitFlow.pendingUserIds(now),
+      ...this.modes.flatMap((mode) => mode.pendingUserIds(now)),
     ]);
     await Promise.all([...ids].map((id) => this.sender.send(id, BOT_RESTART_NOTICE)));
   }
@@ -57,25 +57,20 @@ export class OrderDraftService implements OnApplicationShutdown {
   // Arms the "кілька номерів / реквізити" mode: only while it's armed does the very next message go
   // through the requisites parser instead of the regular single-order template.
   startRequisites(userId: bigint): BotReply {
-    this.partOffers.delete(userId);
-    this.minusFlow.leave(userId);
-    this.kitFlow.leave(userId);
-    return this.requisitesFlow.start(userId);
+    return this.switchTo(userId, this.requisitesFlow);
   }
 
-  // Arms the "закрити мінус" mode the same way; no two modes ever stay armed together.
+  // The other modes are armed the same way.
   startMinus(userId: bigint): BotReply {
-    this.partOffers.delete(userId);
-    this.requisitesFlow.leave(userId);
-    this.kitFlow.leave(userId);
-    return this.minusFlow.start(userId);
+    return this.switchTo(userId, this.minusFlow);
   }
 
   startKit(userId: bigint): BotReply {
-    this.partOffers.delete(userId);
-    this.requisitesFlow.leave(userId);
-    this.minusFlow.leave(userId);
-    return this.kitFlow.start(userId);
+    return this.switchTo(userId, this.kitFlow);
+  }
+
+  startCash(userId: bigint): BotReply {
+    return this.switchTo(userId, this.cashFlow);
   }
 
   async handleText(manager: Manager, text: string): Promise<BotReply | null> {
@@ -130,23 +125,23 @@ export class OrderDraftService implements OnApplicationShutdown {
   cancel(userId: bigint): BotReply {
     const hadFiles = this.pendingFiles.clear(userId);
     const hadOffer = this.partOffers.delete(userId);
-    const hadRequisites = this.requisitesFlow.leave(userId);
-    const hadMinus = this.minusFlow.leave(userId);
-    const hadKit = this.kitFlow.leave(userId);
-    return {
-      html:
-        hadFiles || hadOffer || hadRequisites || hadMinus || hadKit
-          ? 'Скасовано.'
-          : 'Нема чого скасовувати.',
-    };
+    const hadMode = this.leaveModes(userId);
+    return { html: hadFiles || hadOffer || hadMode ? 'Скасовано.' : 'Нема чого скасовувати.' };
   }
 
   // Another flow was started: the next message is no longer read by an armed mode, and any pending
-  // preview is dropped.
-  leaveModes(userId: bigint): void {
-    this.requisitesFlow.leave(userId);
-    this.minusFlow.leave(userId);
-    this.kitFlow.leave(userId);
+  // preview is dropped. Reports whether there was anything to drop.
+  leaveModes(userId: bigint): boolean {
+    // map, not some: every mode must be left, not just the first one that had something.
+    return this.modes.map((mode) => mode.leave(userId)).some(Boolean);
+  }
+
+  editCash(userId: bigint): BotReply {
+    return this.cashFlow.edit(userId);
+  }
+
+  async confirmCash(manager: Manager): Promise<BotReply> {
+    return this.cashFlow.confirm(manager);
   }
 
   editKit(userId: bigint): BotReply {
@@ -192,16 +187,18 @@ export class OrderDraftService implements OnApplicationShutdown {
     return { html: 'Скасовано.' };
   }
 
+  private get modes() {
+    return [this.requisitesFlow, this.minusFlow, this.kitFlow, this.cashFlow];
+  }
+
+  private switchTo(userId: bigint, mode: { start(userId: bigint): BotReply }): BotReply {
+    this.partOffers.delete(userId);
+    this.leaveModes(userId);
+    return mode.start(userId);
+  }
+
   private async handleArmed(manager: Manager, text: string): Promise<BotReply | null> {
-    if (this.minusFlow.isArmed(manager.telegramId)) {
-      return this.minusFlow.handle(manager, text);
-    }
-    if (this.requisitesFlow.isArmed(manager.telegramId)) {
-      return this.requisitesFlow.handle(manager, text);
-    }
-    if (this.kitFlow.isArmed(manager.telegramId)) {
-      return this.kitFlow.handle(manager, text);
-    }
-    return null;
+    const armed = this.modes.find((mode) => mode.isArmed(manager.telegramId));
+    return armed ? armed.handle(manager, text) : null;
   }
 }
