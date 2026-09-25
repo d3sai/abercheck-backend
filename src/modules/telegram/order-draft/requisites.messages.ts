@@ -1,7 +1,12 @@
-import { type Order, type OrderRequisite, Prisma } from '../../../generated/prisma/client';
+import {
+  type Currency,
+  type Order,
+  type OrderRequisite,
+  Prisma,
+} from '../../../generated/prisma/client';
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
-import { escapeHtml, formatKyivDateTime, formatMoneyGrn as money } from '../core/format';
+import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
 import { MENU_LABEL } from '../core/menu';
 import { formatRate } from '../notifications/order-templates';
 import type { RequisitesPlan } from './requisites.parser';
@@ -16,12 +21,13 @@ export function requisiteBlock(
   payerName: string,
   account: string | null,
   amount: Prisma.Decimal,
+  currency: Currency,
   paidAt: Date,
 ): string {
   const fields = [
     payerName,
     ...(account ? [account] : []),
-    money(amount),
+    money(amount, currency),
     formatKyivDateTime(paidAt),
   ];
   return `<pre>${fields.map(escapeHtml).join('\n')}</pre>`;
@@ -39,6 +45,7 @@ export function requisitesHint(): BotReply {
     html: [
       '💳 <b>Кілька номерів або чужі реквізити</b>',
       'Усе одним повідомленням, порядок не важливий. Кожен номер з нового рядка разом із сумою.',
+      'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
       '',
       `<pre>${example}</pre>`,
       '',
@@ -84,14 +91,16 @@ export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext)
   if (plan.kind === 'group') {
     for (const item of plan.items) {
       const note = item.note ? ` ${escapeHtml(item.note)}` : '';
-      lines.push(`№ <b>${escapeHtml(item.number)}</b> — ${money(item.amount)}${note}`);
+      lines.push(
+        `№ <b>${escapeHtml(item.number)}</b> — ${money(item.amount, plan.currency)}${note}`,
+      );
     }
-    lines.push(`Разом: <b>${money(plan.total)}</b>`);
+    lines.push(`Разом: <b>${money(plan.total, plan.currency)}</b>`);
   } else {
     if (plan.kind === 'single') {
       lines.push(`№ <b>${escapeHtml(plan.items[0]!.number)}</b>`);
     }
-    lines.push(`Сума: <b>${money(plan.total)}</b>`);
+    lines.push(`Сума: <b>${money(plan.total, plan.currency)}</b>`);
   }
   if (plan.rate) {
     lines.push(`Курс: ${escapeHtml(plan.rate.replace('.', ','))}`);
@@ -106,7 +115,13 @@ export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext)
         lines.push('');
       }
       lines.push(
-        requisiteBlock(item.payerName, item.account, new Prisma.Decimal(item.amount), item.paidAt),
+        requisiteBlock(
+          item.payerName,
+          item.account,
+          new Prisma.Decimal(item.amount),
+          plan.currency,
+          item.paidAt,
+        ),
       );
     });
   }
@@ -142,17 +157,17 @@ export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext)
 
 export function requisitesCreatedReply(orders: Order[], skipped: string[]): BotReply {
   const [first] = orders;
+  if (!first) {
+    return { html: '⚠️ Нічого не створено.' };
+  }
   const total = orders.reduce((sum, order) => sum.plus(order.amountDue), new Prisma.Decimal(0));
   const skippedNote =
     skipped.length > 0 ? [`Не додано (уже є в системі): ${skipped.join(', ')}.`] : [];
 
-  if (!first) {
-    return { html: '⚠️ Нічого не створено.' };
-  }
   const head =
     orders.length > 1
-      ? `✅ Оплату зареєстровано: ${orders.length} номерів · ${money(total)}`
-      : `✅ Оплату зареєстровано: № <b>${escapeHtml(first.orderNumber)}</b> · ${money(total)}`;
+      ? `✅ Оплату зареєстровано: ${orders.length} номерів · ${money(total, first.currency)}`
+      : `✅ Оплату зареєстровано: № <b>${escapeHtml(first.orderNumber)}</b> · ${money(total, first.currency)}`;
   return {
     html: [head, 'Повідомлю про оплату.', ...skippedNote].join('\n'),
   };
@@ -176,13 +191,16 @@ export function adminRequisitesMessage(
   const numbers =
     orders.length > 1
       ? orders.map(
-          (order) => `№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amountDue)}`,
+          (order) =>
+            `№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amountDue, order.currency)}`,
         )
       : [`№ <b>${escapeHtml(first.orderNumber)}</b>`];
   return [
     title,
     ...numbers,
-    orders.length > 1 ? `Разом: ${money(total)}` : `Сума: ${money(total)}`,
+    orders.length > 1
+      ? `Разом: ${money(total, first.currency)}`
+      : `Сума: ${money(total, first.currency)}`,
     ...(first.exchangeRate ? [`Курс: ${formatRate(first.exchangeRate)}`] : []),
     ...(first.comment ? [`Коментар: ${escapeHtml(first.comment)}`] : []),
     ...(requisites.length > 0
@@ -191,7 +209,7 @@ export function adminRequisitesMessage(
           'Реквізити:',
           ...requisites.flatMap((item, index) => [
             ...(index > 0 ? [''] : []),
-            requisiteBlock(item.payerName, item.account, item.amount, item.paidAt),
+            requisiteBlock(item.payerName, item.account, item.amount, first.currency, item.paidAt),
           ]),
         ]
       : []),

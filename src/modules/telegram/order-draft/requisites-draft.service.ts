@@ -119,6 +119,11 @@ export class RequisitesDraftService {
             html: `⚠️ Номер ${escapeHtml(number)} уже є в системі у складі № ${escapeHtml(existing.order.orderNumber)} — додати до нього не можна.`,
           };
         }
+        if (existing.order.currency !== plan.currency) {
+          return {
+            html: `⚠️ Номер ${escapeHtml(number)} уже є в системі в іншій валюті — частину в іншій валюті додати не можна.`,
+          };
+        }
         addPart = true;
       }
     } else if (plan.kind === 'group') {
@@ -162,6 +167,7 @@ export class RequisitesDraftService {
     const { plan } = draft;
     const common = {
       clientName: plan.label,
+      currency: plan.currency,
       exchangeRate: plan.rate ?? undefined,
       comment: plan.comment ?? undefined,
     };

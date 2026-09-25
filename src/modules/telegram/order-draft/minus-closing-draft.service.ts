@@ -88,6 +88,7 @@ export class MinusClosingDraftService {
         orderType: OrderType.MINUS_CLOSING,
         clientName: plan.clientName,
         amountDue: plan.total.toFixed(2),
+        currency: plan.currency,
         exchangeRate: plan.rate ?? undefined,
         comment: plan.comment ?? undefined,
         paidAt: plan.paidAt ?? undefined,

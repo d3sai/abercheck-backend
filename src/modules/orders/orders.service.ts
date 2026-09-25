@@ -160,7 +160,7 @@ export class OrdersService {
   async createGroup(
     managerId: number,
     items: GroupOrderItem[],
-    common: { clientName: string; exchangeRate?: string; comment?: string },
+    common: { clientName: string; currency?: Currency; exchangeRate?: string; comment?: string },
     options?: { notify?: boolean },
   ): Promise<Order[]> {
     const numbers = items.map((item) => baseNumberOf(normalizeBaseNumber(item.orderNumber)));
@@ -189,6 +189,7 @@ export class OrdersService {
                 baseNumber,
                 clientName: common.clientName,
                 amountDue: item.amountDue,
+                currency: common.currency,
                 exchangeRate: common.exchangeRate,
                 comment: index === 0 ? common.comment : `Оплата разом із № ${baseNumber}`,
                 managerId,

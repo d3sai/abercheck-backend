@@ -1,8 +1,11 @@
+import { Currency } from '../../../../src/generated/prisma/client';
 import {
   REQUISITES_MAX_LENGTH,
   hasMultipleOrdersOrRequisites,
+  messageCurrency,
   parseRequisites,
   type RequisitesPlan,
+  unitAfterAmount,
   withoutNumbers,
 } from '../../../../src/modules/telegram/order-draft/requisites.parser';
 
@@ -442,6 +445,96 @@ describe('parseRequisites', () => {
     const plan = planOf('0000-068641 100 грн\nКурс: 0');
 
     expect(plan.rate).toBeNull();
+  });
+});
+
+describe('dollar amounts', () => {
+  it('should read several numbers paid together in dollars, with "$" before or after the sum', () => {
+    const plan = planOf(
+      '0000-068772 335,58 $\n0000-068773 $971.83\nЗагальна сума: 1 307,41 $\n44,9%',
+    );
+
+    expect(plan).toMatchObject({ kind: 'group', currency: Currency.USD, rate: '44.9' });
+    expect(plan.items.map((item) => [item.number, item.amount.toFixed(2)])).toEqual([
+      ['0000-068772', '335.58'],
+      ['0000-068773', '971.83'],
+    ]);
+    expect(plan.total.toFixed(2)).toBe('1307.41');
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it('should read one number paid to several recipients in dollars', () => {
+    const plan = planOf(
+      '0000-068652\n19.09.2026\nФОП Берчатов М.М - 590.50 $ 10:50\n4441 1110 6964 5962 Андріанов Олександр 400 usd 10:51',
+    );
+
+    expect(plan).toMatchObject({ kind: 'single', currency: Currency.USD });
+    expect(plan.total.toFixed(2)).toBe('990.50');
+    expect(requisites(plan)).toEqual([
+      'ФОП Берчатов М.М||590.50',
+      'Андріанов Олександр|4441 1110 6964 5962|400.00',
+    ]);
+  });
+
+  it('should word the difference warning in dollars', () => {
+    const plan = planOf('0000-068772 100 $\n0000-068773 50 $\nЗагальна сума: 160 $');
+
+    expect(plan.warnings).toEqual([expect.stringContaining('10 $')]);
+  });
+
+  it('should refuse hryvnias and dollars in one message', () => {
+    expect(parseRequisites('0000-068772 100 грн\n0000-068773 50 $')).toEqual({
+      ok: false,
+      errors: ['Гривні й долари в одному повідомленні — надішліть окремо.'],
+    });
+  });
+
+  it('should keep hryvnias when nothing is marked, or only a total is given', () => {
+    expect(planOf('0000-068641\nЗагальна сума: 500').currency).toBe(Currency.UAH);
+    expect(planOf('0000-068641 809,48 грн').currency).toBe(Currency.UAH);
+  });
+
+  it('should ask for the dollar sign as well when a number has no sum', () => {
+    const result = parseRequisites('0000-068641\n0000-068642 50 $');
+
+    expect(result).toEqual({
+      ok: false,
+      errors: [expect.stringContaining('або знаком $') as string],
+    });
+  });
+
+  it('should flag two dollar sums as several payments', () => {
+    expect(hasMultipleOrdersOrRequisites('Оплата\nФОП Гук 100 $\nФОП Іван 50 $')).toBe(true);
+    expect(hasMultipleOrdersOrRequisites('Оплата\nФОП Гук $100\nФОП Іван $50')).toBe(true);
+    expect(hasMultipleOrdersOrRequisites('0000-066717\nЧернявський Владислав\n$150')).toBe(false);
+  });
+
+  it.each([
+    ['150 $', Currency.USD],
+    ['$150', Currency.USD],
+    ['150$', Currency.USD],
+    ['150 usd', Currency.USD],
+    ['150 дол.', Currency.USD],
+    ['150 доларів', Currency.USD],
+    ['150 грн', Currency.UAH],
+    ['150', Currency.UAH],
+    ['Оплата 200\nДолинська Марія', Currency.UAH],
+    ['https://docs.google.com/spreadsheets/d/1$5/edit', Currency.UAH],
+  ])('should tell the currency of %p', (text, currency) => {
+    expect(messageCurrency(unitAfterAmount(text))).toEqual({ ok: true, currency });
+  });
+
+  it('should turn a leading "$" into a trailing unit, but leave a "$" glued to a word alone', () => {
+    expect(unitAfterAmount('Сума: $1 500, курс 45')).toBe('Сума: 1 500 $, курс 45');
+    expect(unitAfterAmount('url?x=$5')).toBe('url?x=$5');
+    expect(unitAfterAmount('150 $')).toBe('150 $');
+  });
+
+  it('should not pull the next line or a time into a trailing "$"', () => {
+    expect(unitAfterAmount('0000-068772 100 $\n0000-068773 50 $')).toBe(
+      '0000-068772 100 $\n0000-068773 50 $',
+    );
+    expect(unitAfterAmount('ФОП Гук 590.50 $ 10:50')).toBe('ФОП Гук 590.50 $ 10:50');
   });
 });
 

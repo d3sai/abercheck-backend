@@ -267,6 +267,17 @@ describe('OrdersService', () => {
       comment: 'весь текст',
     };
 
+    it('should give every number of a dollar group the dollar currency', async () => {
+      await service.createGroup(7, items, { ...common, currency: Currency.USD });
+
+      const calls = tx.order.create.mock.calls as [{ data: { currency: Currency } }][];
+      expect(calls.map(([{ data }]) => data.currency)).toEqual([
+        Currency.USD,
+        Currency.USD,
+        Currency.USD,
+      ]);
+    });
+
     it('should create each number as its own order under the first number', async () => {
       const created = await service.createGroup(7, items, common);
 

@@ -1,7 +1,7 @@
-import { Prisma } from '../../../generated/prisma/client';
-import { MONEY_PATTERN } from '../../../common/money';
+import { Currency, Prisma } from '../../../generated/prisma/client';
+import { MONEY_PATTERN, MONEY_UNIT_SRC } from '../../../common/money';
 import type { RequisiteInput } from '../../requisites/requisites.service';
-import { formatMoneyGrn as money } from '../core/format';
+import { formatMoneyIn } from '../core/format';
 import { parseExchangeRate } from './order-draft.parsers';
 import {
   AMOUNT_SRC,
@@ -13,10 +13,12 @@ import {
   deriveRequisiteLines,
   loneRate,
   numericDates,
+  messageCurrency,
   parseDateTime,
   paymentAmount,
   sum,
   toDecimal,
+  unitAfterAmount,
 } from './requisites.parser';
 
 // "Закриття заборгованості клієнта": the client paid off their debt — to one of our FOPs, or to
@@ -26,6 +28,8 @@ export interface MinusPlan {
   /** "за підрахунком 31 серпня 2026", "за період 07.09." — not always given. */
   period: string | null;
   paidAt: Date | null;
+  /** Every amount of the message — the total and each payment — is in this currency. */
+  currency: Currency;
   total: Prisma.Decimal;
   ourFop: string | null;
   requisiteLines: RequisiteInput[];
@@ -65,8 +69,11 @@ const ON_CARD = /^(?:на\s+)?(?:карт[ауиі]|картку|рахунок)
 // Tolerates a stray dot in the time, as typed: "05.09.2026 12.:36".
 const DATE_LINE =
   /^(\d{1,2}[./]\d{1,2}[./](?:\d{4}|\d{2}))(?:[ ,]+(\d{1,2})\s*[.:]{1,2}\s*(\d{2}))?$/u;
-const LEADING_AMOUNT = new RegExp(String.raw`^(${AMOUNT_SRC})(?:\s*грн\.?)?`, 'iu');
-const AMOUNT_GRN = new RegExp(String.raw`(?<![\d.,:])(${AMOUNT_SRC})\s*грн\.?`, 'iu');
+const LEADING_AMOUNT = new RegExp(String.raw`^(${AMOUNT_SRC})(?:\s*${MONEY_UNIT_SRC})?`, 'iu');
+const AMOUNT_WITH_UNIT = new RegExp(
+  String.raw`(?<![\d.,:])(${AMOUNT_SRC})\s*${MONEY_UNIT_SRC}`,
+  'iu',
+);
 
 const trimPunctuation = (text: string): string => text.replace(/^[\s:\-–—,]+|[\s:\-–—,.]+$/gu, '');
 // "(з урахуванням 1%)" → "з урахуванням 1%".
@@ -93,7 +100,7 @@ function normalizeDate(line: string): string | null {
 
 // A line that is nothing but an amount (plus maybe a note after it) — the total, not a payer.
 function bareAmount(line: string): { amount: Prisma.Decimal; note: string } | null {
-  const match = AMOUNT_GRN.exec(line);
+  const match = AMOUNT_WITH_UNIT.exec(line);
   if (!match || /[\p{L}\d]/u.test(line.slice(0, match.index))) {
     return null;
   }
@@ -109,13 +116,20 @@ function splitPeriod(text: string): { name: string; period: string | null } {
   return { name, period: match ? trimPunctuation(match[1]!) : null };
 }
 
-export function parseMinusClosing(text: string): MinusResult {
-  if (text.trim().length > REQUISITES_MAX_LENGTH) {
+export function parseMinusClosing(raw: string): MinusResult {
+  if (raw.trim().length > REQUISITES_MAX_LENGTH) {
     return {
       ok: false,
       errors: [`Повідомлення задовге — максимум ${REQUISITES_MAX_LENGTH} символів.`],
     };
   }
+  const text = unitAfterAmount(raw);
+  const detected = messageCurrency(text);
+  if (!detected.ok) {
+    return { ok: false, errors: [detected.error] };
+  }
+  const { currency } = detected;
+  const money = (value: Prisma.Decimal): string => formatMoneyIn(value, currency);
 
   // One object rather than loose lets: the take* helpers below fill it in.
   const found: {
@@ -309,6 +323,7 @@ export function parseMinusClosing(text: string): MinusResult {
       clientName: name.slice(0, 255),
       period: period?.slice(0, 255) ?? null,
       paidAt,
+      currency,
       total: stated,
       ourFop: found.ourFop,
       requisiteLines,

@@ -11,10 +11,6 @@ export function formatMoney(value: Prisma.Decimal): string {
   return fraction === '00' ? grouped : `${grouped},${fraction}`;
 }
 
-export function formatMoneyGrn(value: Prisma.Decimal): string {
-  return `${formatMoney(value)} грн`;
-}
-
 export function formatMoneyIn(value: Prisma.Decimal, currency: Currency): string {
   return `${formatMoney(value)} ${currency === Currency.USD ? '$' : 'грн'}`;
 }

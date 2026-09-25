@@ -1,7 +1,12 @@
-import { type Order, type OrderRequisite, Prisma } from '../../../generated/prisma/client';
+import {
+  type Currency,
+  type Order,
+  type OrderRequisite,
+  Prisma,
+} from '../../../generated/prisma/client';
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
-import { escapeHtml, formatKyivDateTime, formatMoneyGrn as money } from '../core/format';
+import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
 import { formatRate } from '../notifications/order-templates';
 import type { MinusPlan } from './minus-closing.parser';
 import { requisiteBlock } from './requisites.messages';
@@ -17,6 +22,7 @@ interface ClosingView {
   clientName: string;
   period: string | null;
   paidAt: Date | null;
+  currency: Currency;
   total: Prisma.Decimal;
   ourFop: string | null;
   requisites: { payerName: string; account: string | null; amount: Prisma.Decimal; paidAt: Date }[];
@@ -31,14 +37,16 @@ function closingLines(view: ClosingView): string[] {
   const period = view.period ? ` ${escapeHtml(view.period)}` : '';
   const received = [
     ...(view.ourFop ? [`Наш ФОП: ${escapeHtml(view.ourFop)}`] : []),
-    ...view.requisites.map((r) => requisiteBlock(r.payerName, r.account, r.amount, r.paidAt)),
+    ...view.requisites.map((r) =>
+      requisiteBlock(r.payerName, r.account, r.amount, view.currency, r.paidAt),
+    ),
   ];
   return [
     '➖ <b>Закриття заборгованості клієнта</b>',
     ...(view.orderNumber ? [`№ <b>${escapeHtml(view.orderNumber)}</b>`] : []),
     `Клієнт: <b>${escapeHtml(view.clientName)}</b>${period}`,
     `Дата: ${view.paidAt ? formatKyivDateTime(view.paidAt) : '—'}`,
-    `Загальна сума: <b>${money(view.total)}</b>`,
+    `Загальна сума: <b>${money(view.total, view.currency)}</b>`,
     `Оплату отримано на:${received.length > 0 ? '' : ' —'}`,
     ...received.flatMap((line) => ['', line]),
     ...(view.comment ? ['', `Коментар: ${escapeHtml(view.comment)}`] : []),
@@ -65,6 +73,7 @@ export function minusHint(): BotReply {
       'Оплата на картку чи чужий ФОП: кожен платіж окремим рядком, наприклад:',
       '',
       `<pre>${escapeHtml(example)}</pre>`,
+      'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
       '',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
     ].join('\n'),
@@ -92,7 +101,7 @@ export function minusPreview(plan: MinusPlan, files: number): BotReply {
 export function minusCreatedReply(order: Order): BotReply {
   return {
     html: [
-      `➖ Закриття мінусу № <b>${escapeHtml(order.orderNumber)}</b> створено · ${money(order.amountDue)}`,
+      `➖ Закриття мінусу № <b>${escapeHtml(order.orderNumber)}</b> створено · ${money(order.amountDue, order.currency)}`,
       escapeHtml(order.clientName),
     ].join('\n'),
   };

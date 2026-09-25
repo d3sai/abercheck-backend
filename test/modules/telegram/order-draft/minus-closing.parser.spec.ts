@@ -278,4 +278,41 @@ describe('parseMinusClosing', () => {
     expect(result.ok).toBe(false);
     expect(!result.ok && result.errors.join(' ')).toContain(error);
   });
+
+  describe('dollars', () => {
+    it('should read a closing in dollars, with the "$" before the sum', () => {
+      const plan = planOf(
+        'Закриття мінусу клієнта Гук Руслан\n05.09.2026 12:36\nСума: $1 500\nОтримано на: ФОП Берчатов М. М.',
+      );
+
+      expect(plan).toMatchObject({
+        clientName: 'Гук Руслан',
+        currency: 'USD',
+        ourFop: 'Берчатов М. М.',
+      });
+      expect(plan.total.toFixed(2)).toBe('1500.00');
+    });
+
+    it('should read card payments in dollars and word the mismatch in dollars', () => {
+      const plan = planOf(
+        'Клієнт: Гук Руслан\nДата: 05.09.2026\nЗагальна сума: 150 $\n4441 1110 6964 5962 Андріанов Олександр 100 $ 14:59',
+      );
+
+      expect(plan.currency).toBe('USD');
+      expect(plan.requisiteLines).toEqual([
+        expect.objectContaining({ payerName: 'Андріанов Олександр', amount: '100.00' }),
+      ]);
+      expect(plan.warnings).toEqual(
+        expect.arrayContaining([expect.stringContaining('різниця 50 $')]),
+      );
+    });
+
+    it('should stay in hryvnias by default and refuse mixing the two', () => {
+      expect(planOf(SAMPLES.template).currency).toBe('UAH');
+      expect(parseMinusClosing('Клієнт: Гук\nСума: 100 грн\n50 $')).toEqual({
+        ok: false,
+        errors: ['Гривні й долари в одному повідомленні — надішліть окремо.'],
+      });
+    });
+  });
 });

@@ -1,8 +1,8 @@
-import { Prisma } from '../../../generated/prisma/client';
-import { MONEY_PATTERN } from '../../../common/money';
+import { Currency, Prisma } from '../../../generated/prisma/client';
+import { MONEY_PATTERN, MONEY_UNIT_SRC, UAH_UNIT_SRC, USD_UNIT_SRC } from '../../../common/money';
 import { kyivDateTime, kyivParts } from '../../../common/kyiv-time';
 import type { RequisiteInput } from '../../requisites/requisites.service';
-import { formatMoneyGrn as money } from '../core/format';
+import { formatMoneyIn } from '../core/format';
 import { parseExchangeRate } from './order-draft.parsers';
 
 export interface PlanItem {
@@ -15,6 +15,8 @@ export type PlanKind = 'single' | 'group';
 
 export interface RequisitesPlan {
   kind: PlanKind;
+  /** One message is one payment: every amount in it is in this currency. */
+  currency: Currency;
   items: PlanItem[];
   total: Prisma.Decimal;
   derivedTotal: boolean;
@@ -33,9 +35,9 @@ const COMMENT_MAX_LENGTH = 2000;
 const ZERO = new Prisma.Decimal(0);
 
 export const AMOUNT_SRC = String.raw`(?:\d{1,3}(?:[\u00a0\u202f ]\d{3})+|\d+)(?:[.,]\d{1,2})?`;
-const AMOUNT = new RegExp(String.raw`(?<![\d.,:])(${AMOUNT_SRC})\s*грн\.?`, 'giu');
+const AMOUNT = new RegExp(String.raw`(?<![\d.,:])(${AMOUNT_SRC})\s*${MONEY_UNIT_SRC}`, 'giu');
 const TOTAL_LABEL = new RegExp(
-  String.raw`^\s*(?:загальна\s+сума|разом|всього|сума)\s*[:\-–—]?\s*(${AMOUNT_SRC})\s*(?:грн\.?)?\s*$`,
+  String.raw`^\s*(?:загальна\s+сума|разом|всього|сума)\s*[:\-–—]?\s*(${AMOUNT_SRC})\s*${MONEY_UNIT_SRC}?\s*$`,
   'iu',
 );
 const RATE_LABELED = /^\s*курс\s*[:\-–—]?\s*(\d{1,4}(?:[.,]\d{1,4})?)\s*%?\s*$/iu;
@@ -75,6 +77,37 @@ const WORD_DATE = new RegExp(
 const PAYMENT_LINE = /^\s*(?:фоп|тов)\s/iu;
 const TRAILING_BARE_AMOUNT = new RegExp(String.raw`[\s\-–—:,;]*(?<![\d.,])${AMOUNT_SRC}$`, 'u');
 const TRAILING_AMOUNT = new RegExp(String.raw`\p{L}[^\d]*?(?<![\d.,])(${AMOUNT_SRC})\s*$`, 'u');
+
+// "$150" → "150 $": the amount readers below expect the unit after the number. Only a "$" glued
+// to the digits counts (so "590 $ 10:50" keeps its unit), and one glued to a word or a URL is left
+// alone.
+export function unitAfterAmount(text: string): string {
+  const prefixed = new RegExp(
+    String.raw`(?<![\p{L}\p{N}/=?&#%_.~+-])\$(${AMOUNT_SRC})(?!\d)`,
+    'gu',
+  );
+  return text.replace(prefixed, '$1 $$');
+}
+
+const UNIT_AFTER_DIGIT = new RegExp(String.raw`\d\s*(?:(${UAH_UNIT_SRC})|${USD_UNIT_SRC})`, 'giu');
+
+export type CurrencyResult = { ok: true; currency: Currency } | { ok: false; error: string };
+
+// One message is one payment, so all its amounts share a currency; no unit at all means hryvnias.
+export function messageCurrency(text: string): CurrencyResult {
+  let uah = false;
+  let usd = false;
+  for (const match of text.replace(/https?:\/\/\S+/giu, ' ').matchAll(UNIT_AFTER_DIGIT)) {
+    if (match[1]) {
+      uah = true;
+    } else {
+      usd = true;
+    }
+  }
+  return uah && usd
+    ? { ok: false, error: 'Гривні й долари в одному повідомленні — надішліть окремо.' }
+    : { ok: true, currency: usd ? Currency.USD : Currency.UAH };
+}
 
 export function toDecimal(raw: string): Prisma.Decimal {
   return new Prisma.Decimal(raw.replace(/[\s\u00a0\u202f]/g, '').replace(',', '.'));
@@ -139,7 +172,8 @@ export function paymentAmount(line: string): Prisma.Decimal | null {
   return match ? toDecimal(match[1]!) : null;
 }
 
-export function hasMultipleOrdersOrRequisites(text: string): boolean {
+export function hasMultipleOrdersOrRequisites(raw: string): boolean {
+  const text = unitAfterAmount(raw);
   const lines = text.split(/\r?\n/);
   const numbers = new Set(text.match(NUMBER_ANYWHERE) ?? []);
   const amountLines = lines.filter((line) =>
@@ -413,13 +447,20 @@ export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): Requisi
 export const sum = (values: Prisma.Decimal[]): Prisma.Decimal =>
   values.reduce((total, value) => total.plus(value), ZERO);
 
-export function parseRequisites(text: string): RequisitesResult {
-  if (text.trim().length > REQUISITES_MAX_LENGTH) {
+export function parseRequisites(raw: string): RequisitesResult {
+  if (raw.trim().length > REQUISITES_MAX_LENGTH) {
     return {
       ok: false,
       errors: [`Повідомлення задовге — максимум ${REQUISITES_MAX_LENGTH} символів.`],
     };
   }
+  const text = unitAfterAmount(raw);
+  const detected = messageCurrency(text);
+  if (!detected.ok) {
+    return { ok: false, errors: [detected.error] };
+  }
+  const { currency } = detected;
+  const money = (value: Prisma.Decimal): string => formatMoneyIn(value, currency);
 
   const lines = text.split(/\r?\n/);
   const warnings: string[] = [];
@@ -519,7 +560,7 @@ export function parseRequisites(text: string): RequisitesResult {
     for (const item of numbers) {
       if (!item.amount) {
         errors.push(
-          `Біля номера ${item.number} немає суми — напишіть її зі словом «грн» у тому ж рядку.`,
+          `Біля номера ${item.number} немає суми — напишіть її зі словом «грн» (або знаком $) у тому ж рядку.`,
         );
       }
     }
@@ -540,7 +581,7 @@ export function parseRequisites(text: string): RequisitesResult {
 
   if (errors.length === 0 && total === null) {
     errors.push(
-      'Не знайшов жодної суми. Пишіть суми зі словом «грн» або додайте рядок «Загальна сума: 9 067 грн».',
+      'Не знайшов жодної суми. Пишіть суми зі словом «грн» (або знаком $) або додайте рядок «Загальна сума: 9 067 грн».',
     );
   }
   if (errors.length === 0 && total !== null) {
@@ -567,6 +608,7 @@ export function parseRequisites(text: string): RequisitesResult {
     ok: true,
     plan: {
       kind,
+      currency,
       items,
       total,
       derivedTotal,

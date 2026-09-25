@@ -724,6 +724,7 @@ UA549358710000067320000088286"`;
         ],
         {
           clientName: 'Гук Віктор Степанович ФОП',
+          currency: 'UAH',
           exchangeRate: '44.9',
           comment: '18.09.2026 21:28',
         },
@@ -734,6 +735,52 @@ UA549358710000067320000088286"`;
         expect.stringContaining('Разом: 1 912,82 грн'),
       );
       expect(reply.html).toContain('3 номерів');
+    });
+
+    it('should create several numbers paid in dollars as a dollar group', async () => {
+      orders.createGroup.mockResolvedValue(
+        groupOrders().map((order) => ({ ...order, currency: 'USD' })),
+      );
+      const preview = await begin('0000-068772 100 $\n0000-068773 $50\nЗагальна сума: 150 $');
+      expect(preview?.html).toContain('Разом: <b>150 $</b>');
+      expect(preview?.html).not.toContain('грн');
+
+      const reply = await service.confirmRequisites(MANAGER);
+
+      expect(orders.createGroup).toHaveBeenCalledWith(
+        MANAGER.id,
+        [
+          { orderNumber: '0000-068772', amountDue: '100.00' },
+          { orderNumber: '0000-068773', amountDue: '50.00' },
+        ],
+        expect.objectContaining({ currency: 'USD' }),
+      );
+      expect(reply.html).toContain('3 номерів');
+      expect(reply.html).toContain('$');
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('$'));
+    });
+
+    it('should create one dollar order for several recipients', async () => {
+      orders.create.mockResolvedValue({ ...singleOrder(), currency: 'USD' });
+      await begin(
+        '0000-068652\nФОП Берчатов М.М - 590.50 $ 10:50\nФОП Берчатова Л.О - 400 $ 10:50',
+      );
+
+      await service.confirmRequisites(MANAGER);
+
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        expect.objectContaining({ currency: 'USD', amountDue: '990.50', orderType: 'REGULAR' }),
+        { notify: false, addPart: false },
+      );
+    });
+
+    it('should tell hryvnias and dollars in one message to be sent separately', async () => {
+      const reply = await begin('0000-068772 100 грн\n0000-068773 50 $');
+
+      expect(reply?.html).toContain('Гривні й долари в одному повідомленні');
+      expect(reply?.buttons).toBeUndefined();
+      expect(orders.createGroup).not.toHaveBeenCalled();
     });
 
     it('should create one REGULAR order for several recipients and attach each as a structured requisite', async () => {
@@ -749,6 +796,7 @@ UA549358710000067320000088286"`;
         MANAGER.id,
         {
           clientName: 'ФОП Берчатов М.М',
+          currency: 'UAH',
           exchangeRate: '44.9',
           comment: '19.09.2026',
           orderType: 'REGULAR',
@@ -884,7 +932,7 @@ UA549358710000067320000088286"`;
 
     describe('when a number is already in the system', () => {
       const existing = (orderNumber: string) => ({
-        order: { orderNumber, clientName: 'Хтось', amountDue: dec('100') },
+        order: { orderNumber, clientName: 'Хтось', amountDue: dec('100'), currency: 'UAH' },
         amountPaid: dec('0'),
       });
 
@@ -900,6 +948,15 @@ UA549358710000067320000088286"`;
           notify: false,
           addPart: true,
         });
+      });
+
+      it('should refuse a dollar part of a number that is in hryvnias', async () => {
+        orders.findWithBalance.mockResolvedValue(existing('0000-068652'));
+
+        const reply = await begin('0000-068652\nФОП Берчатов М.М - 590.50 $ 10:50');
+
+        expect(reply?.html).toContain('в іншій валюті');
+        expect(reply?.buttons).toBeUndefined();
       });
 
       it('should refuse when the number belongs to another group', async () => {
@@ -989,6 +1046,33 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       return service.handleText(MANAGER, text);
     };
 
+    it('should create a closing in dollars', async () => {
+      orders.create.mockResolvedValue({
+        ...closing(),
+        amountDue: new Prisma.Decimal('1500'),
+        currency: 'USD',
+      });
+
+      const preview = await begin(
+        'Закриття мінусу Гук Руслан\n05.09.2026 12:36\nСума: $1 500\nФОП Берчатов',
+      );
+      expect(preview?.html).toContain('Загальна сума: <b>1 500 $</b>');
+      expect(preview?.html).not.toContain('грн');
+
+      const reply = await service.confirmMinus(MANAGER);
+
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        expect.objectContaining({
+          orderType: 'MINUS_CLOSING',
+          currency: 'USD',
+          amountDue: '1500.00',
+        }),
+        { notify: false },
+      );
+      expect(reply.html).toContain('1 500 $');
+    });
+
     it('should show the template and arm waiting for the very next message', () => {
       const reply = service.startMinus(USER);
 
@@ -1012,6 +1096,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
           orderType: 'MINUS_CLOSING',
           clientName: 'Гук Руслан',
           amountDue: '27409.00',
+          currency: 'UAH',
           exchangeRate: undefined,
           comment: '№ 0000-065607 · з урахуванням 1%',
           paidAt: new Date('2026-09-05T09:36:00Z'),
