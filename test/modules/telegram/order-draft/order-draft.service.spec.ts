@@ -210,7 +210,7 @@ describe('OrderDraftService', () => {
         '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%',
       );
 
-      expect(preview?.html).toContain('кілька номерів однією оплатою');
+      expect(preview?.html).toContain('Кілька номерів однією оплатою');
     });
 
     it('should leave the labelled classic template alone even if a field value looks like a card', async () => {
@@ -716,7 +716,7 @@ UA549358710000067320000088286"`;
     it('should show what it understood and create nothing until the manager agrees', async () => {
       const reply = await begin(GROUP);
 
-      expect(reply?.html).toContain('кілька номерів однією оплатою');
+      expect(reply?.html).toContain('Кілька номерів однією оплатою');
       expect(reply?.html).toContain('№ <b>0000-068773</b> — 971,83 грн');
       expect(reply?.html).toContain('Разом: <b>1 912,82 грн</b>');
       expect(
@@ -849,7 +849,7 @@ UA549358710000067320000088286"`;
 
       orders.create.mockResolvedValue(singleOrder());
       const retry = await service.handleText(MANAGER, SINGLE);
-      expect(retry?.html).toContain('Зрозумів так');
+      expect(retry?.html).toContain('Підпис у списках');
     });
 
     it('should let the manager correct the message', async () => {
@@ -857,7 +857,7 @@ UA549358710000067320000088286"`;
 
       expect(service.editRequisites(USER).html).toContain('Надішліть виправлене');
       expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
-      expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Зрозумів так');
+      expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Підпис у списках');
     });
 
     it('should treat even a perfectly normal order sent while armed via the escape hatch', async () => {
@@ -866,7 +866,7 @@ UA549358710000067320000088286"`;
         '\n',
       );
       const preview = await begin(classic);
-      expect(preview?.html).toContain('Зрозумів так');
+      expect(preview?.html).toContain('Підпис у списках');
       orders.create.mockResolvedValue(
         createdOrder({ orderNumber: '0000-066092', clientName: 'Носенко Роман' }),
       );
@@ -926,7 +926,7 @@ UA549358710000067320000088286"`;
       service.startRequisites(USER);
       const reply = await service.addFile(MANAGER, file(), SINGLE);
 
-      expect(reply.html).toContain('Зрозумів так');
+      expect(reply.html).toContain('Підпис у списках');
       expect(reply.html).toContain('Файлів: 1');
     });
 
@@ -1031,7 +1031,7 @@ UA549358710000067320000088286"`;
 
       expect(reply.html).toContain("щойно з'явився");
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
-      expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Зрозумів так');
+      expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Підпис у списках');
     });
   });
 
@@ -1153,7 +1153,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
     it('should read a message without a number as a closing only while armed', async () => {
       const armed = await begin('Гук Руслан\n27 409 грн');
-      expect(armed?.html).toContain('Зрозумів так');
+      expect(armed?.html).toContain('Закриття заборгованості клієнта');
 
       service.cancel(USER);
       const plain = await service.handleText(MANAGER, 'Гук Руслан\n27 409 грн');
@@ -1175,7 +1175,9 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
       expect(service.editMinus(USER).html).toContain('Надішліть виправлене');
       expect((await service.confirmMinus(MANAGER)).html).toContain('Немає даних');
-      expect((await service.handleText(MANAGER, EXAMPLE))?.html).toContain('Зрозумів так');
+      expect((await service.handleText(MANAGER, EXAMPLE))?.html).toContain(
+        'Закриття заборгованості клієнта',
+      );
     });
   });
 
@@ -1198,18 +1200,20 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
     };
 
     beforeEach(() => {
-      payments.findByExternalId.mockResolvedValue(null);
       orders.findWithBalance.mockImplementation((number: string) =>
         Promise.resolve(number === '0000-065651' ? existing() : null),
       );
     });
 
-    it('should create the new numbers and pay every number, the existing one included', async () => {
-      orders.createGroup.mockResolvedValue([createdOrder({ orderNumber: '0000-062265' })]);
-      payments.ingest.mockResolvedValue({ kind: 'recorded', order: createdOrder() });
+    it('should create only the new numbers, unpaid, and record no payment', async () => {
+      orders.createGroup.mockResolvedValue([
+        createdOrder({ orderNumber: '0000-062265' }),
+        createdOrder({ orderNumber: '0000-062937' }),
+      ]);
 
       const preview = await begin();
       expect(preview?.html).toContain('0000-065651</b> — 323,29 $ (уже є в системі)');
+      expect(preview?.html).toContain('Створю нові номери');
 
       const reply = await service.confirmKit(MANAGER);
 
@@ -1224,40 +1228,21 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
           comment: 'Оплата на Кит · код доступу 647143353',
         }),
       );
-      expect(payments.ingest).toHaveBeenCalledTimes(3);
-      [
-        ['0000-062265', '2696.71'],
-        ['0000-062937', '480.00'],
-        ['0000-065651', '323.29'],
-      ].forEach(([number, amount], index) => {
-        expect(payments.ingest).toHaveBeenNthCalledWith(
-          index + 1,
-          expect.objectContaining({
-            external_transaction_id: `kit:647143353:${number}`,
-            order_number: number,
-            amount,
-            currency: 'USD',
-            paid_at: '2026-08-21T11:44:00.000Z',
-          }),
-        );
-      });
-      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('647143353'));
-      expect(reply.html).toContain('Оплату на Кит записано · 3 500 $');
-    });
-
-    it('should refuse the same transfer sent twice', async () => {
-      payments.findByExternalId.mockResolvedValue({ id: 1 });
-
-      expect((await begin())?.html).toContain('уже зареєстровано');
-    });
-
-    it('should refuse to pay a cancelled or hryvnia number', async () => {
-      orders.findWithBalance.mockResolvedValue(existing('CANCELLED'));
-      expect((await begin())?.html).toContain('0000-065651 скасовано');
-
-      orders.findWithBalance.mockResolvedValue(existing('AWAITING_PAYMENT', 'UAH'));
-      expect((await begin())?.html).toContain('у гривнях');
       expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('647143353'));
+      expect(reply.html).toContain('«Оплата на Кит» надіслано адмінам · 3 500 $');
+      expect(reply.html).toContain('Нових номерів: 2');
+    });
+
+    it('should only tell the admins when every number already exists', async () => {
+      orders.findWithBalance.mockResolvedValue(existing());
+
+      expect((await begin())?.html).toContain('Усі номери вже є в системі');
+      const reply = await service.confirmKit(MANAGER);
+
+      expect(orders.createGroup).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
+      expect(reply.html).not.toContain('Нових номерів');
     });
   });
 

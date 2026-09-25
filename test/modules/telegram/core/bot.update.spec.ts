@@ -458,7 +458,7 @@ describe('BotUpdate', () => {
     it('should refuse a payment-report-shaped message with guidance when /requisites was never sent', async () => {
       const replies = await say(GROUP);
 
-      expect(replies[0]!.text).not.toContain('кілька номерів однією оплатою');
+      expect(replies[0]!.text).not.toContain('Кілька номерів однією оплатою');
       expect(replies[0]!.text).toContain('кілька номерів або чужі реквізити');
       expect(replies[0]!.text).toContain(MENU_LABEL.Requisites);
       expect(replies[0]!.text).toContain('/requisites');
@@ -472,7 +472,7 @@ describe('BotUpdate', () => {
 
       const preview = await say(GROUP);
 
-      expect(preview[0]!.text).toContain('кілька номерів однією оплатою');
+      expect(preview[0]!.text).toContain('Кілька номерів однією оплатою');
       expect(preview[0]!.reply_markup?.inline_keyboard?.flat().map((b) => b.callback_data)).toEqual(
         ['req:ok', 'req:edit', 'req:regular'],
       );

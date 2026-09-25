@@ -27,6 +27,11 @@ describe('parseKit', () => {
     expect(plan.warnings).toEqual([]);
   });
 
+  it('skips a heading with nothing after its colon', () => {
+    const result = parseKit(`Наприклад :\n${EXAMPLE}`);
+    expect(result.ok && result.plan.comment).toBeNull();
+  });
+
   it('warns when the numbers do not add up to the transfer', () => {
     const result = parseKit(EXAMPLE.replace('480,00', '400,00'));
     expect(result.ok && result.plan.warnings).toEqual([

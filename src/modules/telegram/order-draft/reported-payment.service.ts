@@ -17,7 +17,7 @@ export interface ReportedItem {
 }
 
 export interface ReportedPayment {
-  /** Names both the new orders and the payment's payer line: "Оплата на Кит", "Оплата готівкою". */
+  /** Names the new orders: "Оплата готівкою". */
   label: string;
   currency: Currency;
   items: ReportedItem[];
@@ -36,7 +36,7 @@ export type ReportCheck =
   | { ok: false; alreadyRecorded: true }
   | { ok: false; alreadyRecorded: false; errors: string[] };
 
-// Money the manager reports as already received (a Кит transfer, cash) that no bank statement will
+// Money the manager reports as already received (cash) that no bank statement will
 // ever bring in: the missing 1C numbers are created, then each number gets its payment, exactly as
 // if the bank had sent it — same statuses, same notices.
 @Injectable()

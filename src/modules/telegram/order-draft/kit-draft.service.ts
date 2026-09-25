@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Currency, type Manager, type Order } from '../../../generated/prisma/client';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
+import { OrdersService } from '../../orders/orders.service';
 import type { BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
@@ -9,12 +10,11 @@ import { DraftModeStore } from './draft-mode.store';
 import { adminKitMessage, kitCreatedReply, kitHint, kitPreview } from './kit.messages';
 import { type KitPlan, parseKit } from './kit.parser';
 import { PendingFilesStore } from './pending-files.store';
-import { type ReportedItem, ReportedPaymentService } from './reported-payment.service';
 import { requisitesErrors } from './requisites.messages';
 
 export interface KitDraft {
   plan: KitPlan;
-  /** Numbers already in the system: they only get the payment, nothing is created for them. */
+  /** Numbers already in the system: nothing is created for them. */
   existing: string[];
   expiresAt: number;
 }
@@ -30,16 +30,13 @@ const KIT_MODE_TTL_MS = 30 * 60_000;
 
 const KIT_LABEL = 'Оплата на Кит';
 
-// One payment per number and transfer, so sending the same message twice never pays twice.
-const kitItems = (plan: KitPlan): ReportedItem[] =>
-  plan.items.map((item) => ({ ...item, paymentId: `kit:${plan.accessCode}:${item.number}` }));
-
 // "💵 Оплата на Кит": arming the mode, reading one message in the Кит template into a preview, then
-// recording the transfer's share on every number (ReportedPaymentService).
+// creating the numbers not yet in the system and telling the admins. It records no payment: the
+// admins attach it themselves.
 @Injectable()
 export class KitDraftService {
   constructor(
-    private readonly reported: ReportedPaymentService,
+    private readonly orders: OrdersService,
     private readonly pendingFiles: PendingFilesStore,
     private readonly drafts: KitDraftStore,
     private readonly sender: TelegramSender,
@@ -73,18 +70,16 @@ export class KitDraftService {
       return requisitesErrors(parsed.errors);
     }
     const { plan } = parsed;
-    const check = await this.reported.check(kitItems(plan), Currency.USD);
-    if (!check.ok) {
-      return check.alreadyRecorded
-        ? { html: '⚠️ Цей переказ уже зареєстровано.' }
-        : requisitesErrors(check.errors);
-    }
+    const found = await Promise.all(
+      plan.items.map((item) => this.orders.findWithBalance(item.number)),
+    );
+    const existing = plan.items.filter((_, index) => found[index]).map((item) => item.number);
     this.drafts.setDraft(manager.telegramId, {
       plan,
-      existing: check.existing,
+      existing,
       expiresAt: Date.now() + KIT_DRAFT_TTL_MS,
     });
-    return kitPreview(plan, check.existing, this.pendingFiles.list(manager.telegramId).length);
+    return kitPreview(plan, existing, this.pendingFiles.list(manager.telegramId).length);
   }
 
   async confirm(manager: Manager): Promise<BotReply> {
@@ -93,22 +88,27 @@ export class KitDraftService {
       return { html: '⚠️ Немає даних для відправки. Надішліть повідомлення ще раз.' };
     }
     const { plan, existing } = draft;
+    const fresh = plan.items.filter((item) => !existing.includes(item.number));
 
-    let fileOrder: Order | undefined;
+    let created: Order[] = [];
     try {
-      fileOrder = await this.reported.record(manager, {
-        label: KIT_LABEL,
-        currency: Currency.USD,
-        items: kitItems(plan),
-        existing,
-        paidAt: plan.paidAt,
-        payerName: KIT_LABEL,
-        receivingAccount: 'Кит',
-        purpose: `Код доступу ${plan.accessCode}`,
-        comment: [`${KIT_LABEL} · код доступу ${plan.accessCode}`, plan.comment]
-          .filter(Boolean)
-          .join(' · '),
-      });
+      if (fresh.length > 0) {
+        created = await this.orders.createGroup(
+          manager.id,
+          fresh.map((item) => ({
+            orderNumber: item.number,
+            amountDue: item.amount.toFixed(2),
+          })),
+          {
+            clientName: KIT_LABEL,
+            currency: Currency.USD,
+            paidAt: plan.paidAt ?? undefined,
+            comment: [`${KIT_LABEL} · код доступу ${plan.accessCode}`, plan.comment]
+              .filter(Boolean)
+              .join(' · '),
+          },
+        );
+      }
     } catch (error) {
       if (error instanceof OrderNumberTakenError) {
         this.drafts.arm(manager.telegramId, Date.now() + KIT_MODE_TTL_MS);
@@ -122,12 +122,17 @@ export class KitDraftService {
 
     const files = this.pendingFiles.take(manager.telegramId);
     const notice = adminKitMessage(plan, existing, manager.name);
-    if (files.length > 0 && fileOrder) {
+    // With every number already in the system, the files go to the first of them.
+    const fileOrder =
+      files.length > 0
+        ? (created[0] ?? (await this.orders.findWithBalance(existing[0]!))?.order)
+        : undefined;
+    if (fileOrder) {
       await this.notifier.notify(fileOrder, manager, files, notice);
     } else {
       await this.sender.sendToAdmins(notice);
     }
-    return kitCreatedReply(plan);
+    return kitCreatedReply(plan, created.length);
   }
 
   pendingUserIds(now: number): bigint[] {

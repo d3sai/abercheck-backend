@@ -82,8 +82,6 @@ export function minusHint(): BotReply {
 
 export function minusPreview(plan: MinusPlan, files: number): BotReply {
   const lines = [
-    '<b>Зрозумів так:</b>',
-    '',
     ...closingLines({
       ...plan,
       requisites: plan.requisiteLines.map((r) => ({ ...r, amount: new Prisma.Decimal(r.amount) })),

@@ -47,6 +47,9 @@ const DATE_ONLY = /^\s*\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:\s+\d{1,2}:\d{2})?\s*$/u;
 const NUMBER_AT_START = /^\s*(?:[№#]\s*)?(\d{4}-\d{6})(?!\d)(.*)$/u;
 const NEAR_MISS_AT_START = /^\s*(?:[№#]\s*)?(\d{3}-\d{6})(?!\d)(.*)$/u;
 const NUMBER_ANYWHERE = /(?<!\d)\d{4}-\d{6}(?!\d)/gu;
+// A heading with nothing after its colon — "Зразок :", "Наприклад :", "Замовлення та сума в
+// доларах :" — carries no data of its own.
+export const LABEL_ONLY = /^[\p{L}\s'’]+:$/u;
 export const CARD = /(?<!\d)(?:\d{4}[\u00a0 -]){3}\d{4}(?!\d)/u;
 export const IBAN = /(?<![A-Za-z\d])UA\d{27}(?!\d)/u;
 const DATE = /\d{1,2}[./]\d{1,2}[./]\d{2,4}/gu;

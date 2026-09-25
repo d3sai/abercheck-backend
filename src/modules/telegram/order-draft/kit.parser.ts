@@ -3,6 +3,7 @@ import { MONEY_PATTERN, UAH_UNIT_SRC } from '../../../common/money';
 import { formatMoneyIn } from '../core/format';
 import {
   AMOUNT_SRC,
+  LABEL_ONLY,
   REQUISITES_MAX_LENGTH,
   parseDateTime,
   sum,
@@ -57,7 +58,7 @@ export function parseKit(raw: string): KitResult {
 
   for (const original of text.split(/\r?\n/)) {
     const line = original.replace(/\s+/g, ' ').trim();
-    if (line === '' || HEADER.test(line) || ITEMS_HEADING.test(line)) {
+    if (line === '' || HEADER.test(line) || ITEMS_HEADING.test(line) || LABEL_ONLY.test(line)) {
       continue;
     }
     const numbers = line.match(NUMBER) ?? [];

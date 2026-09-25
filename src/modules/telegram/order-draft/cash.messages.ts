@@ -43,8 +43,6 @@ export function cashHint(): BotReply {
 
 export function cashPreview(plan: CashPlan, exists: boolean, files: number): BotReply {
   const lines = [
-    '<b>Зрозумів так:</b>',
-    '',
     ...cashLines(plan, exists),
     '',
     exists

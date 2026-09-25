@@ -11,12 +11,12 @@ export const KitAction = {
 
 const usd = (value: Prisma.Decimal): string => formatMoneyIn(value, Currency.USD);
 
-// Reads like the "Оплата на Кит" template the managers fill in; the code is copyable. Numbers
-// already in the system are marked: they only get the payment.
+// Reads like the "Оплата на Кит" template the managers fill in; the access code stands out. Numbers
+// already in the system are marked: nothing is created for them.
 function kitLines(plan: KitPlan, existing: string[]): string[] {
   return [
     '💵 <b>Оплата на Кит</b>',
-    `Код доступу: <code>${escapeHtml(plan.accessCode)}</code>`,
+    `Код доступу: <b>${escapeHtml(plan.accessCode)}</b>`,
     `Загальна сума: <b>${usd(plan.total)}</b>`,
     'Замовлення та сума в доларах:',
     ...plan.items.map(
@@ -52,13 +52,11 @@ export function kitHint(): BotReply {
 
 export function kitPreview(plan: KitPlan, existing: string[], files: number): BotReply {
   const lines = [
-    '<b>Зрозумів так:</b>',
-    '',
     ...kitLines(plan, existing),
     '',
-    existing.length > 0
-      ? 'Нові номери створю, а оплату запишу на кожен номер.'
-      : 'Створю ці номери й одразу запишу на них оплату.',
+    existing.length === plan.items.length
+      ? 'Усі номери вже є в системі. Надішлю шаблон адмінам.'
+      : 'Створю нові номери й надішлю шаблон адмінам.',
     ...(files > 0 ? ['', `Файлів: ${files}`] : []),
     ...(plan.warnings.length > 0 ? ['', ...plan.warnings.map((w) => `⚠️ ${escapeHtml(w)}`)] : []),
   ];
@@ -68,11 +66,12 @@ export function kitPreview(plan: KitPlan, existing: string[], files: number): Bo
   };
 }
 
-export function kitCreatedReply(plan: KitPlan): BotReply {
+export function kitCreatedReply(plan: KitPlan, created: number): BotReply {
   return {
     html: [
-      `💵 Оплату на Кит записано · ${usd(plan.total)}`,
-      `Код доступу: <code>${escapeHtml(plan.accessCode)}</code>`,
+      `✅ «Оплата на Кит» надіслано адмінам · ${usd(plan.total)}`,
+      `Код доступу: <b>${escapeHtml(plan.accessCode)}</b>`,
+      ...(created > 0 ? [`Нових номерів: ${created}`] : []),
     ].join('\n'),
   };
 }

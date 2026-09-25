@@ -29,6 +29,13 @@ describe('parseCash', () => {
     expect(cashPaymentId(plan)).toBe('cash:0000-066498:2026-09-01T12:20:00.000Z:4260.00');
   });
 
+  it('skips a heading with nothing after its colon, as pasted by a manager', () => {
+    const result = parseCash(`Зразок :\n${SAMPLE}`);
+    expect(result.ok && result.plan.handedBy).toBe(
+      'Христина Павлів передала готівку Христині Вихопень ( Саджениці)',
+    );
+  });
+
   it('reads the labelled template, in dollars', () => {
     const result = parseCash(LABELED);
     if (!result.ok) throw new Error(result.errors.join('; '));

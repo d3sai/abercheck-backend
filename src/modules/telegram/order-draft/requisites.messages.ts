@@ -83,11 +83,7 @@ export interface PreviewContext {
 }
 
 export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext): BotReply {
-  const lines: string[] = [
-    plan.kind === 'group'
-      ? '<b>Зрозумів так</b> — кілька номерів однією оплатою:'
-      : '<b>Зрозумів так</b>:',
-  ];
+  const lines: string[] = plan.kind === 'group' ? ['<b>Кілька номерів однією оплатою:</b>'] : [];
 
   if (plan.kind === 'group') {
     for (const item of plan.items) {

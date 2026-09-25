@@ -3,6 +3,7 @@ import { MONEY_PATTERN, MONEY_UNIT_SRC } from '../../../common/money';
 import { detectCurrency, parseExchangeRate, parseOrderNumber } from './order-draft.parsers';
 import {
   AMOUNT_SRC,
+  LABEL_ONLY,
   REQUISITES_MAX_LENGTH,
   numericDates,
   parseDateTime,
@@ -64,7 +65,7 @@ export function parseCash(raw: string): CashResult {
 
   for (const original of unitAfterAmount(raw).split(/\r?\n/)) {
     const line = original.replace(/\s+/g, ' ').trim();
-    if (line === '' || HEADER.test(line)) {
+    if (line === '' || HEADER.test(line) || LABEL_ONLY.test(line)) {
       continue;
     }
     const labeled = LABELS.map(([label, re]) => [label, re.exec(line)?.[1]?.trim()] as const).find(
