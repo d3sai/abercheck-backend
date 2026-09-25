@@ -24,7 +24,10 @@ export interface KitPlan {
 export type KitResult = { ok: true; plan: KitPlan } | { ok: false; errors: string[] };
 
 const HEADER = /^оплата\s+на\s+кит\s*[:\-–—]?\s*$/iu;
-const ACCESS_CODE = /^код(?:\s+доступу)?\s*[:\-–—]?\s*(.*)$/iu;
+// "Код доступу: 647143353" or just "Код: 647143353".
+const ACCESS_CODE = /^код(?:\s+доступу)?(?!\p{L})\s*[:\-–—]?\s*(.*)$/iu;
+// Or the code alone on its line. Six digits or more, so a bare total never passes.
+const BARE_ACCESS_CODE = /^\d{6,64}$/u;
 const TOTAL = /^(?:загальна\s+)?сума\s*[:\-–—]?\s*(.*)$/iu;
 const DATE = /^дата(?:\s+(?:та|і)\s+час)?\s*[:\-–—]?\s*(.*)$/iu;
 // "Замовлення та сума в доларах :" — the heading over the number lines.
@@ -103,11 +106,17 @@ export function parseKit(raw: string): KitResult {
       date = line;
       continue;
     }
+    if (accessCode === null && BARE_ACCESS_CODE.test(line)) {
+      accessCode = line;
+      continue;
+    }
     comments.push(line);
   }
 
   if (!accessCode) {
-    errors.push('Не знайшов код доступу. Додайте рядок «Код доступу: 647143353».');
+    errors.push(
+      'Не знайшов код доступу. Додайте рядок «Код доступу: 647143353» або «Код: 647143353».',
+    );
   }
   if (items.length === 0) {
     errors.push('Не знайшов жодного замовлення. Кожен номер із сумою з нового рядка.');

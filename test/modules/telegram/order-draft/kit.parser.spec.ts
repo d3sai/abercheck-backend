@@ -27,6 +27,14 @@ describe('parseKit', () => {
     expect(plan.warnings).toEqual([]);
   });
 
+  it.each(['Код доступу: 647143353', 'Код: 647143353', 'код 647143353', '647143353'])(
+    'reads the access code from «%s»',
+    (line) => {
+      const result = parseKit(EXAMPLE.replace('Код доступу : 647143353', line));
+      expect(result.ok && result.plan.accessCode).toBe('647143353');
+    },
+  );
+
   it('skips a heading with nothing after its colon', () => {
     const result = parseKit(`Наприклад :\n${EXAMPLE}`);
     expect(result.ok && result.plan.comment).toBeNull();
@@ -47,7 +55,9 @@ describe('parseKit', () => {
   it('refuses without an access code, a number, or with hryvnias', () => {
     expect(parseKit('Загальна сума: 100 дол\n0000-062265 100 дол')).toEqual({
       ok: false,
-      errors: ['Не знайшов код доступу. Додайте рядок «Код доступу: 647143353».'],
+      errors: [
+        'Не знайшов код доступу. Додайте рядок «Код доступу: 647143353» або «Код: 647143353».',
+      ],
     });
     expect(parseKit('Код доступу: 1\nСума: 100 дол').ok).toBe(false);
     expect(parseKit('Код доступу: 1\n0000-062265 100 грн').ok).toBe(false);
