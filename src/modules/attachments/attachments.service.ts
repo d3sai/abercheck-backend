@@ -28,7 +28,7 @@ function fileIdOf(sent: SentMedia): string {
 
 function caption(order: CaptionOrder, uploader: Initiator): string {
   return [
-    `📎 ФОП: <b>${escapeHtml(order.clientName)}</b>`,
+    `📎 <b>${escapeHtml(order.clientName)}</b>`,
     `Замовлення № ${escapeHtml(order.orderNumber)}`,
     `Сума до оплати: ${formatMoneyIn(order.amountDue, order.currency)}`,
     `Додав: ${escapeHtml(uploader.name)}`,

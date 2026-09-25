@@ -48,7 +48,7 @@ export function dailyReportMessage(
 export function underpaidMessage({ order, amountPaid }: OrderWithPaid<OrderWithManager>): string {
   return [
     '🔴 <b>Недоплата</b>',
-    `ФОП: <b>${escapeHtml(order.clientName)}</b>`,
+    `<b>${escapeHtml(order.clientName)}</b>`,
     `Замовлення № ${escapeHtml(order.orderNumber)}`,
     `Сума замовлення: ${formatMoneyIn(order.amountDue, order.currency)}`,
     `Сплачено: ${formatMoneyIn(amountPaid, order.currency)}`,

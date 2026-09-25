@@ -95,7 +95,7 @@ describe('AttachmentsService.saveFromTelegram', () => {
 
     const [, media] = bot.telegram.sendMediaGroup.mock.calls[0] as [number, MediaGroupItem[]];
     expect(media[0]!.caption).toBeUndefined();
-    expect(media[1]!.caption).toContain('📎 ФОП:');
+    expect(media[1]!.caption).toContain('📎 <b>');
     expect(media[1]!.caption).toContain('Замовлення № 0000-066717');
   });
 

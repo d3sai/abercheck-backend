@@ -74,7 +74,7 @@ describe('managerPaymentMessage', () => {
     expect(managerPaymentMessage(notice(OrderStatus.PAID, [fop, tov]))).toBe(
       [
         '🟢 <b>Оплату отримано</b>',
-        'ФОП: <b>Чернявський Владислав</b>',
+        '<b>Чернявський Владислав</b>',
         'Замовлення № 0000-066717',
         'Сума замовлення: 6 158,41 грн',
         '',
@@ -91,7 +91,7 @@ describe('managerPaymentMessage', () => {
     expect(managerPaymentMessage(notice(OrderStatus.PARTIALLY_PAID, [fop]))).toBe(
       [
         '🔵 <b>Отримано часткову оплату</b>',
-        'ФОП: <b>Чернявський Владислав</b>',
+        '<b>Чернявський Владислав</b>',
         'Замовлення № 0000-066717',
         'Сума замовлення: 6 158,41 грн',
         'Отримано: 3 614,32 грн на ФОП Гук В.С',
@@ -115,7 +115,7 @@ describe('managerPaymentMessage', () => {
     expect(managerPaymentMessage(notice(OrderStatus.OVERPAID, [fop, tov, extra]))).toBe(
       [
         '🟠 <b>Виявлено переплату</b>',
-        'ФОП: <b>Чернявський Владислав</b>',
+        '<b>Чернявський Владислав</b>',
         'Замовлення № 0000-066717',
         'Сума замовлення: 6 158,41 грн',
         'Отримано: 6 208,41 грн',
@@ -130,7 +130,7 @@ describe('managerPaymentMessage', () => {
       order: { ...order(OrderStatus.PARTIALLY_PAID), clientName: 'ТОВ <Роги & Копита>' },
     });
 
-    expect(message).toContain('ФОП: <b>ТОВ &lt;Роги &amp; Копита&gt;</b>');
+    expect(message).toContain('<b>ТОВ &lt;Роги &amp; Копита&gt;</b>');
   });
 });
 

@@ -59,7 +59,7 @@ describe('adminOrderCreatedMessage', () => {
     expect(message).toBe(
       [
         '🆕 <b>Нове замовлення</b>',
-        'ФОП: <b>ФОП Берчатова Лариса</b>',
+        '<b>ФОП Берчатова Лариса</b>',
         '№ 0000-067968',
         'Сума: 170,10 грн',
         '',
@@ -94,7 +94,7 @@ describe('adminOrderCreatedMessage', () => {
   it('should escape HTML in the client name', () => {
     const message = adminOrderCreatedMessage(order({ clientName: '<b>Клієнт</b>' }), manager);
 
-    expect(message).toContain('ФОП: <b>&lt;b&gt;Клієнт&lt;/b&gt;</b>');
+    expect(message).toContain('<b>&lt;b&gt;Клієнт&lt;/b&gt;</b>');
   });
 
   it('should add the comment when present', () => {
