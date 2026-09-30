@@ -175,7 +175,9 @@ export class CabinetOrdersController {
     const content = await this.attachments.readFile(attachment);
     res.set({
       'Content-Type': attachment.mimeType,
-      'Content-Disposition': contentDisposition(attachment.filename),
+      'Content-Disposition': contentDisposition(
+        withExtension(attachment.filename, attachment.mimeType),
+      ),
     });
     return new StreamableFile(content);
   }
@@ -210,6 +212,20 @@ export class CabinetOrdersController {
     }
     return owner.id;
   }
+}
+
+const EXTENSION_BY_MIME: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'application/pdf': 'pdf',
+};
+
+// Telegram documents may arrive nameless ("файл"); restore the extension so the OS can open the download.
+function withExtension(filename: string, mimeType: string): string {
+  const extension = EXTENSION_BY_MIME[mimeType];
+  return extension && !/\.[A-Za-z0-9]{1,5}$/.test(filename) ? `${filename}.${extension}` : filename;
 }
 
 function contentDisposition(filename: string): string {
