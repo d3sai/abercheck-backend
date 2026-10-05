@@ -35,7 +35,6 @@ export class CreatePaymentDto {
   @Matches(MONEY_PATTERN, { message: 'amount must be a positive amount with up to 2 decimals' })
   amount!: string;
 
-  // Absent means hryvnias, so senders that predate the field keep working.
   @IsOptional()
   @IsEnum(Currency)
   currency?: Currency;

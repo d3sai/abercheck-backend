@@ -159,7 +159,7 @@ describe('OrderDraftService', () => {
     it('should refuse a message with more than one order number', async () => {
       const reply = await service.handleText(
         MANAGER,
-        '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%',
+        '0000-068772 335,58 грн. ФОП Гук\n0000-068773 971,83 грн. ФОП Гук\n44,9%\nГук Іван\n07.09.2026 14:57',
       );
 
       expect(reply?.html).toContain('кілька номерів або чужі реквізити');
@@ -196,7 +196,7 @@ describe('OrderDraftService', () => {
     it('should still work through /requisites once guided there', async () => {
       const guided = await service.handleText(
         MANAGER,
-        '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%',
+        '0000-068772 335,58 грн. ФОП Гук\n0000-068773 971,83 грн. ФОП Гук\n44,9%\nГук Іван\n07.09.2026 14:57',
       );
       expect(guided?.html).toContain('/requisites');
 
@@ -207,7 +207,7 @@ describe('OrderDraftService', () => {
       ]);
       const preview = await service.handleText(
         MANAGER,
-        '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%',
+        '0000-068772 335,58 грн. ФОП Гук\n0000-068773 971,83 грн. ФОП Гук\n44,9%\nГук Іван\n07.09.2026 14:57',
       );
 
       expect(preview?.html).toContain('Кілька номерів однією оплатою');
@@ -626,9 +626,9 @@ describe('OrderDraftService', () => {
   });
 
   describe('one message: "кілька номерів / реквізити", armed by /requisites', () => {
-    const GROUP = `0000-068772 335,58 грн.
-0000-068773 971,83 грн.
-0000-068774 605,41 грн.
+    const GROUP = `0000-068772 335,58 грн. ФОП Гук
+0000-068773 971,83 грн. ФОП Гук
+0000-068774 605,41 грн. ФОП Гук
 Загальна сума: 1 912,82 грн
 
 18.09.2026 21:28
@@ -735,12 +735,12 @@ UA549358710000067320000088286"`;
       expect(orders.createGroup).toHaveBeenCalledWith(
         MANAGER.id,
         [
-          { orderNumber: '0000-068772', amountDue: '335.58' },
-          { orderNumber: '0000-068773', amountDue: '971.83' },
-          { orderNumber: '0000-068774', amountDue: '605.41' },
+          { orderNumber: '0000-068772', amountDue: '335.58', clientName: 'ФОП Гук' },
+          { orderNumber: '0000-068773', amountDue: '971.83', clientName: 'ФОП Гук' },
+          { orderNumber: '0000-068774', amountDue: '605.41', clientName: 'ФОП Гук' },
         ],
         {
-          clientName: 'Гук Віктор Степанович ФОП',
+          clientName: 'ФОП Гук',
           currency: 'UAH',
           exchangeRate: '44.9',
           comment: '18.09.2026 21:28',
@@ -758,7 +758,9 @@ UA549358710000067320000088286"`;
       orders.createGroup.mockResolvedValue(
         groupOrders().map((order) => ({ ...order, currency: 'USD' })),
       );
-      const preview = await begin('0000-068772 100 $\n0000-068773 $50\nЗагальна сума: 150 $');
+      const preview = await begin(
+        '0000-068772 100 $ ФОП Гук\n0000-068773 $50 ФОП Гук\nЗагальна сума: 150 $\nГук Іван\n07.09.2026 14:57',
+      );
       expect(preview?.html).toContain('Разом: <b>150 $</b>');
       expect(preview?.html).not.toContain('грн');
 
@@ -767,8 +769,8 @@ UA549358710000067320000088286"`;
       expect(orders.createGroup).toHaveBeenCalledWith(
         MANAGER.id,
         [
-          { orderNumber: '0000-068772', amountDue: '100.00' },
-          { orderNumber: '0000-068773', amountDue: '50.00' },
+          { orderNumber: '0000-068772', amountDue: '100.00', clientName: 'ФОП Гук' },
+          { orderNumber: '0000-068773', amountDue: '50.00', clientName: 'ФОП Гук' },
         ],
         expect.objectContaining({ currency: 'USD' }),
       );
@@ -780,7 +782,7 @@ UA549358710000067320000088286"`;
     it('should create one dollar order for several recipients', async () => {
       orders.create.mockResolvedValue({ ...singleOrder(), currency: 'USD' });
       await begin(
-        '0000-068652\nФОП Берчатов М.М - 590.50 $ 10:50\nФОП Берчатова Л.О - 400 $ 10:50',
+        '0000-068652\n19.09.2026\nФОП Берчатов М.М - 590.50 $ 10:50\nФОП Берчатова Л.О - 400 $ 10:50',
       );
 
       await service.confirmRequisites(MANAGER);
@@ -862,9 +864,14 @@ UA549358710000067320000088286"`;
 
     it('should treat even a perfectly normal order sent while armed via the escape hatch', async () => {
       // Nothing "wrong" with this text — it's just what a manager sends while /requisites is armed.
-      const classic = ['0000-066092', 'Носенко Роман', '4 527,00 грн', '44,9', 'Терміново'].join(
-        '\n',
-      );
+      const classic = [
+        '0000-066092',
+        'Носенко Роман',
+        '4 527,00 грн',
+        '44,9',
+        'Терміново',
+        '07.09.2026 14:57',
+      ].join('\n');
       const preview = await begin(classic);
       expect(preview?.html).toContain('Підпис у списках');
       orders.create.mockResolvedValue(
@@ -882,7 +889,7 @@ UA549358710000067320000088286"`;
           amountDue: '4527.00',
           currency: 'UAH',
           exchangeRate: '44.9',
-          comment: 'Терміново',
+          comment: 'Терміново\n07.09.2026 14:57',
         },
         { notify: true, addPart: false },
       );
@@ -970,7 +977,7 @@ UA549358710000067320000088286"`;
       it('should refuse a dollar part of a number that is in hryvnias', async () => {
         orders.findWithBalance.mockResolvedValue(existing('0000-068652'));
 
-        const reply = await begin('0000-068652\nФОП Берчатов М.М - 590.50 $ 10:50');
+        const reply = await begin('0000-068652\n19.09.2026\nФОП Берчатов М.М - 590.50 $ 10:50');
 
         expect(reply?.html).toContain('в іншій валюті');
         expect(reply?.buttons).toBeUndefined();
@@ -1003,8 +1010,8 @@ UA549358710000067320000088286"`;
         expect(orders.createGroup).toHaveBeenCalledWith(
           MANAGER.id,
           [
-            { orderNumber: '0000-068772', amountDue: '335.58' },
-            { orderNumber: '0000-068774', amountDue: '605.41' },
+            { orderNumber: '0000-068772', amountDue: '335.58', clientName: 'ФОП Гук' },
+            { orderNumber: '0000-068774', amountDue: '605.41', clientName: 'ФОП Гук' },
           ],
           expect.objectContaining({ comment: '18.09.2026 21:28' }),
         );
@@ -1152,7 +1159,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
     });
 
     it('should read a message without a number as a closing only while armed', async () => {
-      const armed = await begin('Гук Руслан\n27 409 грн');
+      const armed = await begin('Гук Руслан\n27 409 грн\nФОП Берчатов М. М.\n05.09.2026 12:36');
       expect(armed?.html).toContain('Закриття заборгованості клієнта');
 
       service.cancel(USER);
@@ -1298,7 +1305,9 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
         amountPaid: new Prisma.Decimal(0),
       });
 
-      expect((await begin('0000-066498\n150 $'))?.html).toContain('(уже є в системі)');
+      expect((await begin('0000-066498\n150 $\n01.09.2026 15:20'))?.html).toContain(
+        '(уже є в системі)',
+      );
       await service.confirmCash(MANAGER);
 
       expect(orders.createGroup).not.toHaveBeenCalled();

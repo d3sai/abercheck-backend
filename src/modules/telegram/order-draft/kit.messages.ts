@@ -11,8 +11,6 @@ export const KitAction = {
 
 const usd = (value: Prisma.Decimal): string => formatMoneyIn(value, Currency.USD);
 
-// Reads like the "Оплата на Кит" template the managers fill in; the access code stands out. Numbers
-// already in the system are marked: nothing is created for them.
 function kitLines(plan: KitPlan, existing: string[]): string[] {
   return [
     '💵 <b>Оплата на Кит</b>',

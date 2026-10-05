@@ -132,7 +132,6 @@ export class AttachmentsService {
       ];
     }
 
-    // One album message; the caption sits on the last file so it reads as a trailing note below the whole stack.
     const media = files.map((file, index) => ({
       type: kind,
       media: file.fileId,

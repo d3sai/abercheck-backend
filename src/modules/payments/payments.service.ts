@@ -161,7 +161,6 @@ export class PaymentsService {
       ? await lockGroup(tx, await resolveBaseNumber(tx, reportedOrderNumber))
       : [];
     const currency = dto.currency ?? Currency.UAH;
-    // A payment in another currency than the order is never applied to it — an admin sorts it out.
     const found = parts.length > 0 ? pickAnchor(parts) : null;
     const anchor = found?.currency === currency ? found : null;
 
@@ -182,7 +181,6 @@ export class PaymentsService {
     return anchor ? this.applyToGroup(tx, payment, parts) : { kind: 'unmatched', payment };
   }
 
-  // A payment covers the whole 1C number: all its orders share the resulting status.
   private async applyToGroup(
     tx: Prisma.TransactionClient,
     payment: Payment,

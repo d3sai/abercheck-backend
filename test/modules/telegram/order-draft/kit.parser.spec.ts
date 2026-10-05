@@ -48,7 +48,9 @@ describe('parseKit', () => {
   });
 
   it('accepts $ and numbers without a unit', () => {
-    const result = parseKit('Код доступу: 1\n0000-062265 $100\n0000-062937 50');
+    const result = parseKit(
+      'Код доступу: 1\n0000-062265 $100\n0000-062937 50\nДата та час: 21.08.2026 14:44',
+    );
     expect(result.ok && result.plan.total.toFixed(2)).toBe('150.00');
   });
 
@@ -57,10 +59,16 @@ describe('parseKit', () => {
       ok: false,
       errors: [
         'Не знайшов код доступу. Додайте рядок «Код доступу: 647143353» або «Код: 647143353».',
+        'Не вказано дату й час. Напишіть дату й час саме цього замовлення, у форматі ДД.ММ.РРРР ГГ:ХХ.',
       ],
     });
     expect(parseKit('Код доступу: 1\nСума: 100 дол').ok).toBe(false);
     expect(parseKit('Код доступу: 1\n0000-062265 100 грн').ok).toBe(false);
     expect(parseKit('Код доступу: 1\n0000-062265\n0000-062265 5 дол').ok).toBe(false);
+  });
+
+  it.each(['', 'Дата та час: 21.08.2026'])('refuses a missing date or time «%s»', (line) => {
+    const result = parseKit(`Код доступу: 1\n0000-062265 100 дол\n${line}`);
+    expect(!result.ok && result.errors.join(' ')).toContain('Не вказано дату й час');
   });
 });

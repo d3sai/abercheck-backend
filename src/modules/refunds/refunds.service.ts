@@ -68,7 +68,6 @@ export class RefundsService {
     return result;
   }
 
-  // Cancels one order, or with wholeNumber every order of its 1C number.
   async cancelUnpaid(
     orderId: number,
     initiator: Initiator,

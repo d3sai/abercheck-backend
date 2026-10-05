@@ -14,7 +14,6 @@ export function adminOrderCreatedMessage(order: Order, manager: Manager): string
         : '➕ <b>Нова частина замовлення</b>';
   return [
     title,
-    // Managers usually write "ФОП …" into the name themselves, so no label of our own.
     `<b>${escapeHtml(order.clientName)}</b>`,
     `№ ${escapeHtml(order.orderNumber)}`,
     `Сума: ${formatMoneyIn(order.amountDue, order.currency)}`,

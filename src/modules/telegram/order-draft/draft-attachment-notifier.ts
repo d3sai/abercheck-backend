@@ -4,8 +4,6 @@ import { AttachmentsService, type TelegramFileRef } from '../../attachments/atta
 import type { Manager, Order } from '../../../generated/prisma/client';
 import { TelegramSender } from '../core/telegram-sender';
 
-// Merges an order's admin notice into the files' caption where it fits, so admins get one message
-// instead of two; falls back to sending the notice on its own when it doesn't fit or storing fails.
 @Injectable()
 export class DraftAttachmentNotifier {
   constructor(

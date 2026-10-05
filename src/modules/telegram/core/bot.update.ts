@@ -107,7 +107,6 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
-  // Arms the "закрити мінус" mode: only the very next message is read as a debt closing.
   @Command('newminus')
   async newMinusOrder(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);
@@ -116,8 +115,6 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
-  // Arms the "кілька номерів / реквізити" mode: only the very next message is read as a requisites
-  // report instead of a regular single-order template.
   @Command('requisites')
   async requisites(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);
@@ -126,7 +123,6 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
-  // Arms the "оплата на Кит" mode: the next message is read as the Кит template.
   @Command('kit')
   async kit(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);
@@ -135,7 +131,6 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
-  // Arms the "оплата готівкою" mode: the next message is read as the cash template.
   @Command('cash')
   async cash(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);

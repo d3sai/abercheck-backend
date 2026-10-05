@@ -49,7 +49,6 @@ export class StatsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async snapshot(managerId?: number): Promise<Snapshot> {
-    // Money totals are hryvnias only: dollars are a separate currency and never added to them.
     const unpaid = { status: { in: UNPAID_STATUSES }, managerId, currency: Currency.UAH };
     const [groups, due, paid, refunded, unmatched] = await Promise.all([
       this.prisma.order.groupBy({ by: ['status'], where: { managerId }, _count: { _all: true } }),

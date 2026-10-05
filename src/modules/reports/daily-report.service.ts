@@ -13,7 +13,6 @@ export interface DailyReport {
   byBucket: Record<ReportBucket, number>;
   refundsCount: number;
   refundsAmount: Prisma.Decimal;
-  // The dollar side of the same figures; the fields above are hryvnias only.
   usd: { paymentsAmount: Prisma.Decimal; refundsCount: number; refundsAmount: Prisma.Decimal };
 }
 

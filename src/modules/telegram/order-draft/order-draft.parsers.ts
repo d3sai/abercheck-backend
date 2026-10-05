@@ -13,7 +13,6 @@ export function parseOrderNumber(input: string): ParseResult {
   if (/^\d{4}-\d{6}$/.test(value)) {
     return ok(value);
   }
-  // No preview here — the order is created at once — so a likely typo is pointed out, never fixed.
   return /^\d{3}-\d{6}$/.test(value)
     ? fail(`Бракує цифри. Може, 0${value}?`)
     : fail('Номер має бути у форматі 0000-066717.');
@@ -29,7 +28,6 @@ function parseDecimal(input: string, suffix: RegExp): string | null {
 
 const USD_MARK = new RegExp(USD_UNIT_SRC, 'iu');
 
-// "150 $", "$150", "150 usd", "150 дол." — anything without a dollar mark is hryvnias.
 export function detectCurrency(input: string): Currency {
   return USD_MARK.test(input) ? Currency.USD : Currency.UAH;
 }

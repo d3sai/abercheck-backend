@@ -1,19 +1,20 @@
-import { Currency, Prisma } from '../../../generated/prisma/client';
 import { MONEY_PATTERN, MONEY_UNIT_SRC } from '../../../common/money';
+import { Currency, Prisma } from '../../../generated/prisma/client';
 import type { RequisiteInput } from '../../requisites/requisites.service';
 import { formatMoneyIn } from '../core/format';
 import { parseExchangeRate } from './order-draft.parsers';
 import {
   AMOUNT_SRC,
   CARD,
+  DATE_TIME_HINT,
   IBAN,
-  cleanName,
   REQUISITES_MAX_LENGTH,
   type RestLine,
+  cleanName,
   deriveRequisiteLines,
   loneRate,
-  numericDates,
   messageCurrency,
+  numericDates,
   parseDateTime,
   paymentAmount,
   sum,
@@ -21,14 +22,10 @@ import {
   unitAfterAmount,
 } from './requisites.parser';
 
-// "Закриття заборгованості клієнта": the client paid off their debt — to one of our FOPs, or to
-// cards / other people's FOPs listed line by line like a requisites report.
 export interface MinusPlan {
   clientName: string;
-  /** "за підрахунком 31 серпня 2026", "за період 07.09." — not always given. */
   period: string | null;
   paidAt: Date | null;
-  /** Every amount of the message — the total and each payment — is in this currency. */
   currency: Currency;
   total: Prisma.Decimal;
   ourFop: string | null;
@@ -43,9 +40,7 @@ export type MinusResult = { ok: true; plan: MinusPlan } | { ok: false; errors: s
 
 type Label = 'name' | 'date' | 'total' | 'receivedOn' | 'ourFop' | 'comment' | 'rate' | 'sheet';
 
-// The template's own labels; everything else is read as free text, the way managers used to write.
 const LABELS: [Label, RegExp][] = [
-  // "ФОП: …" (with a colon) is the client, as the preview shows it; "ФОП Берчатов" is our FOP.
   ['name', /^(?:піб(?:\s*\(\s*фоп\s*\))?|клієнт|фоп(?=\s*:))/iu],
   ['date', /^дата/iu],
   ['total', /^(?:загальна\s+)?сума/iu],
@@ -59,14 +54,13 @@ const LABEL_VALUE = /^(?:\s*[:\-–—]\s*|\s+)(.*)$/u;
 
 const HEADER =
   /^(?:(?:закриття|оплата)\s+(?:мінусу|заборгованості)(?:\s+клієнта)?|закри(?:ла|в|ли)(?:\s+мінус)?)(?:\s*[:\-–—])?\s*(.*)$/iu;
-// Copied bank details around a payment — never a comment.
 const BANK_NOISE = /\d|призначення|iban|ібан|єдрпоу|рнокпп|іпн|платіжна/iu;
 const PERIOD = /\s+(за\s+(?:підрахунком|період|\d).*)$/iu;
 const URL_PATTERN = /https?:\/\/\S+/iu;
 const NUMBER_ONLY = /^[№#]?\s*(\d{4}-\d{6})$/u;
+const TIME_IN_DATE = /\d:\d{2}$/u;
 const FOP_PREFIX = /^фоп\s+/iu;
 const ON_CARD = /^(?:на\s+)?(?:карт[ауиі]|картку|рахунок)\s+/iu;
-// Tolerates a stray dot in the time, as typed: "05.09.2026 12.:36".
 const DATE_LINE =
   /^(\d{1,2}[./]\d{1,2}[./](?:\d{4}|\d{2}))(?:[ ,]+(\d{1,2})\s*[.:]{1,2}\s*(\d{2}))?$/u;
 const LEADING_AMOUNT = new RegExp(String.raw`^(${AMOUNT_SRC})(?:\s*${MONEY_UNIT_SRC})?`, 'iu');
@@ -76,7 +70,6 @@ const AMOUNT_WITH_UNIT = new RegExp(
 );
 
 const trimPunctuation = (text: string): string => text.replace(/^[\s:\-–—,]+|[\s:\-–—,.]+$/gu, '');
-// "(з урахуванням 1%)" → "з урахуванням 1%".
 const unwrap = (text: string): string => text.replace(/^\((.*)\)$/u, '$1').trim();
 
 function matchLabel(line: string): { label: Label; value: string } | null {
@@ -98,7 +91,6 @@ function normalizeDate(line: string): string | null {
   return match[2] ? `${match[1]} ${match[2]}:${match[3]}` : match[1]!;
 }
 
-// A line that is nothing but an amount (plus maybe a note after it) — the total, not a payer.
 function bareAmount(line: string): { amount: Prisma.Decimal; note: string } | null {
   const match = AMOUNT_WITH_UNIT.exec(line);
   if (!match || /[\p{L}\d]/u.test(line.slice(0, match.index))) {
@@ -131,7 +123,6 @@ export function parseMinusClosing(raw: string): MinusResult {
   const { currency } = detected;
   const money = (value: Prisma.Decimal): string => formatMoneyIn(value, currency);
 
-  // One object rather than loose lets: the take* helpers below fill it in.
   const found: {
     name: string | null;
     date: string | null;
@@ -147,7 +138,7 @@ export function parseMinusClosing(raw: string): MinusResult {
   const takeDate = (raw: string): void => {
     const normalized = normalizeDate(raw);
     if (!normalized) {
-      warnings.push(`Не розібрав дату «${raw}». Формат: 05.09.2026 12:36.`);
+      warnings.push(`Не розібрав дату «${raw}». Напишіть ${DATE_TIME_HINT}.`);
       return;
     }
     found.date ??= normalized;
@@ -220,7 +211,6 @@ export function parseMinusClosing(raw: string): MinusResult {
           if (!takeRate(value)) comments.push(`Курс: ${value}`);
           break;
         case 'sheet':
-          // Only an http(s) address, already taken above, is ever kept as the spreadsheet link.
           warnings.push(`«${value}» не схоже на посилання, пропускаю.`);
           break;
       }
@@ -255,8 +245,6 @@ export function parseMinusClosing(raw: string): MinusResult {
       continue;
     }
     const note = line.replace(/["“”«»]/gu, '').trim();
-    // No header and no "ПІБ:" label: the first plain line is the client, as in the old template.
-    // Its period ("за підрахунком 7 вересня 2026") may have digits; the name itself may not.
     const asName = splitPeriod(note).name;
     if (found.name === null && asName !== '' && !BANK_NOISE.test(asName)) {
       found.name = note;
@@ -267,8 +255,6 @@ export function parseMinusClosing(raw: string): MinusResult {
 
   const paidAt = found.date ? parseDateTime(found.date) : null;
   const requisiteLines = deriveRequisiteLines(rest, paidAt ?? undefined);
-  // "На карту Тимченко Юрій 4149 6090 5310 7860" with no amount of its own: the only account named,
-  // so the whole sum went there.
   const accounts = rest.filter(
     (l) => l.kind === 'text' && (CARD.test(l.text) || IBAN.test(l.text)),
   );
@@ -303,18 +289,16 @@ export function parseMinusClosing(raw: string): MinusResult {
   } else if (!MONEY_PATTERN.test(stated.toFixed(2))) {
     errors.push('Сума має бути додатною й не більшою за 12 цифр до коми.');
   }
-  if (errors.length > 0 || stated === null) {
-    return { ok: false, errors };
-  }
-
-  if (found.date && !paidAt) {
-    warnings.push(`Такої дати немає: «${found.date}».`);
-  }
-  if (!found.date) {
-    warnings.push('Не вказано дату оплати.');
+  if (!found.date || !TIME_IN_DATE.test(found.date)) {
+    errors.push(`Не вказано дату й час оплати. Напишіть ${DATE_TIME_HINT}.`);
+  } else if (!paidAt) {
+    errors.push(`Такої дати немає: «${found.date}». Напишіть ${DATE_TIME_HINT}.`);
   }
   if (found.ourFop === null && requisiteLines.length === 0) {
-    warnings.push('Не вказано, куди прийшла оплата.');
+    errors.push('Не вказано ФОП. Додайте рядок «Отримано на: ФОП Берчатов М. М.».');
+  }
+  if (errors.length > 0 || stated === null) {
+    return { ok: false, errors };
   }
 
   return {

@@ -4,8 +4,6 @@ import { partIndexOf } from './order-number';
 
 const ZERO = new Prisma.Decimal(0);
 
-// All orders sharing one base number form a group: they are paid by a single payment, so the
-// group has one pool of money and one status. Parts are always passed in creation order (by id).
 export interface GroupSummary {
   due: Prisma.Decimal;
   paid: Prisma.Decimal;
@@ -16,7 +14,6 @@ export function liveParts<T extends Pick<Order, 'status'>>(parts: T[]): T[] {
   return parts.filter((part) => part.status !== OrderStatus.CANCELLED);
 }
 
-// The order that carries the group's payments: the first part still alive.
 export function pickAnchor<T extends Pick<Order, 'status'>>(parts: T[]): T {
   const anchor = liveParts(parts)[0] ?? parts[0];
   if (!anchor) {
@@ -42,8 +39,6 @@ export function summarizeGroup(
   return { due, paid, status: calculateOrderStatus(due, paid, first.status) };
 }
 
-// Splits the group's pool over its live parts in creation order, so each part shows its own share
-// of the payment; whatever is left over (an overpayment) lands on the last part.
 export function allocateShares(
   parts: Pick<Order, 'id' | 'amountDue' | 'status'>[],
   paid: Prisma.Decimal,
@@ -59,8 +54,6 @@ export function allocateShares(
   return shares;
 }
 
-// One record standing for the whole number: total due and one combined client, so flows written
-// for a single order (payment notices, refunds, admin actions) work on a group unchanged.
 export function rollUp<T extends Order>(parts: T[]): T {
   const anchor = pickAnchor(parts);
   const live = liveParts(parts);

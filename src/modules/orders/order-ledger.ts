@@ -21,8 +21,6 @@ export async function lockOrderById(
   return rows.length === 0 ? null : tx.order.findUnique({ where: { id } });
 }
 
-// Any number that belongs to a group (its first number, a "(n)" part, or one of several different
-// numbers paid together) resolves to the group's base number; an unknown number resolves to itself.
 export async function resolveBaseNumber(
   db: Pick<Prisma.TransactionClient, 'order'>,
   raw: string,
@@ -34,7 +32,6 @@ export async function resolveBaseNumber(
   return found?.baseNumber ?? normalizeBaseNumber(raw);
 }
 
-// Locks every order of one 1C number, in creation order.
 export async function lockGroup(
   tx: Prisma.TransactionClient,
   baseNumber: string,
@@ -43,7 +40,6 @@ export async function lockGroup(
   return tx.order.findMany({ where: { baseNumber }, orderBy: { id: 'asc' } });
 }
 
-// Payments minus refunds across all orders of one 1C number.
 export async function groupNetPaid(
   tx: Prisma.TransactionClient,
   baseNumber: string,
@@ -57,7 +53,6 @@ export async function groupNetPaid(
   return (payments._sum.amount ?? zero).minus(refunds._sum.amount ?? zero);
 }
 
-// Writes the group's shared status onto every live part; cancelled parts keep theirs.
 export async function syncGroupStatus(
   tx: Prisma.TransactionClient,
   parts: Order[],

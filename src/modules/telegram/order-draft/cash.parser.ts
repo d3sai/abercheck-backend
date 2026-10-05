@@ -9,9 +9,9 @@ import {
   parseDateTime,
   toDecimal,
   unitAfterAmount,
+  DATE_TIME_HINT,
 } from './requisites.parser';
 
-// "Оплата готівкою": a manager took cash for one 1C number, in hryvnias or dollars.
 export interface CashPlan {
   number: string;
   amount: Prisma.Decimal;
@@ -81,7 +81,6 @@ export function parseCash(raw: string): CashResult {
       if (label === 'handedBy') handedBy.push(value);
       continue;
     }
-    // The same fields without labels, one per line, as managers usually write them.
     if (NUMBER_LINE.test(line)) {
       takeNumber(line);
     } else if (parseDateTime(numericDates(line))) {
@@ -106,15 +105,14 @@ export function parseCash(raw: string): CashResult {
   } else if (!MONEY_PATTERN.test(toDecimal(amount[1]!).toFixed(2))) {
     errors.push('Сума має бути більшою за нуль.');
   }
+  const paidAt = date ? parseDateTime(numericDates(date)) : null;
+  if (!date || !/\d:\d{2}/.test(date)) {
+    errors.push(`Не вказано дату й час. Напишіть ${DATE_TIME_HINT}.`);
+  } else if (!paidAt) {
+    errors.push(`Не розібрав дату «${date}». Напишіть ${DATE_TIME_HINT}.`);
+  }
   if (errors.length > 0 || number === null || !amount) {
     return { ok: false, errors };
-  }
-
-  const paidAt = date ? parseDateTime(numericDates(date)) : null;
-  if (!date) {
-    warnings.push('Не вказано дату.');
-  } else if (!paidAt) {
-    warnings.push(`Не розібрав дату «${date}». Формат: 01.09.2026 15:20.`);
   }
   if (handedBy.length === 0) {
     warnings.push('Не вказано, ким передано.');
@@ -134,7 +132,6 @@ export function parseCash(raw: string): CashResult {
   };
 }
 
-// Same message twice means the same payment: the number, time and amount identify it.
 export function cashPaymentId(plan: CashPlan): string {
   return `cash:${plan.number}:${plan.paidAt?.toISOString() ?? 'no-date'}:${plan.amount.toFixed(2)}`;
 }

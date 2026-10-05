@@ -12,16 +12,13 @@ import { PaymentsService } from '../../payments/payments.service';
 export interface ReportedItem {
   number: string;
   amount: Prisma.Decimal;
-  /** Unique per payment, so the same report sent twice never pays twice. */
   paymentId: string;
 }
 
 export interface ReportedPayment {
-  /** Names the new orders: "Оплата готівкою". */
   label: string;
   currency: Currency;
   items: ReportedItem[];
-  /** Numbers already in the system: they only get the payment. */
   existing: string[];
   paidAt: Date | null;
   payerName: string;
@@ -36,9 +33,6 @@ export type ReportCheck =
   | { ok: false; alreadyRecorded: true }
   | { ok: false; alreadyRecorded: false; errors: string[] };
 
-// Money the manager reports as already received (cash) that no bank statement will
-// ever bring in: the missing 1C numbers are created, then each number gets its payment, exactly as
-// if the bank had sent it — same statuses, same notices.
 @Injectable()
 export class ReportedPaymentService {
   constructor(
@@ -77,8 +71,6 @@ export class ReportedPaymentService {
       : { ok: true, existing };
   }
 
-  // Throws OrderNumberTakenError when a number appeared since the check. Returns an order the
-  // manager's files can be attached to.
   async record(manager: Manager, report: ReportedPayment): Promise<Order | undefined> {
     const fresh = report.items.filter((item) => !report.existing.includes(item.number));
     const created =

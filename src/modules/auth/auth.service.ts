@@ -115,7 +115,6 @@ export class AuthService {
     return valid ? manager : null;
   }
 
-  /** The very first manager the bot ever sees becomes an active admin — nobody else can. */
   private async bootstrapsAdmin(telegramId: bigint, existing: Manager | null): Promise<boolean> {
     if (existing?.status === ManagerStatus.ACTIVE || existing?.status === ManagerStatus.REJECTED) {
       return false;

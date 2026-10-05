@@ -8,8 +8,6 @@ export interface PartOffer {
   expiresAt: number;
 }
 
-// A regular-order draft on a number that already exists, waiting for the manager to confirm it as
-// one more part of that number.
 @Injectable()
 export class PartOfferStore {
   private readonly offers = new Map<bigint, PartOffer>();
@@ -18,7 +16,6 @@ export class PartOfferStore {
     this.offers.set(userId, offer);
   }
 
-  // Reads and clears in one step, for whoever answers the offer.
   take(userId: bigint): PartOffer | undefined {
     const offer = this.offers.get(userId);
     this.offers.delete(userId);

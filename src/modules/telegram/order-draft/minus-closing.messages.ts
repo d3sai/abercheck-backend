@@ -17,7 +17,6 @@ export const MinusAction = {
 } as const;
 
 interface ClosingView {
-  /** Only once created — the preview has no number yet. */
   orderNumber?: string;
   clientName: string;
   period: string | null;
@@ -31,8 +30,6 @@ interface ClosingView {
   sheetUrl: string | null;
 }
 
-// The "Закриття заборгованості клієнта" template itself: the preview and the admins' notice read
-// exactly like the template the business uses.
 function closingLines(view: ClosingView): string[] {
   const period = view.period ? ` ${escapeHtml(view.period)}` : '';
   const received = [

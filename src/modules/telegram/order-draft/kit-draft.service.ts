@@ -14,7 +14,6 @@ import { requisitesErrors } from './requisites.messages';
 
 export interface KitDraft {
   plan: KitPlan;
-  /** Numbers already in the system: nothing is created for them. */
   existing: string[];
   expiresAt: number;
 }
@@ -22,17 +21,12 @@ export interface KitDraft {
 @Injectable()
 export class KitDraftStore extends DraftModeStore<KitDraft> {}
 
-// How long a manager has to answer the preview.
 const KIT_DRAFT_TTL_MS = 10 * 60_000;
 
-// How long the mode waits for the message after the button/command.
 const KIT_MODE_TTL_MS = 30 * 60_000;
 
 const KIT_LABEL = 'Оплата на Кит';
 
-// "💵 Оплата на Кит": arming the mode, reading one message in the Кит template into a preview, then
-// creating the numbers not yet in the system and telling the admins. It records no payment: the
-// admins attach it themselves.
 @Injectable()
 export class KitDraftService {
   constructor(
@@ -53,7 +47,6 @@ export class KitDraftService {
     return this.drafts.isArmed(userId);
   }
 
-  // Drops the armed mode and any pending preview, reporting whether there was anything to drop.
   leave(userId: bigint): boolean {
     return this.drafts.leave(userId);
   }
@@ -122,7 +115,6 @@ export class KitDraftService {
 
     const files = this.pendingFiles.take(manager.telegramId);
     const notice = adminKitMessage(plan, existing, manager.name);
-    // With every number already in the system, the files go to the first of them.
     const fileOrder =
       files.length > 0
         ? (created[0] ?? (await this.orders.findWithBalance(existing[0]!))?.order)

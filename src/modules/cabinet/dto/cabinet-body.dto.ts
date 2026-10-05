@@ -23,7 +23,6 @@ export class CabinetCreateOrderDto extends CreateOrderDto {
   @IsPositive()
   managerId?: number;
 
-  // The number is already taken: create this order as one more part of it instead of failing.
   @IsOptional()
   @IsBoolean()
   addPart?: boolean;

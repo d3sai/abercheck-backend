@@ -44,8 +44,6 @@ export interface Admin extends Initiator {
 const dismissButton = button('Скасувати', AdminAction.Dismiss);
 const warn = (text: string): BotReply => ({ html: `⚠️ ${text}` });
 
-// How long a "reply to this message" prompt (attach a payment, enter a partial refund amount)
-// waits for the admin's answer.
 const ADMIN_PROMPT_TTL_MS = 10 * 60_000;
 
 interface AttachPrompt {
@@ -75,8 +73,6 @@ export class AdminFlowService implements OnApplicationShutdown {
     private readonly sender: TelegramSender,
   ) {}
 
-  // The bot is restarting: an admin mid-way through attaching a payment or entering a refund
-  // amount would otherwise get no reply at all when they answer. A short warning makes that visible.
   async onApplicationShutdown(): Promise<void> {
     const now = Date.now();
     const ids = new Set<bigint>();

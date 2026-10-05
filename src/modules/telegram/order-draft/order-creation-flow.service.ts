@@ -46,8 +46,6 @@ const FIELDS: readonly FieldSpec[] = [
   { field: 'comment', label: 'Коментар', optional: true, parse: parseText(2000) },
 ];
 
-// A cash report sent without its button has the date where the unlabelled template expects the
-// ФОП. The order is created at once, with no preview, so that shape is refused, never guessed.
 function parseClientName(input: string): ParseResult {
   return parseDateTime(numericDates(input.trim()))
     ? {

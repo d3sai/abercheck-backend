@@ -21,10 +21,6 @@ import { RequisitesDraftService } from './requisites-draft.service';
 
 export { DraftAction };
 
-// Coordinates the order-draft flows — the regular single-order template (OrderCreationFlowService)
-// and the button-armed modes: "кілька номерів / реквізити", "закрити мінус", "оплата на Кит" and
-// "оплата готівкою" — plus the file buffer they share: which one a message or upload goes to
-// depends on which mode, if any, is armed. At most one mode is armed at a time.
 @Injectable()
 export class OrderDraftService implements OnApplicationShutdown {
   constructor(
@@ -38,8 +34,6 @@ export class OrderDraftService implements OnApplicationShutdown {
     private readonly sender: TelegramSender,
   ) {}
 
-  // The bot is restarting: whoever has files waiting, an unanswered part offer, or an armed/pending
-  // requisites flow would otherwise lose it silently. A short warning at least makes that visible.
   async onApplicationShutdown(): Promise<void> {
     const now = Date.now();
     const ids = new Set<bigint>([
@@ -54,13 +48,10 @@ export class OrderDraftService implements OnApplicationShutdown {
     return this.orderCreation.hint();
   }
 
-  // Arms the "кілька номерів / реквізити" mode: only while it's armed does the very next message go
-  // through the requisites parser instead of the regular single-order template.
   startRequisites(userId: bigint): BotReply {
     return this.switchTo(userId, this.requisitesFlow);
   }
 
-  // The other modes are armed the same way.
   startMinus(userId: bigint): BotReply {
     return this.switchTo(userId, this.minusFlow);
   }
@@ -129,10 +120,7 @@ export class OrderDraftService implements OnApplicationShutdown {
     return { html: hadFiles || hadOffer || hadMode ? 'Скасовано.' : 'Нема чого скасовувати.' };
   }
 
-  // Another flow was started: the next message is no longer read by an armed mode, and any pending
-  // preview is dropped. Reports whether there was anything to drop.
   leaveModes(userId: bigint): boolean {
-    // map, not some: every mode must be left, not just the first one that had something.
     return this.modes.map((mode) => mode.leave(userId)).some(Boolean);
   }
 
@@ -164,8 +152,6 @@ export class OrderDraftService implements OnApplicationShutdown {
     return this.requisitesFlow.edit(userId);
   }
 
-  // "Це звичайне замовлення" escape hatch: the message was misread as a requisites report, so the
-  // same text goes through the regular template instead.
   async regularFromRequisites(manager: Manager): Promise<BotReply> {
     return this.requisitesFlow.regularFrom(manager);
   }

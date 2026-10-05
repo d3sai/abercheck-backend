@@ -45,6 +45,7 @@ export function requisitesHint(): BotReply {
     html: [
       '💳 <b>Кілька номерів або чужі реквізити</b>',
       'Усе одним повідомленням, порядок не важливий. Кожен номер з нового рядка разом із сумою.',
+      'Якщо номерів кілька — біля кожного номера, після суми, напишіть його ФОП.',
       'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
       '',
       `<pre>${example}</pre>`,
@@ -67,17 +68,15 @@ export function multipleOrRequisitesGuard(): BotReply {
 export function requisitesErrors(errors: string[]): BotReply {
   return {
     html: [
-      '⚠️ Не вийшло прочитати:',
+      '⚠️ Потрібно виправити повідомлення:',
       ...errors.map((error) => `• ${escapeHtml(error)}`),
-      'Виправте й надішліть ще раз.',
+      'Після виправлення надішліть його ще раз.',
     ].join('\n'),
   };
 }
 
 export interface PreviewContext {
-  /** The single number already exists: this becomes one more part of it. */
   addsPart: boolean;
-  /** Numbers left out of a group because they already exist. */
   skipped: string[];
   files: number;
 }
@@ -122,7 +121,9 @@ export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext)
       );
     });
   }
-  lines.push('', `Підпис у списках: ${escapeHtml(plan.label)}`);
+  if (plan.kind !== 'group') {
+    lines.push('', `Підпис у списках: ${escapeHtml(plan.label)}`);
+  }
   if (context.files > 0) {
     lines.push(`Файлів: ${context.files}`);
   }

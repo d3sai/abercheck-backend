@@ -49,28 +49,33 @@ describe('parseCash', () => {
   });
 
   it.each(['$150', '150 дол', '150 usd'])('takes %s for dollars', (amount) => {
-    const result = parseCash(`0000-066498\n${amount}`);
+    const result = parseCash(`0000-066498\n${amount}\n01.09.2026 15:20`);
     expect(result.ok && result.plan.currency).toBe('USD');
   });
 
   it('treats an amount with no unit as hryvnias and warns about missing fields', () => {
-    const result = parseCash('0000-066498\n4260');
+    const result = parseCash('0000-066498\n4260\n01.09.2026 15:20');
     expect(result.ok && result.plan.currency).toBe('UAH');
-    expect(result.ok && result.plan.warnings).toEqual([
-      'Не вказано дату.',
-      'Не вказано, ким передано.',
-    ]);
+    expect(result.ok && result.plan.warnings).toEqual(['Не вказано, ким передано.']);
   });
 
   it('refuses without a number or an amount', () => {
-    expect(parseCash('01.09.2026\n4260 грн')).toEqual({
+    expect(parseCash('01.09.2026 15:20\n4260 грн')).toEqual({
       ok: false,
       errors: ['Не знайшов номер замовлення. Формат: 0000-066498.'],
     });
-    expect(parseCash('0000-066498\nХристина')).toEqual({
+    expect(parseCash('0000-066498\n01.09.2026 15:20\nХристина')).toEqual({
       ok: false,
       errors: ['Не знайшов суму. Наприклад: 4260 грн.'],
     });
-    expect(parseCash('000-066498\n4260 грн').ok).toBe(false);
+    expect(parseCash('000-066498\n01.09.2026 15:20\n4260 грн').ok).toBe(false);
+  });
+
+  it.each([
+    ['0000-066498\n4260 грн\nХристина'],
+    ['0000-066498\n4260 грн\nДата: 01.09.2026\nХристина'],
+  ])('refuses a missing date or time', (text) => {
+    const result = parseCash(text);
+    expect(!result.ok && result.errors.join(' ')).toContain('Не вказано дату й час');
   });
 });

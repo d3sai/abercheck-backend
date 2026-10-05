@@ -278,6 +278,23 @@ describe('OrdersService', () => {
       ]);
     });
 
+    it('should give each number its own client when the item names one', async () => {
+      await service.createGroup(
+        7,
+        [
+          { orderNumber: '0000-068772', amountDue: '335.58', clientName: 'ФОП Гук' },
+          { orderNumber: '0000-068773', amountDue: '971.83' },
+        ],
+        common,
+      );
+
+      const calls = tx.order.create.mock.calls as [{ data: { clientName: string } }][];
+      expect(calls.map(([{ data }]) => data.clientName)).toEqual([
+        'ФОП Гук',
+        'Гук Віктор Степанович ФОП',
+      ]);
+    });
+
     it('should create each number as its own order under the first number', async () => {
       const created = await service.createGroup(7, items, common);
 

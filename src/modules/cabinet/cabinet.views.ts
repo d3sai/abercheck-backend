@@ -77,8 +77,6 @@ export interface OrderAttachmentView {
   createdAt: string;
 }
 
-// One individual payment behind an order paid via other people's requisites (a card, another FOP):
-// who actually paid, through which account, how much and when.
 export interface OrderRequisiteView {
   id: number;
   payerName: string;
@@ -97,7 +95,6 @@ export interface OrderGroupPartView {
   status: OrderStatus;
 }
 
-// The whole 1C number this order belongs to: all its parts are paid by the same payment.
 export interface OrderGroupView {
   baseNumber: string;
   amountDue: string;
@@ -110,7 +107,6 @@ export interface OrderGroupView {
 export interface OrderDetailView extends OrderSummaryView {
   exchangeRate: string | null;
   comment: string | null;
-  /** Minus closing only. */
   paidAt: string | null;
   ourFop: string | null;
   period: string | null;

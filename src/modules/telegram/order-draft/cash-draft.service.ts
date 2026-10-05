@@ -14,7 +14,6 @@ import { requisitesErrors } from './requisites.messages';
 
 export interface CashDraft {
   plan: CashPlan;
-  /** The number is already in the system: it only gets the payment. */
   exists: boolean;
   expiresAt: number;
 }
@@ -22,10 +21,8 @@ export interface CashDraft {
 @Injectable()
 export class CashDraftStore extends DraftModeStore<CashDraft> {}
 
-// How long a manager has to answer the preview.
 const CASH_DRAFT_TTL_MS = 10 * 60_000;
 
-// How long the mode waits for the message after the button/command.
 const CASH_MODE_TTL_MS = 30 * 60_000;
 
 const CASH_LABEL = 'Оплата готівкою';
@@ -34,8 +31,6 @@ const cashItems = (plan: CashPlan): ReportedItem[] => [
   { number: plan.number, amount: plan.amount, paymentId: cashPaymentId(plan) },
 ];
 
-// "💰 Оплата готівкою": arming the mode, reading one message in the cash template into a preview,
-// then recording the cash on its number (ReportedPaymentService).
 @Injectable()
 export class CashDraftService {
   constructor(
@@ -56,7 +51,6 @@ export class CashDraftService {
     return this.drafts.isArmed(userId);
   }
 
-  // Drops the armed mode and any pending preview, reporting whether there was anything to drop.
   leave(userId: bigint): boolean {
     return this.drafts.leave(userId);
   }

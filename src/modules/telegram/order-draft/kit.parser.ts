@@ -9,9 +9,9 @@ import {
   sum,
   toDecimal,
   unitAfterAmount,
+  DATE_TIME_HINT,
 } from './requisites.parser';
 
-// "Оплата на Кит": one dollar transfer, found by its access code, spread over several 1C numbers.
 export interface KitPlan {
   accessCode: string;
   total: Prisma.Decimal;
@@ -24,16 +24,12 @@ export interface KitPlan {
 export type KitResult = { ok: true; plan: KitPlan } | { ok: false; errors: string[] };
 
 const HEADER = /^оплата\s+на\s+кит\s*[:\-–—]?\s*$/iu;
-// "Код доступу: 647143353" or just "Код: 647143353".
 const ACCESS_CODE = /^код(?:\s+доступу)?(?!\p{L})\s*[:\-–—]?\s*(.*)$/iu;
-// Or the code alone on its line. Six digits or more, so a bare total never passes.
 const BARE_ACCESS_CODE = /^\d{6,64}$/u;
 const TOTAL = /^(?:загальна\s+)?сума\s*[:\-–—]?\s*(.*)$/iu;
 const DATE = /^дата(?:\s+(?:та|і)\s+час)?\s*[:\-–—]?\s*(.*)$/iu;
-// "Замовлення та сума в доларах :" — the heading over the number lines.
 const ITEMS_HEADING = /^замовлення(?!\p{L})[^\d]*$/iu;
 const NUMBER = /(?<!\d)\d{4}-\d{6}(?!\d)/gu;
-// Not glued to other digits, so "0000-062265" never lends its "062265" to the amount.
 const AMOUNT = new RegExp(String.raw`(?<![\d.,-])(${AMOUNT_SRC})(?![\d-])`, 'u');
 const HRYVNIAS = new RegExp(String.raw`\d\s*${UAH_UNIT_SRC}`, 'iu');
 
@@ -126,6 +122,12 @@ export function parseKit(raw: string): KitResult {
       errors.push(`Сума для № ${item.number} має бути більшою за нуль.`);
     }
   }
+  const paidAt = date ? parseDateTime(date) : null;
+  if (!date || !/\d:\d{2}/.test(date)) {
+    errors.push(`Не вказано дату й час. Напишіть ${DATE_TIME_HINT}.`);
+  } else if (!paidAt) {
+    errors.push(`Не розібрав дату «${date}». Напишіть ${DATE_TIME_HINT}.`);
+  }
   if (errors.length > 0 || !accessCode) {
     return { ok: false, errors };
   }
@@ -139,13 +141,6 @@ export function parseKit(raw: string): KitResult {
       `Замовлення разом ${usd(itemsTotal)}, а переказ ${usd(total)} (різниця ${usd(itemsTotal.minus(total).abs())}).`,
     );
   }
-  const paidAt = date ? parseDateTime(date) : null;
-  if (!date) {
-    warnings.push('Не вказано дату.');
-  } else if (!paidAt) {
-    warnings.push(`Не розібрав дату «${date}». Формат: 21.08.2026 14:44.`);
-  }
-
   return {
     ok: true,
     plan: {

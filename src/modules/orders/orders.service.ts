@@ -46,13 +46,13 @@ export interface OrderFilter {
 export interface OrderWithPaid<T extends Order = Order> {
   order: T;
   amountPaid: Prisma.Decimal;
-  // Set for a whole number: every number of the group that is still alive.
   orderNumbers?: string[];
 }
 
 export interface GroupOrderItem {
   orderNumber: string;
   amountDue: string;
+  clientName?: string;
 }
 
 export type OrderWithManager = Order & { manager: Manager };
@@ -75,7 +75,6 @@ export interface OrderGroupView {
   parts: OrderWithManager[];
 }
 
-// Filled only by the bot's minus-closing (and, for paidAt, Кит) flow — deliberately not part of the public CreateOrderDto.
 export interface ClosingDetails {
   paidAt?: Date;
   ourFop?: string;
@@ -112,8 +111,6 @@ export class OrdersService {
     private readonly events: EventEmitter2,
   ) {}
 
-  // Creating an order on a number that is already taken is refused, unless the caller asks for
-  // another part of that number: it then gets the next "(n)" suffix and joins the group.
   async create(
     managerId: number,
     dto: CreateOrderDto & ClosingDetails,
@@ -155,8 +152,6 @@ export class OrdersService {
     return order;
   }
 
-  // Several different 1C numbers paid by one payment: each keeps its own number and amount, but
-  // they form one group under the first number, so a payment, a status and a refund cover them all.
   async createGroup(
     managerId: number,
     items: GroupOrderItem[],
@@ -193,7 +188,7 @@ export class OrdersService {
                 orderType: OrderType.REGULAR,
                 orderNumber: numbers[index]!,
                 baseNumber,
-                clientName: common.clientName,
+                clientName: item.clientName ?? common.clientName,
                 amountDue: item.amountDue,
                 currency: common.currency,
                 exchangeRate: common.exchangeRate,
@@ -220,7 +215,6 @@ export class OrdersService {
     return orders;
   }
 
-  // One entry per 1C number: an unpaid number is listed once, with the total of all its parts.
   async findUnpaid(
     limit: number,
     cursor?: number,
@@ -240,8 +234,6 @@ export class OrdersService {
     return { items: await this.groupsWithBalance(page.map((head) => head.baseNumber)), nextCursor };
   }
 
-  // The whole number as one record: total due, everything paid against it. Any number of a group
-  // finds the group.
   async findWithBalance(orderNumber: string): Promise<OrderWithPaid<OrderWithManager> | null> {
     const [group] = await this.groupsWithBalance([
       await resolveBaseNumber(this.prisma, orderNumber),
@@ -322,7 +314,6 @@ export class OrdersService {
     return { items: await this.withBalances(orders), total };
   }
 
-  // A single order (part) of a number; payments and refunds are those of the whole number.
   async findLedger(orderNumber: string): Promise<OrderLedger | null> {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber: normalizePartNumber(orderNumber) },
@@ -456,7 +447,6 @@ export class OrdersService {
     });
   }
 
-  // Each order shows its own share of what was paid against its number.
   private async withBalances<T extends Order>(orders: T[]): Promise<OrderWithPaid<T>[]> {
     if (orders.length === 0) {
       return [];

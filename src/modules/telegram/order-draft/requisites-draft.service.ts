@@ -10,6 +10,7 @@ import { TelegramSender } from '../core/telegram-sender';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
 import { OrderCreationFlowService } from './order-creation-flow.service';
 import { PendingFilesStore } from './pending-files.store';
+import { type RequisitesDraft, RequisitesDraftStore } from './requisites-draft.store';
 import {
   adminRequisitesMessage,
   requisitesCreatedReply,
@@ -18,16 +19,11 @@ import {
   requisitesPreview,
 } from './requisites.messages';
 import { parseRequisites, withoutNumbers } from './requisites.parser';
-import { type RequisitesDraft, RequisitesDraftStore } from './requisites-draft.store';
 
-// How long a manager has to answer a requisites report's preview.
 const REQUISITES_DRAFT_TTL_MS = 10 * 60_000;
 
-// How long the "кілька номерів / реквізити" mode waits for the message after the button/command.
 const REQUISITES_MODE_TTL_MS = 30 * 60_000;
 
-// The "кілька номерів / реквізити" draft: arming the mode, reading a free-text report into a
-// preview, and creating the resulting order(s) once the manager confirms it.
 @Injectable()
 export class RequisitesDraftService {
   constructor(
@@ -40,8 +36,6 @@ export class RequisitesDraftService {
     private readonly notifier: DraftAttachmentNotifier,
   ) {}
 
-  // Arms the mode: only while armed does the very next message go through the requisites parser
-  // instead of the regular single-order template.
   start(userId: bigint): BotReply {
     this.drafts.clearDraft(userId);
     this.drafts.arm(userId, Date.now() + REQUISITES_MODE_TTL_MS);
@@ -52,7 +46,6 @@ export class RequisitesDraftService {
     return this.drafts.isArmed(userId);
   }
 
-  // Drops the armed mode and any pending preview, reporting whether there was anything to drop.
   leave(userId: bigint): boolean {
     return this.drafts.leave(userId);
   }
@@ -63,8 +56,6 @@ export class RequisitesDraftService {
     return { html: 'Гаразд. Надішліть виправлене повідомлення.' };
   }
 
-  // "Це звичайне замовлення" escape hatch: the message was misread as a requisites report, so the
-  // same text goes through the regular template instead.
   async regularFrom(manager: Manager): Promise<BotReply> {
     const draft = this.drafts.takeDraft(manager.telegramId);
     this.drafts.disarm(manager.telegramId);
@@ -133,7 +124,7 @@ export class RequisitesDraftService {
       skipped = plan.items.filter((_, index) => found[index]).map((item) => item.number);
       if (skipped.length === plan.items.length) {
         return {
-          html: `⚠️ Усі ці номери вже є в системі: ${skipped.join(', ')}. Немає що додавати.`,
+          html: `⚠️ Усі ці номери вже є в системі: ${skipped.join(', ')}.`,
         };
       }
       if (skipped.length > 0) {
@@ -176,7 +167,11 @@ export class RequisitesDraftService {
     if (plan.kind === 'group') {
       orders = await this.orders.createGroup(
         manager.id,
-        plan.items.map((item) => ({ orderNumber: item.number, amountDue: item.amount.toFixed(2) })),
+        plan.items.map((item) => ({
+          orderNumber: item.number,
+          amountDue: item.amount.toFixed(2),
+          clientName: item.fop ?? undefined,
+        })),
         common,
       );
     } else {

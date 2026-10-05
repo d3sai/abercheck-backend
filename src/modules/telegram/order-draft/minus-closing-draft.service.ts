@@ -24,14 +24,10 @@ export interface MinusDraft {
 @Injectable()
 export class MinusDraftStore extends DraftModeStore<MinusDraft> {}
 
-// How long a manager has to answer the preview.
 const MINUS_DRAFT_TTL_MS = 10 * 60_000;
 
-// How long the mode waits for the message after the button/command.
 const MINUS_MODE_TTL_MS = 30 * 60_000;
 
-// "➖ Закрити мінус": arming the mode, reading one message in the "Закриття заборгованості клієнта"
-// template (or written freely) into a preview, and creating the closing once it is confirmed.
 @Injectable()
 export class MinusClosingDraftService {
   constructor(
@@ -53,7 +49,6 @@ export class MinusClosingDraftService {
     return this.drafts.isArmed(userId);
   }
 
-  // Drops the armed mode and any pending preview, reporting whether there was anything to drop.
   leave(userId: bigint): boolean {
     return this.drafts.leave(userId);
   }

@@ -9,13 +9,14 @@ export interface PlanItem {
   number: string;
   amount: Prisma.Decimal;
   note: string | null;
+  /** The note without remarks in brackets, e.g. «(залишок)»; only read for several numbers. */
+  fop?: string | null;
 }
 
 export type PlanKind = 'single' | 'group';
 
 export interface RequisitesPlan {
   kind: PlanKind;
-  /** One message is one payment: every amount in it is in this currency. */
   currency: Currency;
   items: PlanItem[];
   total: Prisma.Decimal;
@@ -47,8 +48,6 @@ const DATE_ONLY = /^\s*\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:\s+\d{1,2}:\d{2})?\s*$/u;
 const NUMBER_AT_START = /^\s*(?:[№#]\s*)?(\d{4}-\d{6})(?!\d)(.*)$/u;
 const NEAR_MISS_AT_START = /^\s*(?:[№#]\s*)?(\d{3}-\d{6})(?!\d)(.*)$/u;
 const NUMBER_ANYWHERE = /(?<!\d)\d{4}-\d{6}(?!\d)/gu;
-// A heading with nothing after its colon — "Зразок :", "Наприклад :", "Замовлення та сума в
-// доларах :" — carries no data of its own.
 export const LABEL_ONLY = /^[\p{L}\s'’]+:$/u;
 export const CARD = /(?<!\d)(?:\d{4}[\u00a0 -]){3}\d{4}(?!\d)/u;
 export const IBAN = /(?<![A-Za-z\d])UA\d{27}(?!\d)/u;
@@ -75,15 +74,10 @@ const WORD_DATE = new RegExp(
   String.raw`(?<!\d)(\d{1,2})\s+(${MONTHS.join('|')})\s+(\d{4})(?:\s*р(?:оку|\.)?)?`,
   'giu',
 );
-// Only a payment line says which account it went through, so only there is a number without
-// "грн" taken for an amount — never in the ЄДРПОУ / ІПН / invoice lines copied around it.
 const PAYMENT_LINE = /^\s*(?:фоп|тов)\s/iu;
 const TRAILING_BARE_AMOUNT = new RegExp(String.raw`[\s\-–—:,;]*(?<![\d.,])${AMOUNT_SRC}$`, 'u');
 const TRAILING_AMOUNT = new RegExp(String.raw`\p{L}[^\d]*?(?<![\d.,])(${AMOUNT_SRC})\s*$`, 'u');
 
-// "$150" → "150 $": the amount readers below expect the unit after the number. Only a "$" glued
-// to the digits counts (so "590 $ 10:50" keeps its unit), and one glued to a word or a URL is left
-// alone.
 export function unitAfterAmount(text: string): string {
   const prefixed = new RegExp(
     String.raw`(?<![\p{L}\p{N}/=?&#%_.~+-])\$(${AMOUNT_SRC})(?!\d)`,
@@ -96,7 +90,6 @@ const UNIT_AFTER_DIGIT = new RegExp(String.raw`\d\s*(?:(${UAH_UNIT_SRC})|${USD_U
 
 export type CurrencyResult = { ok: true; currency: Currency } | { ok: false; error: string };
 
-// One message is one payment, so all its amounts share a currency; no unit at all means hryvnias.
 export function messageCurrency(text: string): CurrencyResult {
   let uah = false;
   let usd = false;
@@ -151,7 +144,6 @@ export function parseDateTime(raw: string): Date | null {
   return roundTrips ? date : null;
 }
 
-// "5 вересня 2026" → "05.09.2026", so a date written in words reads like any other.
 export function numericDates(text: string): string {
   return text.replace(WORD_DATE, (_, day: string, month: string, year: string) => {
     const index = MONTHS.indexOf(month.toLowerCase()) + 1;
@@ -159,7 +151,6 @@ export function numericDates(text: string): string {
   });
 }
 
-// The amount of a payment line, with or without "грн": "5168 … Носенко Роман 2 287".
 export function paymentAmount(line: string): Prisma.Decimal | null {
   const withCurrency = firstAmount(line);
   if (withCurrency || !(CARD.test(line) || PAYMENT_LINE.test(line))) {
@@ -219,7 +210,6 @@ interface Scan {
   duplicates: string[];
 }
 
-// Just an amount (maybe with a note after it) — not a payer's line, which starts with a name.
 function isBareAmountLine(trimmed: string): boolean {
   const at = amountRegex().exec(trimmed)?.index;
   return (
@@ -342,6 +332,18 @@ export function cleanName(line: string): string {
     .replace(/^[\s\-–—:,.;()]+|[\s\-–—:,;()]+$/g, '');
 }
 
+export const DATE_TIME_HINT = 'дату й час саме цього замовлення, у форматі ДД.ММ.РРРР ГГ:ХХ';
+
+function fopOf(note: string | null): string | null {
+  const fop = (note ?? '')
+    .replace(/\([^)]*\)/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return /\p{L}{3,}/u.test(fop) ? fop.slice(0, 255) : null;
+}
+
+const DEFAULT_LABEL = 'Оплата на реквізити';
+
 function guessLabel(lines: string[]): string {
   for (const line of lines) {
     const trimmed = line.trim();
@@ -361,7 +363,7 @@ function guessLabel(lines: string[]): string {
       return name.slice(0, 255);
     }
   }
-  return 'Оплата на реквізити';
+  return DEFAULT_LABEL;
 }
 
 function buildComment(rest: RestLine[], comments: string[]): string | null {
@@ -375,7 +377,6 @@ function buildComment(rest: RestLine[], comments: string[]): string | null {
   return parts.length > 0 ? parts.join(' · ').slice(0, COMMENT_MAX_LENGTH) : null;
 }
 
-// `fallback` dates a payment that has no date of its own nor a date line above it.
 export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): RequisiteInput[] {
   const lines = [...rest];
   const records: RequisiteInput[] = [];
@@ -414,7 +415,6 @@ export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): Requisi
 
     const ownDate = new RegExp(DATE.source, 'u').exec(trimmed)?.[0];
     const ownTime = new RegExp(TIME.source, 'u').exec(trimmed)?.[0];
-    // A payment's own time wins over the time on the date line above it.
     const dateText =
       ownDate ?? (ownTime ? currentDateText?.replace(TIME, '').trim() : currentDateText);
     const whenText = [dateText, ownTime].filter(Boolean).join(' ');
@@ -556,7 +556,7 @@ export function parseRequisites(raw: string): RequisitesResult {
       total = own;
     }
     if (total) {
-      items = [{ number: numbers[0]!.number, amount: total, note: numbers[0]!.note }];
+      items = [{ number: numbers[0]!.number, amount: total, note: numbers[0]!.note, fop: null }];
     }
   } else {
     kind = 'group';
@@ -566,9 +566,16 @@ export function parseRequisites(raw: string): RequisitesResult {
           `Біля номера ${item.number} немає суми — напишіть її зі словом «грн» (або знаком $) у тому ж рядку.`,
         );
       }
+      if (!fopOf(item.note)) {
+        errors.push(
+          `Біля номера ${item.number} немає ФОП — напишіть його в тому ж рядку після суми.`,
+        );
+      }
     }
     items = numbers.flatMap((item) =>
-      item.amount ? [{ number: item.number, amount: item.amount, note: item.note }] : [],
+      item.amount
+        ? [{ number: item.number, amount: item.amount, note: item.note, fop: fopOf(item.note) }]
+        : [],
     );
     total = sum(items.map((item) => item.amount));
     if (errors.length === 0) {
@@ -595,6 +602,14 @@ export function parseRequisites(raw: string): RequisitesResult {
       errors.push('Сума має бути додатною й не більшою за 12 цифр до коми.');
     }
   }
+  const label = guessLabel(lines);
+  if (kind !== 'group' && label === DEFAULT_LABEL) {
+    errors.push('Не знайшов ФОП. Додайте рядок «ФОП Прізвище Ім’я».');
+  }
+  const dated = numericDates(text);
+  if (!new RegExp(DATE.source, 'u').test(dated) || !new RegExp(TIME.source, 'u').test(dated)) {
+    errors.push(`Не вказано дату й час оплати. Напишіть ${DATE_TIME_HINT}.`);
+  }
   if (errors.length > 0 || total === null) {
     return { ok: false, errors };
   }
@@ -603,7 +618,6 @@ export function parseRequisites(raw: string): RequisitesResult {
     warnings.unshift('Загальної суми в тексті немає — я порахував її з рядків, перевірте.');
   }
 
-  const label = guessLabel(lines);
   const normalizedRate = rate ? parseExchangeRate(rate) : null;
   const comment = buildComment(found.rest, found.comments);
 
@@ -616,18 +630,14 @@ export function parseRequisites(raw: string): RequisitesResult {
       total,
       derivedTotal,
       rate: normalizedRate?.ok ? normalizedRate.value : null,
-      label,
+      label: kind === 'group' ? (items[0]?.fop ?? label) : label,
       warnings,
       comment,
-      // Numbers are the substance of a group, but a payment split across several third-party
-      // accounts is still worth recording — e.g. several 1C numbers paid at once by two card
-      // holders. lineRecords already excludes the numbers' own lines and the total.
       requisiteLines: kind === 'group' ? lineRecords : requisiteLines,
     },
   };
 }
 
-// The same message without the lines of the given numbers and without the total that covered them.
 export function withoutNumbers(text: string, numbers: string[]): string {
   return text
     .split(/\r?\n/)

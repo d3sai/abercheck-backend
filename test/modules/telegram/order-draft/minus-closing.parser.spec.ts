@@ -183,12 +183,12 @@ describe('parseMinusClosing', () => {
   });
 
   it('should read a two-digit year and a date written in words', () => {
-    expect(planOf('Клієнт: Гук\nСума: 100 грн\nДата: 05.09.26 12:36').paidAt).toEqual(
+    expect(planOf('Клієнт: Гук\nСума: 100 грн\nФОП Берчатов\nДата: 05.09.26 12:36').paidAt).toEqual(
       new Date('2026-09-05T09:36:00Z'),
     );
-    expect(planOf('Клієнт: Гук\nСума: 100 грн\n5 вересня 2026 р.').paidAt).toEqual(
-      new Date('2026-09-04T21:00:00Z'),
-    );
+    expect(
+      planOf('Клієнт: Гук\nСума: 100 грн\nФОП Берчатов\n5 вересня 2026 р. 12:36').paidAt,
+    ).toEqual(new Date('2026-09-05T09:36:00Z'));
   });
 
   it('should read a payment line without "грн" and date it by the closing when it has no date', () => {
@@ -215,14 +215,16 @@ describe('parseMinusClosing', () => {
   });
 
   it('should read "ФОП:" with a colon as the client, and "ФОП …" without one as our FOP', () => {
-    const plan = planOf('ФОП: Гук Руслан\nСума: 100 грн\nФОП Берчатов М. М.');
+    const plan = planOf('ФОП: Гук Руслан\nСума: 100 грн\nФОП Берчатов М. М.\n05.09.2026 12:36');
 
     expect(plan.clientName).toBe('Гук Руслан');
     expect(plan.ourFop).toBe('Берчатов М. М.');
   });
 
   it('should take "Оплату отримано на: ФОП …" as our FOP', () => {
-    const plan = planOf('ПІБ: Гук Руслан\nСума: 100 грн\nОплату отримано на: ФОП Берчатов М. М.');
+    const plan = planOf(
+      'ПІБ: Гук Руслан\nСума: 100 грн\nДата: 05.09.2026 12:36\nОплату отримано на: ФОП Берчатов М. М.',
+    );
 
     expect(plan.ourFop).toBe('Берчатов М. М.');
   });
@@ -242,15 +244,16 @@ describe('parseMinusClosing', () => {
   });
 
   it('should take the first plain line as the client when there is no header', () => {
-    const plan = planOf('Гук Руслан\n27 409 грн\nФОП Берчатов М. М.');
+    const plan = planOf('Гук Руслан\n27 409 грн\nФОП Берчатов М. М.\n05.09.2026 12:36');
 
     expect(plan.clientName).toBe('Гук Руслан');
     expect(plan.ourFop).toBe('Берчатов М. М.');
-    expect(plan.warnings).toEqual(['Не вказано дату оплати.']);
   });
 
   it('should warn when the written total and the payments disagree', () => {
-    const plan = planOf('ПІБ: Гук Руслан\nЗагальна сума: 5 000 грн\nФОП А - 3 000 грн');
+    const plan = planOf(
+      'ПІБ: Гук Руслан\nДата: 05.09.2026 12:36\nЗагальна сума: 5 000 грн\nФОП А - 3 000 грн',
+    );
 
     expect(plan.total.toFixed(2)).toBe('5000.00');
     expect(plan.warnings).toContain(
@@ -260,7 +263,7 @@ describe('parseMinusClosing', () => {
 
   it('should keep only an http(s) address as the spreadsheet, and an unreadable rate as a comment', () => {
     const plan = planOf(
-      'ПІБ: Гук Руслан\nСума: 100 грн\nКурс: без %\nПосилання на таблицю: javascript:alert(1)',
+      'ПІБ: Гук Руслан\nСума: 100 грн\nФОП Берчатов\nДата: 05.09.2026 12:36\nКурс: без %\nПосилання на таблицю: javascript:alert(1)',
     );
 
     expect(plan.sheetUrl).toBeNull();
@@ -272,12 +275,18 @@ describe('parseMinusClosing', () => {
   it.each([
     ['27 409 грн\nФОП Берчатов', 'Не знайшов клієнта'],
     ['Закриття мінусу Гук Руслан\nФОП Берчатов', 'Не знайшов суму'],
-  ])('should refuse a message without a client or an amount', (text, error) => {
-    const result = parseMinusClosing(text);
+    ['Клієнт: Гук\nСума: 100 грн\nФОП Берчатов', 'Не вказано дату й час'],
+    ['Клієнт: Гук\nСума: 100 грн\nФОП Берчатов\nДата: 05.09.2026', 'Не вказано дату й час'],
+    ['Клієнт: Гук\nСума: 100 грн\nДата: 05.09.2026 12:36', 'Не вказано ФОП'],
+  ])(
+    'should refuse a message without a client, an amount, a date with time or a FOP',
+    (text, error) => {
+      const result = parseMinusClosing(text);
 
-    expect(result.ok).toBe(false);
-    expect(!result.ok && result.errors.join(' ')).toContain(error);
-  });
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.errors.join(' ')).toContain(error);
+    },
+  );
 
   describe('dollars', () => {
     it('should read a closing in dollars, with the "$" before the sum', () => {
@@ -295,7 +304,7 @@ describe('parseMinusClosing', () => {
 
     it('should read card payments in dollars and word the mismatch in dollars', () => {
       const plan = planOf(
-        'Клієнт: Гук Руслан\nДата: 05.09.2026\nЗагальна сума: 150 $\n4441 1110 6964 5962 Андріанов Олександр 100 $ 14:59',
+        'Клієнт: Гук Руслан\nДата: 05.09.2026 12:36\nЗагальна сума: 150 $\n4441 1110 6964 5962 Андріанов Олександр 100 $ 14:59',
       );
 
       expect(plan.currency).toBe('USD');

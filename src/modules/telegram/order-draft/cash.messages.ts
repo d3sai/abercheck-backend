@@ -8,7 +8,6 @@ export const CashAction = {
   Edit: 'cash:edit',
 } as const;
 
-// Reads like the "Оплата готівкою" template the managers fill in.
 function cashLines(plan: CashPlan, exists: boolean): string[] {
   return [
     '💰 <b>Оплата готівкою</b>',

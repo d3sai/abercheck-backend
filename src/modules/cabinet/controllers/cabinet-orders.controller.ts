@@ -222,7 +222,6 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   'application/pdf': 'pdf',
 };
 
-// Telegram documents may arrive nameless ("файл"); restore the extension so the OS can open the download.
 function withExtension(filename: string, mimeType: string): string {
   const extension = EXTENSION_BY_MIME[mimeType];
   return extension && !/\.[A-Za-z0-9]{1,5}$/.test(filename) ? `${filename}.${extension}` : filename;
