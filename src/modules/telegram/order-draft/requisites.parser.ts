@@ -568,7 +568,7 @@ export function parseRequisites(raw: string): RequisitesResult {
       }
       if (!fopOf(item.note)) {
         errors.push(
-          `Біля номера ${item.number} немає ФОП — напишіть його в тому ж рядку після суми.`,
+          `Біля номера ${item.number} немає ФОП чи ТОВ — напишіть його в тому ж рядку після суми.`,
         );
       }
     }
@@ -604,7 +604,7 @@ export function parseRequisites(raw: string): RequisitesResult {
   }
   const label = guessLabel(lines);
   if (kind !== 'group' && label === DEFAULT_LABEL) {
-    errors.push('Не знайшов ФОП. Додайте рядок «ФОП Прізвище Ім’я».');
+    errors.push('Не знайшов ФОП чи ТОВ. Додайте рядок «ФОП Прізвище Ім’я» або «ТОВ Назва».');
   }
   const dated = numericDates(text);
   if (!new RegExp(DATE.source, 'u').test(dated) || !new RegExp(TIME.source, 'u').test(dated)) {

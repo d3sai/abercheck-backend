@@ -33,7 +33,9 @@ interface ClosingView {
 function closingLines(view: ClosingView): string[] {
   const period = view.period ? ` ${escapeHtml(view.period)}` : '';
   const received = [
-    ...(view.ourFop ? [`Наш ФОП: ${escapeHtml(view.ourFop)}`] : []),
+    ...(view.ourFop
+      ? [`${/^тов\s/iu.test(view.ourFop) ? 'Отримано на' : 'Наш ФОП'}: ${escapeHtml(view.ourFop)}`]
+      : []),
     ...view.requisites.map((r) =>
       requisiteBlock(r.payerName, r.account, r.amount, view.currency, r.paidAt),
     ),
@@ -67,7 +69,7 @@ export function minusHint(): BotReply {
     html: [
       '➖ <b>Закриття мінусу</b>',
       'Надішліть одним повідомленням.',
-      'Оплата на картку чи чужий ФОП: кожен платіж окремим рядком, наприклад:',
+      'Оплата на картку чи чужий ФОП/ТОВ: кожен платіж окремим рядком, наприклад:',
       '',
       `<pre>${escapeHtml(example)}</pre>`,
       'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',

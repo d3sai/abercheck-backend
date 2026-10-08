@@ -402,6 +402,14 @@ describe('parseRequisites', () => {
       expect(!result.ok && result.errors.join(' ')).toContain(`Біля номера ${number} немає ФОП`);
     });
 
+    it('should take a company as well as a FOP for a number', () => {
+      const plan = planOf(
+        `0000-068772 100 грн ТОВ Абертайм\n0000-068773 50 грн ФОП Іванов${STAMP}`,
+      );
+
+      expect(plan.items.map((item) => item.fop)).toEqual(['ТОВ Абертайм', 'ФОП Іванов']);
+    });
+
     it('should keep a FOP for every number, without bracketed remarks', () => {
       const plan = planOf(
         `0000-068772 100 грн (залишок) ФОП Гук\n0000-068773 50 грн ФОП Іванов${STAMP}`,

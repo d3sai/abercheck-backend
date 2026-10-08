@@ -143,6 +143,18 @@ describe('OrderDraftService', () => {
     await expect(service.handleText(MANAGER, 'привіт, як справи?')).resolves.toBeNull();
   });
 
+  it('should read «ТОВ:» as the client name, like «ФОП:»', async () => {
+    orders.create.mockResolvedValue(createdOrder({ clientName: 'Абертайм' }));
+
+    await service.handleText(MANAGER, 'Номер: 0000-066717\nТОВ: Абертайм\nСума: 100');
+
+    expect(orders.create).toHaveBeenCalledWith(
+      MANAGER.id,
+      expect.objectContaining({ clientName: 'Абертайм', amountDue: '100' }),
+      expect.anything(),
+    );
+  });
+
   it('should list every validation error without creating an order', async () => {
     const reply = await service.handleText(
       MANAGER,

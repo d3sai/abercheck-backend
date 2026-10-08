@@ -46,11 +46,14 @@ const FIELDS: readonly FieldSpec[] = [
   { field: 'comment', label: 'Коментар', optional: true, parse: parseText(2000) },
 ];
 
+// «ТОВ: …» fills the same field as «ФОП: …».
+const FIELDS_WITH_ALIASES = [...FIELDS, { field: 'clientName', label: 'ТОВ' }];
+
 function parseClientName(input: string): ParseResult {
   return parseDateTime(numericDates(input.trim()))
     ? {
         ok: false,
-        error: `схоже на дату, а не на ФОП. Якщо це оплата готівкою, натисніть «${MENU_LABEL.Cash}» (/cash).`,
+        error: `схоже на дату, а не на ФОП чи ТОВ. Якщо це оплата готівкою, натисніть «${MENU_LABEL.Cash}» (/cash).`,
       }
     : parseText(255)(input);
 }
@@ -99,13 +102,14 @@ export class OrderCreationFlowService {
   }
 
   extractFields(text: string): Record<string, string> | null {
-    const labeled = parseTemplate(text, FIELDS);
+    const labeled = parseTemplate(text, FIELDS_WITH_ALIASES);
     return Object.keys(labeled).length > 0 ? labeled : parseFreeform(text);
   }
 
   needsRequisitesButton(text: string): boolean {
     return (
-      Object.keys(parseTemplate(text, FIELDS)).length === 0 && hasMultipleOrdersOrRequisites(text)
+      Object.keys(parseTemplate(text, FIELDS_WITH_ALIASES)).length === 0 &&
+      hasMultipleOrdersOrRequisites(text)
     );
   }
 

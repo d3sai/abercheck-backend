@@ -38,14 +38,16 @@ export interface MinusPlan {
 
 export type MinusResult = { ok: true; plan: MinusPlan } | { ok: false; errors: string[] };
 
-type Label = 'name' | 'date' | 'total' | 'receivedOn' | 'ourFop' | 'comment' | 'rate' | 'sheet';
+type Label =
+  'name' | 'date' | 'total' | 'receivedOn' | 'ourFop' | 'ourCompany' | 'comment' | 'rate' | 'sheet';
 
 const LABELS: [Label, RegExp][] = [
-  ['name', /^(?:піб(?:\s*\(\s*фоп\s*\))?|клієнт|фоп(?=\s*:))/iu],
+  ['name', /^(?:піб(?:\s*\(\s*фоп\s*\))?|клієнт|(?:фоп|тов)(?=\s*:))/iu],
   ['date', /^дата/iu],
   ['total', /^(?:загальна\s+)?сума/iu],
   ['receivedOn', /^(?:оплату\s+)?отримано\s+на/iu],
   ['ourFop', /^наш\s+фоп/iu],
+  ['ourCompany', /^наше\s+тов|^наш\s+тов/iu],
   ['comment', /^коментар/iu],
   ['rate', /^курс/iu],
   ['sheet', /^(?:посилання(?:\s+на\s+таблицю)?|таблиця)/iu],
@@ -60,6 +62,7 @@ const URL_PATTERN = /https?:\/\/\S+/iu;
 const NUMBER_ONLY = /^[№#]?\s*(\d{4}-\d{6})$/u;
 const TIME_IN_DATE = /\d:\d{2}$/u;
 const FOP_PREFIX = /^фоп\s+/iu;
+const COMPANY_PREFIX = /^тов\s+/iu;
 const ON_CARD = /^(?:на\s+)?(?:карт[ауиі]|картку|рахунок)\s+/iu;
 const DATE_LINE =
   /^(\d{1,2}[./]\d{1,2}[./](?:\d{4}|\d{2}))(?:[ ,]+(\d{1,2})\s*[.:]{1,2}\s*(\d{2}))?$/u;
@@ -162,7 +165,12 @@ export function parseMinusClosing(raw: string): MinusResult {
   const takeOurFop = (raw: string): void => {
     found.ourFop ??= raw.replace(FOP_PREFIX, '').trim().slice(0, 255);
   };
+  // A company keeps its «ТОВ» in the name, a FOP drops the «ФОП» word.
+  const takeOurCompany = (raw: string): void => {
+    takeOurFop(COMPANY_PREFIX.test(raw) ? raw : `ТОВ ${raw}`);
+  };
 
+  let previous = '';
   for (const original of text.split(/\r?\n/)) {
     const url = URL_PATTERN.exec(original)?.[0];
     if (url) {
@@ -173,6 +181,8 @@ export function parseMinusClosing(raw: string): MinusResult {
       rest.push({ text: '', kind: 'blank' });
       continue;
     }
+    const before = previous;
+    previous = line;
 
     const header = HEADER.exec(line);
     if (header) {
@@ -196,6 +206,9 @@ export function parseMinusClosing(raw: string): MinusResult {
           break;
         case 'ourFop':
           takeOurFop(value);
+          break;
+        case 'ourCompany':
+          takeOurCompany(value);
           break;
         case 'receivedOn':
           if (paymentAmount(value) || CARD.test(value) || IBAN.test(value)) {
@@ -237,6 +250,11 @@ export function parseMinusClosing(raw: string): MinusResult {
       continue;
     }
     if (found.ourFop === null && FOP_PREFIX.test(line)) {
+      takeOurFop(line);
+      continue;
+    }
+    // After a heading such as «Платіжна установа:» a «ТОВ …» line is a bank detail, not our company.
+    if (found.ourFop === null && COMPANY_PREFIX.test(line) && !before.endsWith(':')) {
       takeOurFop(line);
       continue;
     }
@@ -295,7 +313,9 @@ export function parseMinusClosing(raw: string): MinusResult {
     errors.push(`Такої дати немає: «${found.date}». Напишіть ${DATE_TIME_HINT}.`);
   }
   if (found.ourFop === null && requisiteLines.length === 0) {
-    errors.push('Не вказано ФОП. Додайте рядок «Отримано на: ФОП Берчатов М. М.».');
+    errors.push(
+      'Не вказано ФОП чи ТОВ. Додайте рядок «Отримано на: ФОП Берчатов М. М.» або «Отримано на: ТОВ Назва».',
+    );
   }
   if (errors.length > 0 || stated === null) {
     return { ok: false, errors };

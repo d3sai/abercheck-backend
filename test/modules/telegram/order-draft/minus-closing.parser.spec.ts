@@ -221,6 +221,28 @@ describe('parseMinusClosing', () => {
     expect(plan.ourFop).toBe('Берчатов М. М.');
   });
 
+  it.each([
+    ['Отримано на: ТОВ Абертайм'],
+    ['Наш ТОВ: Абертайм'],
+    ['Наше ТОВ: ТОВ Абертайм'],
+    ['ТОВ Абертайм'],
+  ])('should take «%s» as our company, keeping «ТОВ» in its name', (line) => {
+    const plan = planOf(`Клієнт: Гук\nСума: 100 грн\nДата: 05.09.2026 12:36\n${line}`);
+
+    expect(plan.ourFop).toBe('ТОВ Абертайм');
+  });
+
+  it('should read «ТОВ:» as the client, and ignore a «ТОВ …» line under a heading', () => {
+    expect(planOf('ТОВ: Абертайм\nСума: 100 грн\nФОП Берчатов\n05.09.2026 12:36').clientName).toBe(
+      'Абертайм',
+    );
+
+    const result = parseMinusClosing(
+      'Клієнт: Гук\nСума: 100 грн\nДата: 05.09.2026 12:36\nПлатіжна установа:\nТОВ НоваПей',
+    );
+    expect(!result.ok && result.errors.join(' ')).toContain('Не вказано ФОП чи ТОВ');
+  });
+
   it('should take "Оплату отримано на: ФОП …" as our FOP', () => {
     const plan = planOf(
       'ПІБ: Гук Руслан\nСума: 100 грн\nДата: 05.09.2026 12:36\nОплату отримано на: ФОП Берчатов М. М.',
