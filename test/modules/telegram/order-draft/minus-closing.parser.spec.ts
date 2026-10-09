@@ -232,6 +232,15 @@ describe('parseMinusClosing', () => {
     expect(plan.ourFop).toBe('ТОВ Абертайм');
   });
 
+  it.each(['ФОП', 'ТОВ'])('should read the template label «ПІБ (%s):» as the client', (kind) => {
+    const plan = planOf(
+      `Закриття заборгованості клієнта\nПІБ (${kind}): Гук Руслан за підрахунком 31.08.2026\nДата: 05.09.2026 12:36\nЗагальна Сума: 2 140 грн\nОплату отримано на: ФОП Берчатов М. М.`,
+    );
+
+    expect(plan.clientName).toBe('Гук Руслан');
+    expect(plan.period).toBe('за підрахунком 31.08.2026');
+  });
+
   it('should read «ТОВ:» as the client, and ignore a «ТОВ …» line under a heading', () => {
     expect(planOf('ТОВ: Абертайм\nСума: 100 грн\nФОП Берчатов\n05.09.2026 12:36').clientName).toBe(
       'Абертайм',

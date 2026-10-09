@@ -42,7 +42,7 @@ type Label =
   'name' | 'date' | 'total' | 'receivedOn' | 'ourFop' | 'ourCompany' | 'comment' | 'rate' | 'sheet';
 
 const LABELS: [Label, RegExp][] = [
-  ['name', /^(?:піб(?:\s*\(\s*фоп\s*\))?|клієнт|(?:фоп|тов)(?=\s*:))/iu],
+  ['name', /^(?:піб(?:\s*\(\s*(?:фоп|тов)\s*\))?|клієнт|(?:фоп|тов)(?=\s*:))/iu],
   ['date', /^дата/iu],
   ['total', /^(?:загальна\s+)?сума/iu],
   ['receivedOn', /^(?:оплату\s+)?отримано\s+на/iu],
