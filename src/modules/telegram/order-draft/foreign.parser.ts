@@ -1,5 +1,5 @@
-import { EUR_UNIT_SRC, MONEY_PATTERN } from '../../../common/money';
-import type { Prisma } from '../../../generated/prisma/client';
+import { EUR_UNIT_SRC, MONEY_PATTERN, UAH_UNIT_SRC, USD_UNIT_SRC } from '../../../common/money';
+import { Currency, type Prisma } from '../../../generated/prisma/client';
 import { parseExchangeRate, parseOrderNumber } from './order-draft.parsers';
 import {
   AMOUNT_SRC,
@@ -9,11 +9,13 @@ import {
   numericDates,
   parseDateTime,
   toDecimal,
+  unitAfterAmount,
 } from './requisites.parser';
 
 export interface ForeignPlan {
   number: string;
   amount: Prisma.Decimal;
+  currency: Currency;
   recipient: string | null;
   rate: string | null;
   paidAt: Date | null;
@@ -38,7 +40,15 @@ const LABELS: [Label, RegExp][] = [
 // The template puts an emoji before some labels («💰 Сума»).
 const LEADING_SYMBOLS = /^[^\p{L}\p{N}№#]+/u;
 const AMOUNT_LINE = new RegExp(String.raw`^(${AMOUNT_SRC})\s*(.*)$`, 'u');
-const EUR_ONLY = new RegExp(`^${EUR_UNIT_SRC}$`, 'iu');
+const CURRENCY_UNITS: [Currency, RegExp][] = [
+  [Currency.UAH, new RegExp(String.raw`^(?:${UAH_UNIT_SRC}|uah(?!\p{L})|гривн\p{L}*)$`, 'iu')],
+  [Currency.USD, new RegExp(`^${USD_UNIT_SRC}$`, 'iu')],
+  [Currency.EUR, new RegExp(`^${EUR_UNIT_SRC}$`, 'iu')],
+];
+const CURRENCY_HINT = 'Напишіть UAH, USD або EUR: «Сума: 100 EUR» чи «Валюта: EUR».';
+
+const currencyOf = (text: string): Currency | null =>
+  CURRENCY_UNITS.find(([, re]) => re.test(text))?.[0] ?? null;
 // The template pasted outside /foreign: its header or the «На кого:» label.
 const FOREIGN_SHAPE = /^[^\p{L}\p{N}]*(?:оплата\s+закордонного\s+замовлення|на\s+кого\s*:)/imu;
 
@@ -84,18 +94,31 @@ export function parseForeign(raw: string): ForeignResult {
     else errors.push(`Номер «${fields.number}»: ${parsed.error}`);
   }
 
-  const amount = fields.amount ? AMOUNT_LINE.exec(fields.amount) : null;
+  const amount = fields.amount ? AMOUNT_LINE.exec(unitAfterAmount(fields.amount)) : null;
   if (!fields.amount) {
     errors.push('Не знайшов суму. Наприклад: 100 EUR.');
   } else if (!amount) {
     errors.push(`Не розібрав суму «${fields.amount}».`);
-  } else if (amount[2]!.trim() !== '' && !EUR_ONLY.test(amount[2]!.trim())) {
-    errors.push('Сума має бути в EUR.');
   } else if (!MONEY_PATTERN.test(toDecimal(amount[1]!).toFixed(2))) {
     errors.push('Сума має бути більшою за нуль.');
   }
-  if (fields.currency && !EUR_ONLY.test(fields.currency)) {
-    errors.push('Валюта лише EUR.');
+
+  // The unit after the amount and the «Валюта» line may each name the currency; they must agree.
+  const unit = amount?.[2]?.trim() ?? '';
+  const unitCurrency = unit === '' ? null : currencyOf(unit);
+  const labelCurrency = fields.currency ? currencyOf(fields.currency) : null;
+  if (unit !== '' && !unitCurrency) {
+    errors.push(`Не розібрав валюту «${unit}». ${CURRENCY_HINT}`);
+  }
+  if (fields.currency && !labelCurrency) {
+    errors.push(`Не розібрав валюту «${fields.currency}». ${CURRENCY_HINT}`);
+  }
+  if (unitCurrency && labelCurrency && unitCurrency !== labelCurrency) {
+    errors.push('У «Сума» і «Валюта» різні валюти.');
+  }
+  const currency = unitCurrency ?? labelCurrency;
+  if (!currency && unit === '' && !fields.currency) {
+    errors.push(`Не вказано валюту. ${CURRENCY_HINT}`);
   }
 
   const paidAt = fields.date ? parseDateTime(numericDates(fields.date)) : null;
@@ -115,7 +138,7 @@ export function parseForeign(raw: string): ForeignResult {
     warnings.push('Не вказано, на кого.');
   }
 
-  if (errors.length > 0 || number === null || !amount) {
+  if (errors.length > 0 || number === null || !amount || currency === null) {
     return { ok: false, errors };
   }
   return {
@@ -123,6 +146,7 @@ export function parseForeign(raw: string): ForeignResult {
     plan: {
       number,
       amount: toDecimal(amount[1]!),
+      currency,
       recipient: fields.recipient ? fields.recipient.slice(0, 255) : null,
       rate,
       paidAt,

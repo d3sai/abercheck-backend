@@ -1428,10 +1428,24 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(withFile.html).toContain('/foreign');
     });
 
-    it('should refuse hryvnias and a missing time instead of creating the order', async () => {
-      expect((await begin(TEMPLATE.replace('100 EUR', '100 грн')))?.html).toContain(
-        'Сума має бути в EUR',
+    it('should create the order in the currency the template names', async () => {
+      orders.createGroup.mockResolvedValue([
+        createdOrder({ orderNumber: '0000-066498', currency: 'USD' }),
+      ]);
+
+      const dollars = TEMPLATE.replace('100 EUR', '150 $').replace('Валюта: EUR', 'Валюта: USD');
+      expect((await begin(dollars))?.html).toContain('Сума: <b>150 $</b>');
+      await service.confirmForeign(MANAGER);
+
+      expect(orders.createGroup).toHaveBeenCalledWith(
+        MANAGER.id,
+        [{ orderNumber: '0000-066498', amountDue: '150.00' }],
+        expect.objectContaining({ currency: 'USD' }),
       );
+    });
+
+    it('should refuse clashing currencies and a missing time instead of creating the order', async () => {
+      expect((await begin(TEMPLATE.replace('100 EUR', '100 грн')))?.html).toContain('різні валюти');
       expect((await begin(TEMPLATE.replace('15:20', '')))?.html).toContain('Не вказано дату й час');
       expect(orders.createGroup).not.toHaveBeenCalled();
     });

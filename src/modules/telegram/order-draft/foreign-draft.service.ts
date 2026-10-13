@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Currency, type Manager, type Order } from '../../../generated/prisma/client';
+import type { Manager, Order } from '../../../generated/prisma/client';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
 import { OrdersService } from '../../orders/orders.service';
 import type { BotReply } from '../core/bot-reply';
@@ -92,7 +92,7 @@ export class ForeignDraftService {
           [{ orderNumber: plan.number, amountDue: plan.amount.toFixed(2) }],
           {
             clientName: FOREIGN_LABEL,
-            currency: Currency.EUR,
+            currency: plan.currency,
             exchangeRate: plan.rate ?? undefined,
             paidAt: plan.paidAt ?? undefined,
             comment: [FOREIGN_LABEL, plan.recipient && `на ${plan.recipient}`, plan.comment]

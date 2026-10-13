@@ -23,6 +23,7 @@ describe('parseForeign', () => {
     const { plan } = result;
     expect(plan.number).toBe('0000-066498');
     expect(plan.amount.toFixed(2)).toBe('100.00');
+    expect(plan.currency).toBe('EUR');
     expect(plan.recipient).toBe('Абертайм ТОВ ( EUR)');
     expect(plan.rate).toBe('44.9');
     expect(plan.paidAt?.toISOString()).toBe('2026-10-13T12:20:00.000Z');
@@ -49,6 +50,7 @@ describe('parseForeign', () => {
     expect(errors).toEqual([
       expect.stringContaining('Не знайшов номер замовлення'),
       expect.stringContaining('Не знайшов суму'),
+      expect.stringContaining('Не вказано валюту'),
       expect.stringContaining('Не вказано дату й час'),
     ]);
     expect(errorsOf(TEMPLATE.replace('15:20', ''))).toEqual([
@@ -62,12 +64,38 @@ describe('parseForeign', () => {
     ]);
   });
 
-  it.each(['100 грн', '100 $', '100 дол'])('refuses the amount %p, euros only', (amount) => {
-    expect(errorsOf(TEMPLATE.replace('100 EUR', amount))).toEqual(['Сума має бути в EUR.']);
+  it.each([
+    ['100 грн', 'UAH'],
+    ['100 $', 'USD'],
+    ['$100', 'USD'],
+    ['100 дол', 'USD'],
+    ['100 євро', 'EUR'],
+  ])('reads the amount %p as %s', (amount, currency) => {
+    const result = parseForeign(
+      TEMPLATE.replace('100 EUR', amount).replace('💱 Валюта: EUR\n', ''),
+    );
+    expect(result.ok && result.plan.currency).toBe(currency);
   });
 
-  it('refuses another currency in «Валюта» and a zero amount', () => {
-    expect(errorsOf(TEMPLATE.replace('Валюта: EUR', 'Валюта: USD'))).toEqual(['Валюта лише EUR.']);
+  it('takes the currency from «Валюта» alone, and refuses a clash or an unknown one', () => {
+    const noUnit = TEMPLATE.replace('100 EUR', '100');
+    expect(parseForeign(noUnit.replace('Валюта: EUR', 'Валюта: USD'))).toMatchObject({
+      plan: { currency: 'USD' },
+    });
+    expect(errorsOf(TEMPLATE.replace('Валюта: EUR', 'Валюта: USD'))).toEqual([
+      'У «Сума» і «Валюта» різні валюти.',
+    ]);
+    expect(errorsOf(TEMPLATE.replace('Валюта: EUR', 'Валюта: GBP'))).toEqual([
+      expect.stringContaining('Не розібрав валюту «GBP»'),
+    ]);
+  });
+
+  it('asks for the currency when neither «Сума» nor «Валюта» names it', () => {
+    const text = TEMPLATE.replace('100 EUR', '100').replace('💱 Валюта: EUR\n', '');
+    expect(errorsOf(text)).toEqual([expect.stringContaining('Не вказано валюту')]);
+  });
+
+  it('refuses a zero amount', () => {
     expect(errorsOf(TEMPLATE.replace('100 EUR', '0 EUR'))).toEqual([
       'Сума має бути більшою за нуль.',
     ]);
