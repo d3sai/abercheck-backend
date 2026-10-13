@@ -30,6 +30,7 @@ enum OrderType {
 enum Currency {
   UAH
   USD
+  EUR
 
   @@map("currency")
 }

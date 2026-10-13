@@ -29,11 +29,11 @@ describe('CreateOrderDto', () => {
     },
   );
 
-  it.each([undefined, 'UAH', 'USD'])('should accept currency %p', (currency) => {
+  it.each([undefined, 'UAH', 'USD', 'EUR'])('should accept currency %p', (currency) => {
     expect(validate({ ...valid, currency })).toEqual([]);
   });
 
-  it.each(['EUR', 'usd', '$'])('should reject currency %p', (currency) => {
+  it.each(['GBP', 'usd', '$'])('should reject currency %p', (currency) => {
     expect(validate({ ...valid, currency })).toEqual(['currency']);
   });
 

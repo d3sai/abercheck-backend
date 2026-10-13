@@ -31,6 +31,10 @@ import {
 import { ReportedPaymentService } from '../../../../src/modules/telegram/order-draft/reported-payment.service';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
 import {
+  ForeignDraftService,
+  ForeignDraftStore,
+} from '../../../../src/modules/telegram/order-draft/foreign-draft.service';
+import {
   KitDraftService,
   KitDraftStore,
 } from '../../../../src/modules/telegram/order-draft/kit-draft.service';
@@ -97,6 +101,8 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     KitDraftStore,
     CashDraftService,
     CashDraftStore,
+    ForeignDraftService,
+    ForeignDraftStore,
     ReportedPaymentService,
     DraftAttachmentNotifier,
     OrderListService,
@@ -280,12 +286,12 @@ describe('BotUpdate', () => {
 
   describe('the main menu', () => {
     it.each(['/start', '/help', 'привіт'])(
-      'should show the seven buttons in reply to %s',
+      'should show the eight buttons in reply to %s',
       async (text) => {
         const replies = await say(text);
 
         expect(replies).toHaveLength(1);
-        expect(menuOf(replies[0]!)).toHaveLength(7);
+        expect(menuOf(replies[0]!)).toHaveLength(8);
         expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
       },
     );

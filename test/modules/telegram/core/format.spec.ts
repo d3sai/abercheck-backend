@@ -4,6 +4,7 @@ import {
   formatKyivDate,
   formatKyivDateTime,
   formatMoney,
+  formatMoneyIn,
 } from '../../../../src/modules/telegram/core/format';
 
 describe('formatMoney', () => {
@@ -17,6 +18,16 @@ describe('formatMoney', () => {
     ['-50', '-50'],
   ])('should format %s as %s', (value, expected) => {
     expect(formatMoney(new Prisma.Decimal(value))).toBe(expected);
+  });
+});
+
+describe('formatMoneyIn', () => {
+  it.each([
+    ['UAH', '6 158,41 грн'],
+    ['USD', '6 158,41 $'],
+    ['EUR', '6 158,41 €'],
+  ] as const)('should format %s as %s', (currency, expected) => {
+    expect(formatMoneyIn(new Prisma.Decimal('6158.41'), currency)).toBe(expected);
   });
 });
 

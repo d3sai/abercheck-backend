@@ -54,7 +54,7 @@ export class DailyReportService {
       byBucket[payment.order?.status ?? 'UNMATCHED'] += 1;
       if (payment.currency === Currency.USD) {
         usd.paymentsAmount = usd.paymentsAmount.plus(payment.amount);
-      } else {
+      } else if (payment.currency === Currency.UAH) {
         totalAmount = totalAmount.plus(payment.amount);
       }
     }
@@ -64,7 +64,7 @@ export class DailyReportService {
       if (refund.order.currency === Currency.USD) {
         usd.refundsCount += 1;
         usd.refundsAmount = usd.refundsAmount.plus(refund.amount);
-      } else {
+      } else if (refund.order.currency === Currency.UAH) {
         refundsCount += 1;
         refundsAmount = refundsAmount.plus(refund.amount);
       }

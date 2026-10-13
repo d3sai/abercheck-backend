@@ -6,6 +6,7 @@ export const MENU_LABEL = {
   Requisites: '💳 Кілька номерів / реквізити',
   Kit: '💵 Оплата на Кит',
   Cash: '💰 Оплата готівкою',
+  Foreign: '🌍 Оплата закордонного замовлення',
   List: '📋 Список',
   Cancel: '❌ Скасувати',
 } as const;
@@ -15,6 +16,7 @@ export const mainMenuKeyboard: ReplyKeyboardMarkup = {
     [{ text: MENU_LABEL.NewOrder }, { text: MENU_LABEL.NewMinus }],
     [{ text: MENU_LABEL.Requisites }],
     [{ text: MENU_LABEL.Kit }, { text: MENU_LABEL.Cash }],
+    [{ text: MENU_LABEL.Foreign }],
     [{ text: MENU_LABEL.List }, { text: MENU_LABEL.Cancel }],
   ],
   resize_keyboard: true,

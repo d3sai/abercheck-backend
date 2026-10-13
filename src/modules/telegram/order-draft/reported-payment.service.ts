@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  Currency,
+  type Currency,
   type Manager,
   type Order,
   OrderStatus,
@@ -33,6 +33,8 @@ export type ReportCheck =
   | { ok: false; alreadyRecorded: true }
   | { ok: false; alreadyRecorded: false; errors: string[] };
 
+const IN_CURRENCY: Record<Currency, string> = { UAH: 'гривнях', USD: 'доларах', EUR: 'євро' };
+
 @Injectable()
 export class ReportedPaymentService {
   constructor(
@@ -60,7 +62,7 @@ export class ReportedPaymentService {
         errors.push(`№ ${item.number} скасовано, оплату до нього не додати.`);
       } else if (order.currency !== currency) {
         errors.push(
-          `№ ${item.number} ${order.currency === Currency.USD ? 'у доларах' : 'у гривнях'}, а оплата ${currency === Currency.USD ? 'в доларах' : 'в гривнях'}.`,
+          `№ ${item.number} у ${IN_CURRENCY[order.currency]}, а оплата в ${IN_CURRENCY[currency]}.`,
         );
       } else {
         existing.push(item.number);

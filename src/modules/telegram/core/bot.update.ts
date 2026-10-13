@@ -10,6 +10,7 @@ import { MENU_LABEL } from './menu';
 import { OrderListService } from '../orders-list/order-list.service';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
 import { CashAction } from '../order-draft/cash.messages';
+import { ForeignAction } from '../order-draft/foreign.messages';
 import { KitAction } from '../order-draft/kit.messages';
 import { MinusAction } from '../order-draft/minus-closing.messages';
 import { RequisitesAction } from '../order-draft/requisites.messages';
@@ -35,6 +36,7 @@ export class BotUpdate implements OnApplicationBootstrap {
         { command: 'requisites', description: 'Кілька номерів або чужі реквізити' },
         { command: 'kit', description: 'Оплата на Кит' },
         { command: 'cash', description: 'Оплата готівкою' },
+        { command: 'foreign', description: 'Оплата закордонного замовлення' },
         { command: 'list', description: 'Мої відкриті замовлення' },
         { command: 'cancel', description: 'Скасувати' },
         { command: 'help', description: 'Що вміє бот' },
@@ -139,6 +141,14 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
+  @Command('foreign')
+  async foreign(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await reply(ctx, this.drafts.startForeign(manager.telegramId));
+    }
+  }
+
   @Command('cancel')
   async cancel(@Ctx() ctx: Context): Promise<void> {
     if (isPrivate(ctx) && ctx.from) {
@@ -240,6 +250,23 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
   }
 
+  @Action(ForeignAction.Send)
+  async sendForeign(@Ctx() ctx: Context): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      await edit(ctx, await this.drafts.confirmForeign(manager));
+    }
+  }
+
+  @Action(ForeignAction.Edit)
+  async editForeign(@Ctx() ctx: Context): Promise<void> {
+    if (isPrivate(ctx) && ctx.from) {
+      await ctx.answerCbQuery();
+      await edit(ctx, this.drafts.editForeign(BigInt(ctx.from.id)));
+    }
+  }
+
   @On('text')
   async text(@Ctx() ctx: Context, @Next() next: Next): Promise<void> {
     if (!isPrivate(ctx) || !ctx.from || !ctx.text || ctx.text.startsWith('/')) {
@@ -256,6 +283,8 @@ export class BotUpdate implements OnApplicationBootstrap {
         return this.kit(ctx);
       case MENU_LABEL.Cash:
         return this.cash(ctx);
+      case MENU_LABEL.Foreign:
+        return this.foreign(ctx);
       case MENU_LABEL.List:
         return this.list(ctx);
       case MENU_LABEL.Cancel:

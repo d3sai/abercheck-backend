@@ -28,11 +28,11 @@ describe('CreatePaymentDto', () => {
     expect(dto.order_number ?? null).toBeNull();
   });
 
-  it.each([undefined, null, 'UAH', 'USD'])('should accept currency %p', (currency) => {
+  it.each([undefined, null, 'UAH', 'USD', 'EUR'])('should accept currency %p', (currency) => {
     expect(invalidFields({ ...valid, currency })).toEqual([]);
   });
 
-  it.each(['EUR', 'usd', '$', 1])('should reject currency %p', (currency) => {
+  it.each(['GBP', 'usd', '$', 1])('should reject currency %p', (currency) => {
     expect(invalidFields({ ...valid, currency })).toEqual(['currency']);
   });
 

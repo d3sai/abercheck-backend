@@ -11,6 +11,9 @@ import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { CashDraftService } from './cash-draft.service';
 import { DraftAction } from './draft-action';
+import { ForeignDraftService } from './foreign-draft.service';
+import { foreignGuard } from './foreign.messages';
+import { isForeignTemplate } from './foreign.parser';
 import { KitDraftService } from './kit-draft.service';
 import { MinusClosingDraftService } from './minus-closing-draft.service';
 import { OrderCreationFlowService } from './order-creation-flow.service';
@@ -29,6 +32,7 @@ export class OrderDraftService implements OnApplicationShutdown {
     private readonly minusFlow: MinusClosingDraftService,
     private readonly kitFlow: KitDraftService,
     private readonly cashFlow: CashDraftService,
+    private readonly foreignFlow: ForeignDraftService,
     private readonly pendingFiles: PendingFilesStore,
     private readonly partOffers: PartOfferStore,
     private readonly sender: TelegramSender,
@@ -64,10 +68,17 @@ export class OrderDraftService implements OnApplicationShutdown {
     return this.switchTo(userId, this.cashFlow);
   }
 
+  startForeign(userId: bigint): BotReply {
+    return this.switchTo(userId, this.foreignFlow);
+  }
+
   async handleText(manager: Manager, text: string): Promise<BotReply | null> {
     const armed = await this.handleArmed(manager, text);
     if (armed) {
       return armed;
+    }
+    if (isForeignTemplate(text)) {
+      return foreignGuard();
     }
     if (this.orderCreation.needsRequisitesButton(text)) {
       return multipleOrRequisitesGuard();
@@ -101,6 +112,9 @@ export class OrderDraftService implements OnApplicationShutdown {
     if (armed) {
       return armed;
     }
+    if (isForeignTemplate(text)) {
+      return foreignGuard();
+    }
     if (this.orderCreation.needsRequisitesButton(text)) {
       return multipleOrRequisitesGuard();
     }
@@ -130,6 +144,14 @@ export class OrderDraftService implements OnApplicationShutdown {
 
   async confirmCash(manager: Manager): Promise<BotReply> {
     return this.cashFlow.confirm(manager);
+  }
+
+  editForeign(userId: bigint): BotReply {
+    return this.foreignFlow.edit(userId);
+  }
+
+  async confirmForeign(manager: Manager): Promise<BotReply> {
+    return this.foreignFlow.confirm(manager);
   }
 
   editKit(userId: bigint): BotReply {
@@ -174,7 +196,7 @@ export class OrderDraftService implements OnApplicationShutdown {
   }
 
   private get modes() {
-    return [this.requisitesFlow, this.minusFlow, this.kitFlow, this.cashFlow];
+    return [this.requisitesFlow, this.minusFlow, this.kitFlow, this.cashFlow, this.foreignFlow];
   }
 
   private switchTo(userId: bigint, mode: { start(userId: bigint): BotReply }): BotReply {

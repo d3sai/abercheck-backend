@@ -19,6 +19,7 @@ import { OrderNotifier } from './notifications/order-notifier';
 import { PaymentNotifier } from './notifications/payment-notifier';
 import { CashDraftService, CashDraftStore } from './order-draft/cash-draft.service';
 import { DraftAttachmentNotifier } from './order-draft/draft-attachment-notifier';
+import { ForeignDraftService, ForeignDraftStore } from './order-draft/foreign-draft.service';
 import { KitDraftService, KitDraftStore } from './order-draft/kit-draft.service';
 import {
   MinusClosingDraftService,
@@ -66,6 +67,7 @@ import { TelegramSender } from './core/telegram-sender';
     MinusDraftStore,
     KitDraftStore,
     CashDraftStore,
+    ForeignDraftStore,
     DraftAttachmentNotifier,
     OrderCreationFlowService,
     RequisitesDraftService,
@@ -73,6 +75,7 @@ import { TelegramSender } from './core/telegram-sender';
     ReportedPaymentService,
     KitDraftService,
     CashDraftService,
+    ForeignDraftService,
     OrderDraftService,
     OrderListService,
     AdminFlowService,

@@ -13,6 +13,10 @@ import {
 import { ReportedPaymentService } from '../../../../src/modules/telegram/order-draft/reported-payment.service';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
 import {
+  ForeignDraftService,
+  ForeignDraftStore,
+} from '../../../../src/modules/telegram/order-draft/foreign-draft.service';
+import {
   KitDraftService,
   KitDraftStore,
 } from '../../../../src/modules/telegram/order-draft/kit-draft.service';
@@ -109,6 +113,8 @@ describe('OrderDraftService', () => {
         KitDraftStore,
         CashDraftService,
         CashDraftStore,
+        ForeignDraftService,
+        ForeignDraftStore,
         ReportedPaymentService,
         DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
@@ -1339,12 +1345,95 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect((await begin())?.html).toContain('Цю оплату вже зареєстровано');
     });
 
+    it('should name a euro number in the currency mismatch', async () => {
+      orders.findWithBalance.mockResolvedValue({
+        order: createdOrder({ orderNumber: '0000-066498', currency: 'EUR' }),
+        amountPaid: new Prisma.Decimal(0),
+      });
+
+      expect((await begin())?.html).toContain('у євро, а оплата в гривнях');
+    });
+
     it('should refuse the sample outside the button instead of taking the date for the ФОП', async () => {
       const reply = await service.handleText(MANAGER, SAMPLE);
 
       expect(reply?.html).toContain('схоже на дату');
       expect(reply?.html).toContain('/cash');
       expect(orders.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a foreign order payment, armed by /foreign', () => {
+    const TEMPLATE = `🌍 Оплата закордонного замовлення
+На кого : Абертайм ТОВ ( EUR)
+№ 0000-066498
+💰 Сума: 100 EUR
+💱 Валюта: EUR
+Дата : 13.10.2026 15:20
+Курс : 44,9
+Коментар: інвойс 17`;
+
+    const begin = async (text = TEMPLATE) => {
+      service.startForeign(USER);
+      return service.handleText(MANAGER, text);
+    };
+
+    it('should create the euro order unpaid and record no payment', async () => {
+      orders.createGroup.mockResolvedValue([
+        createdOrder({ orderNumber: '0000-066498', currency: 'EUR' }),
+      ]);
+
+      const preview = await begin();
+      expect(preview?.html).toContain('Сума: <b>100 €</b>');
+      expect(preview?.html).toContain('Оплату не записую');
+
+      const reply = await service.confirmForeign(MANAGER);
+
+      expect(orders.createGroup).toHaveBeenCalledWith(
+        MANAGER.id,
+        [{ orderNumber: '0000-066498', amountDue: '100.00' }],
+        expect.objectContaining({
+          clientName: 'Оплата закордонного замовлення',
+          currency: 'EUR',
+          exchangeRate: '44.9',
+          comment: 'Оплата закордонного замовлення · на Абертайм ТОВ ( EUR) · інвойс 17',
+        }),
+      );
+      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('0000-066498'));
+      expect(reply.html).toContain('«Оплата закордонного замовлення» надіслано адмінам · 100 €');
+    });
+
+    it('should only tell the admins when the number already exists', async () => {
+      orders.findWithBalance.mockResolvedValue({
+        order: createdOrder({ orderNumber: '0000-066498', currency: 'EUR' }),
+        amountPaid: new Prisma.Decimal(0),
+      });
+
+      expect((await begin())?.html).toContain('(уже є в системі)');
+      await service.confirmForeign(MANAGER);
+
+      expect(orders.createGroup).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
+    });
+
+    it('should point to /foreign when the template comes outside the button', async () => {
+      const reply = await service.handleText(MANAGER, TEMPLATE);
+
+      expect(reply?.html).toContain('/foreign');
+      expect(orders.create).not.toHaveBeenCalled();
+      expect(orders.createGroup).not.toHaveBeenCalled();
+
+      const withFile = await service.addFile(MANAGER, file(), TEMPLATE);
+      expect(withFile.html).toContain('/foreign');
+    });
+
+    it('should refuse hryvnias and a missing time instead of creating the order', async () => {
+      expect((await begin(TEMPLATE.replace('100 EUR', '100 грн')))?.html).toContain(
+        'Сума має бути в EUR',
+      );
+      expect((await begin(TEMPLATE.replace('15:20', '')))?.html).toContain('Не вказано дату й час');
+      expect(orders.createGroup).not.toHaveBeenCalled();
     });
   });
 

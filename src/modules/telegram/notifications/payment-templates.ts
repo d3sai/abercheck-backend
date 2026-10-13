@@ -34,7 +34,7 @@ function orderHeader(order: Order): string[] {
 
 function paymentLine(payment: Payment): string {
   const amount =
-    payment.currency === Currency.USD
+    payment.currency !== Currency.UAH
       ? money(payment.amount, payment.currency)
       : formatMoney(payment.amount);
   return `${recipient(payment)} - ${amount} ${formatKyivDateTime(payment.paidAt)}`;
