@@ -56,7 +56,8 @@ const LABEL_VALUE = /^(?:\s*[:\-–—]\s*|\s+)(.*)$/u;
 
 const HEADER =
   /^(?:(?:закриття|оплата)\s+(?:мінусу|заборгованості)(?:\s+клієнта)?|закри(?:ла|в|ли)(?:\s+мінус)?)(?:\s*[:\-–—])?\s*(.*)$/iu;
-const BANK_NOISE = /\d|призначення|iban|ібан|єдрпоу|рнокпп|іпн|платіжна/iu;
+// A digit is bank junk unless it is part of a percentage, as in «без урахування 1%».
+const BANK_NOISE = /\d(?![\d.,]*\s*%)|призначення|iban|ібан|єдрпоу|рнокпп|іпн|платіжна/iu;
 const PERIOD = /\s+(за\s+(?:підрахунком|період|\d).*)$/iu;
 const URL_PATTERN = /https?:\/\/\S+/iu;
 const NUMBER_ONLY = /^[№#]?\s*(\d{4}-\d{6})$/u;

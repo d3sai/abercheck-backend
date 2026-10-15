@@ -46,6 +46,13 @@ https://docs.google.com/spreadsheets/d/1XOUzGdwIxig5UCvUR6Iw5iW9t2tKdWWiHvVILzGq
 "UA573052990000026005031228837
 3153718452
 Призначення платежу : Оплата за товар"`,
+  cardSolid: `Паша Рабодзей за підрахунком 14.10.2026
+14.10.2026 18:54
+3 467 грн
+4441111067872188 Галько Віталій Васильович
+без урахування 1%
+45,10
+https://docs.google.com/spreadsheets/d/1bUeTeA_AbpH1qcRUwfS-SgFIq1sPr2m6rCrGtm2LPwI/edit?gid=0#gid=0`,
   cardWithoutAmount: `Рабодзей Паша за підрахунком 7 вересня 2026 року
 09.09.2026 16:00
 13 377 грн
@@ -129,6 +136,23 @@ describe('parseMinusClosing', () => {
         account: '4149 6090 5310 7860',
         amount: '13377.00',
         paidAt: new Date('2026-09-09T13:00:00Z'),
+      },
+    ]);
+  });
+
+  it('should take a card written as 16 digits without spaces', () => {
+    const plan = planOf(SAMPLES.cardSolid);
+
+    expect(plan.clientName).toBe('Паша Рабодзей');
+    expect(plan.total.toFixed(2)).toBe('3467.00');
+    expect(plan.rate).toBe('45.10');
+    expect(plan.comment).toBe('без урахування 1%');
+    expect(plan.requisiteLines).toEqual([
+      {
+        payerName: 'Галько Віталій Васильович',
+        account: '4441111067872188',
+        amount: '3467.00',
+        paidAt: new Date('2026-10-14T15:54:00Z'),
       },
     ]);
   });
