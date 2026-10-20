@@ -7,6 +7,7 @@ import { ManagersService } from '../../managers/managers.service';
 import { HELP, NOT_A_MANAGER, newManagerNotice, startReply } from '../access/access.messages';
 import { ADMIN_HELP } from '../admin/admin.update';
 import { MENU_LABEL } from './menu';
+import { DeleteAction, OrderDeleteService } from '../orders-list/order-delete.service';
 import { OrderListService } from '../orders-list/order-list.service';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
 import { CashAction } from '../order-draft/cash.messages';
@@ -14,7 +15,14 @@ import { ForeignAction } from '../order-draft/foreign.messages';
 import { KitAction } from '../order-draft/kit.messages';
 import { MinusAction } from '../order-draft/minus-closing.messages';
 import { RequisitesAction } from '../order-draft/requisites.messages';
-import { type CommandContext, edit, fullName, isPrivate, reply } from './telegram-context';
+import {
+  type CommandContext,
+  edit,
+  fullName,
+  isPrivate,
+  type MatchContext,
+  reply,
+} from './telegram-context';
 import { TelegramSender } from './telegram-sender';
 
 type Next = () => Promise<void>;
@@ -25,6 +33,7 @@ export class BotUpdate implements OnApplicationBootstrap {
     private readonly managers: ManagersService,
     private readonly drafts: OrderDraftService,
     private readonly lists: OrderListService,
+    private readonly deletions: OrderDeleteService,
     private readonly sender: TelegramSender,
   ) {}
 
@@ -98,6 +107,41 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (manager) {
       await reply(ctx, await this.lists.forManager(manager.id, all));
     }
+  }
+
+  @Action(DeleteAction.Ask)
+  async askDelete(@Ctx() ctx: MatchContext): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      const message = ctx.callbackQuery?.message;
+      const keyboard = message && 'reply_markup' in message ? message.reply_markup : undefined;
+      // a list message keeps its other delete buttons, so only a lone button is cleared afterwards
+      const originId =
+        message && keyboard?.inline_keyboard.flat().length === 1 ? message.message_id : 0;
+      await reply(ctx, await this.deletions.ask(manager, ctx.match[1]!, originId));
+    }
+  }
+
+  @Action(DeleteAction.Confirm)
+  async confirmDelete(@Ctx() ctx: MatchContext): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      await edit(ctx, await this.deletions.confirm(manager, ctx.match[1]!));
+      const originId = Number(ctx.match[2]);
+      if (originId > 0 && ctx.chat) {
+        await ctx.telegram
+          .editMessageReplyMarkup(ctx.chat.id, originId, undefined, undefined)
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  @Action(DeleteAction.Dismiss)
+  async dismissDelete(@Ctx() ctx: Context): Promise<void> {
+    await ctx.answerCbQuery();
+    await ctx.deleteMessage().catch(() => undefined);
   }
 
   @Command('new')

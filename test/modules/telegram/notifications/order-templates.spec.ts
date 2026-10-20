@@ -23,6 +23,7 @@ const order = (overrides: Partial<Order> = {}): Order => ({
   ourFop: null,
   period: null,
   sheetUrl: null,
+  adminMessageId: null,
   orderType: OrderType.REGULAR,
   status: 'AWAITING_PAYMENT',
   managerId: 7,

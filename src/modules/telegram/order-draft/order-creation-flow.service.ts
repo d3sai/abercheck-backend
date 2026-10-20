@@ -222,6 +222,7 @@ export class OrderCreationFlowService {
         `${label} № <b>${escapeHtml(order.orderNumber)}</b> створено — повідомлю про оплату.`,
         `${escapeHtml(order.clientName)} · ${formatMoneyIn(order.amountDue, order.currency)}`,
       ].join('\n'),
+      buttons: [[button('🗑 Скасувати замовлення', `del:${order.orderNumber}`)]],
     };
   }
 }

@@ -6,7 +6,7 @@ import { OrderNotifier } from '../../../../src/modules/telegram/notifications/or
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 
 describe('OrderNotifier', () => {
-  const prisma = { manager: { findUniqueOrThrow: jest.fn() } };
+  const prisma = { manager: { findUniqueOrThrow: jest.fn() }, order: { update: jest.fn() } };
   const sender = { sendToAdmins: jest.fn() };
   let notifier: OrderNotifier;
 
@@ -25,6 +25,7 @@ describe('OrderNotifier', () => {
       ourFop: null,
       period: null,
       sheetUrl: null,
+      adminMessageId: null,
       orderType: 'REGULAR',
       status: 'AWAITING_PAYMENT',
       managerId: 7,
@@ -54,6 +55,25 @@ describe('OrderNotifier', () => {
     expect(prisma.manager.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 7 } });
     expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('Нове замовлення'));
     expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('Христина'));
+  });
+
+  it('should remember the admin chat message id so the order can be removed from the chat later', async () => {
+    sender.sendToAdmins.mockResolvedValue(555);
+
+    await notifier.onCreated(event);
+
+    expect(prisma.order.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { adminMessageId: 555 },
+    });
+  });
+
+  it('should not store anything when the admin message could not be sent', async () => {
+    sender.sendToAdmins.mockResolvedValue(null);
+
+    await notifier.onCreated(event);
+
+    expect(prisma.order.update).not.toHaveBeenCalled();
   });
 
   it('should swallow errors so order creation is not affected', async () => {

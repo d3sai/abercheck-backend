@@ -27,6 +27,33 @@ describe('OrderListService', () => {
   afterEach(() => jest.resetAllMocks());
 
   describe('forManager', () => {
+    it('should offer a delete button only for unpaid orders', async () => {
+      const item = (orderNumber: string, status: OrderStatus, paid: string) => ({
+        order: {
+          orderNumber,
+          status,
+          createdAt: new Date('2026-10-01T10:00:00Z'),
+          clientName: 'ФОП',
+          amountDue: d('100.00'),
+          currency: 'UAH',
+        },
+        amountPaid: d(paid),
+      });
+      orders.list.mockResolvedValue({
+        items: [
+          item('1111-111111', OrderStatus.AWAITING_PAYMENT, '0'),
+          item('2222-222222', OrderStatus.PARTIALLY_PAID, '40'),
+        ],
+        total: 2,
+      });
+
+      const reply = await service.forManager(7, false);
+
+      expect(reply.buttons).toEqual([
+        [{ text: '🗑 Видалити 1111-111111', callback_data: 'del:1111-111111' }],
+      ]);
+    });
+
     it("should filter to this manager's open orders by default", async () => {
       const reply = await service.forManager(7, false);
 

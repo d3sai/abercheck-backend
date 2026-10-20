@@ -28,6 +28,7 @@ const order = (overrides: Partial<Order> = {}): Order => ({
   ourFop: null,
   period: null,
   sheetUrl: null,
+  adminMessageId: null,
   orderType: OrderType.REGULAR,
   status: OrderStatus.PARTIALLY_PAID,
   managerId: 7,

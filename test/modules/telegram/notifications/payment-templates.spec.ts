@@ -32,6 +32,7 @@ const order = (status: OrderStatus): Order => ({
   ourFop: null,
   period: null,
   sheetUrl: null,
+  adminMessageId: null,
   orderType: OrderType.REGULAR,
   status,
   managerId: 1,

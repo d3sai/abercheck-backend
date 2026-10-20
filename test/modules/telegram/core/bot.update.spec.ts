@@ -48,6 +48,8 @@ import {
 } from '../../../../src/modules/telegram/order-draft/minus-closing-draft.service';
 import { RequisitesDraftService } from '../../../../src/modules/telegram/order-draft/requisites-draft.service';
 import { RequisitesDraftStore } from '../../../../src/modules/telegram/order-draft/requisites-draft.store';
+import { PrismaService } from '../../../../src/common/prisma/prisma.service';
+import { OrderDeleteService } from '../../../../src/modules/telegram/orders-list/order-delete.service';
 import { OrderListService } from '../../../../src/modules/telegram/orders-list/order-list.service';
 import { DailyReportJob } from '../../../../src/modules/telegram/reports/daily-report.job';
 
@@ -106,6 +108,8 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     ReportedPaymentService,
     DraftAttachmentNotifier,
     OrderListService,
+    { provide: OrderDeleteService, useValue: {} },
+    { provide: PrismaService, useValue: {} },
     {
       provide: ManagersService,
       useValue: {

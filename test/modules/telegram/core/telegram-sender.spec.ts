@@ -11,6 +11,7 @@ describe('TelegramSender', () => {
   const bot = {
     telegram: {
       sendMessage: jest.fn<Promise<unknown>, SendArgs>(),
+      deleteMessage: jest.fn(),
       setMyCommands: jest.fn(),
     },
   };
@@ -28,11 +29,11 @@ describe('TelegramSender', () => {
 
   describe('send', () => {
     it('should send plain HTML with no keyboard by default', async () => {
-      bot.telegram.sendMessage.mockResolvedValue({});
+      bot.telegram.sendMessage.mockResolvedValue({ message_id: 42 });
 
-      const ok = await sender.send(5000000000n, '<b>Привіт</b>');
+      const messageId = await sender.send(5000000000n, '<b>Привіт</b>');
 
-      expect(ok).toBe(true);
+      expect(messageId).toBe(42);
       expect(bot.telegram.sendMessage).toHaveBeenCalledWith(5000000000, '<b>Привіт</b>', {
         parse_mode: 'HTML',
         link_preview_options: { is_disabled: true },
@@ -72,10 +73,10 @@ describe('TelegramSender', () => {
       expect(bot.telegram.sendMessage).toHaveBeenCalledWith(5000000000, 'text', expect.anything());
     });
 
-    it('should swallow a failed send and report it as false instead of throwing', async () => {
+    it('should swallow a failed send and report it as null instead of throwing', async () => {
       bot.telegram.sendMessage.mockRejectedValue(new Error('bot was blocked by the user'));
 
-      await expect(sender.send(111, 'text')).resolves.toBe(false);
+      await expect(sender.send(111, 'text')).resolves.toBeNull();
     });
   });
 
@@ -95,7 +96,23 @@ describe('TelegramSender', () => {
     it('should also swallow failures for admin messages', async () => {
       bot.telegram.sendMessage.mockRejectedValue(new Error('down'));
 
-      await expect(sender.sendToAdmins('text')).resolves.toBe(false);
+      await expect(sender.sendToAdmins('text')).resolves.toBeNull();
+    });
+  });
+
+  describe('deleteAdminMessage', () => {
+    it('should delete the message in the admin chat', async () => {
+      bot.telegram.deleteMessage.mockResolvedValue(true);
+
+      await sender.deleteAdminMessage(77);
+
+      expect(bot.telegram.deleteMessage).toHaveBeenCalledWith(ADMIN_CHAT_ID, 77);
+    });
+
+    it('should not throw when Telegram refuses (e.g. the message is too old)', async () => {
+      bot.telegram.deleteMessage.mockRejectedValue(new Error('message can not be deleted'));
+
+      await expect(sender.deleteAdminMessage(77)).resolves.toBeUndefined();
     });
   });
 

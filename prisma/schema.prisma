@@ -82,28 +82,30 @@ model Manager {
 }
 
 model Order {
-  id            Int         @id @default(autoincrement())
-  orderNumber   String      @unique @map("order_number")
-  baseNumber    String      @map("base_number")
-  clientName    String      @map("client_name")
-  amountDue     Decimal     @map("amount_due") @db.Decimal(14, 2)
-  currency      Currency    @default(UAH)
-  exchangeRate  Decimal?    @map("exchange_rate") @db.Decimal(8, 4)
-  comment       String?
+  id             Int         @id @default(autoincrement())
+  orderNumber    String      @unique @map("order_number")
+  baseNumber     String      @map("base_number")
+  clientName     String      @map("client_name")
+  amountDue      Decimal     @map("amount_due") @db.Decimal(14, 2)
+  currency       Currency    @default(UAH)
+  exchangeRate   Decimal?    @map("exchange_rate") @db.Decimal(8, 4)
+  comment        String?
   // Retired: was free text for a "payment to other requisites" order type. No longer written by the
   // app; kept only because it may already exist as a column in some environments. See OrderRequisite.
-  requisites    String?
-  orderType     OrderType   @default(REGULAR) @map("order_type")
+  requisites     String?
+  orderType      OrderType   @default(REGULAR) @map("order_type")
   // Minus closing only: when the client paid, which of our FOPs received it, the period the debt
   // was calculated for, and the reconciliation spreadsheet.
-  paidAt        DateTime?   @map("paid_at") @db.Timestamptz(3)
-  ourFop        String?     @map("our_fop")
-  period        String?
-  sheetUrl      String?     @map("sheet_url")
-  status        OrderStatus @default(AWAITING_PAYMENT)
-  managerId     Int         @map("manager_id")
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  paidAt         DateTime?   @map("paid_at") @db.Timestamptz(3)
+  ourFop         String?     @map("our_fop")
+  period         String?
+  sheetUrl       String?     @map("sheet_url")
+  status         OrderStatus @default(AWAITING_PAYMENT)
+  managerId      Int         @map("manager_id")
+  // The "new order" message in the admin chat, kept so it can be removed along with the order.
+  adminMessageId Int?        @map("admin_message_id")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   manager        Manager             @relation(fields: [managerId], references: [id], onDelete: Restrict)
   payments       Payment[]

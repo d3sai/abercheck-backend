@@ -20,7 +20,12 @@ export class OrderNotifier {
       const manager = await this.prisma.manager.findUniqueOrThrow({
         where: { id: order.managerId },
       });
-      await this.sender.sendToAdmins(adminOrderCreatedMessage(order, manager));
+      const adminMessageId = await this.sender.sendToAdmins(
+        adminOrderCreatedMessage(order, manager),
+      );
+      if (adminMessageId !== null) {
+        await this.prisma.order.update({ where: { id: order.id }, data: { adminMessageId } });
+      }
     } catch (error) {
       this.logger.error(`Failed to notify about order #${order.id}`, error);
     }

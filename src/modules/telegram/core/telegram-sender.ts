@@ -23,22 +23,30 @@ export class TelegramSender {
     html: string,
     buttons?: InlineKeyboardButton[][],
     menu = false,
-  ): Promise<boolean> {
+  ): Promise<number | null> {
     try {
-      await this.bot.telegram.sendMessage(Number(chatId), html, {
+      const sent = await this.bot.telegram.sendMessage(Number(chatId), html, {
         parse_mode: 'HTML',
         link_preview_options: { is_disabled: true },
         reply_markup: menu ? mainMenuKeyboard : buttons ? { inline_keyboard: buttons } : undefined,
       });
-      return true;
+      return sent.message_id;
     } catch (error) {
       this.logger.error(`Failed to send a message to chat ${chatId}`, error);
-      return false;
+      return null;
     }
   }
 
-  sendToAdmins(html: string, buttons?: InlineKeyboardButton[][]): Promise<boolean> {
+  sendToAdmins(html: string, buttons?: InlineKeyboardButton[][]): Promise<number | null> {
     return this.send(this.adminChatId, html, buttons);
+  }
+
+  async deleteAdminMessage(messageId: number): Promise<void> {
+    await this.bot.telegram
+      .deleteMessage(this.adminChatId, messageId)
+      .catch((error) =>
+        this.logger.warn(`Failed to delete admin chat message ${messageId}`, error),
+      );
   }
 
   async registerCommands(commands: BotCommand[], scope: BotCommandScope): Promise<void> {

@@ -43,6 +43,7 @@ export interface OrderListInput {
   total: number;
   withManager: boolean;
   unmatched?: { payments: Payment[]; total: number };
+  deletable?: string[];
 }
 
 export function orderList({
@@ -51,6 +52,7 @@ export function orderList({
   total,
   withManager,
   unmatched,
+  deletable = [],
 }: OrderListInput): BotReply {
   const shown = total > items.length ? ` · показано ${items.length} з ${total}` : ` · ${total}`;
   const sections = [
@@ -60,7 +62,7 @@ export function orderList({
       : 'Замовлень немає.',
   ];
 
-  const buttons = [];
+  const buttons = deletable.map((number) => [button(`🗑 Видалити ${number}`, `del:${number}`)]);
   if (unmatched && unmatched.total > 0) {
     const more =
       unmatched.total > unmatched.payments.length

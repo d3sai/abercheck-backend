@@ -29,6 +29,12 @@ export class OrderListService {
       items,
       total,
       withManager: false,
+      deletable: items
+        .filter(
+          ({ order, amountPaid }) =>
+            order.status === OrderStatus.AWAITING_PAYMENT && amountPaid.isZero(),
+        )
+        .map(({ order }) => order.orderNumber),
     });
   }
 

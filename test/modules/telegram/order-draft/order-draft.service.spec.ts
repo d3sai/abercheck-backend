@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { PrismaService } from '../../../../src/common/prisma/prisma.service';
 import { type Manager, Prisma } from '../../../../src/generated/prisma/client';
 import { AttachmentsService } from '../../../../src/modules/attachments/attachments.service';
 import { OrderNumberTakenError } from '../../../../src/modules/orders/orders.errors';
@@ -122,6 +123,7 @@ describe('OrderDraftService', () => {
         { provide: PaymentsService, useValue: payments },
         { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
+        { provide: PrismaService, useValue: { order: { update: jest.fn() } } },
       ],
     }).compile();
 
@@ -229,6 +231,16 @@ describe('OrderDraftService', () => {
       );
 
       expect(preview?.html).toContain('Кілька номерів однією оплатою');
+    });
+
+    it('should put a cancel button under the confirmation of a created order', async () => {
+      orders.create.mockResolvedValue(createdOrder());
+
+      const reply = await service.handleText(MANAGER, template());
+
+      expect(reply?.buttons).toEqual([
+        [{ text: '🗑 Скасувати замовлення', callback_data: 'del:0000-066717' }],
+      ]);
     });
 
     it('should leave the labelled classic template alone even if a field value looks like a card', async () => {

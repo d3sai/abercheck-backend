@@ -52,6 +52,7 @@ describe('PaymentNotifier', () => {
       ourFop: null,
       period: null,
       sheetUrl: null,
+      adminMessageId: null,
       orderType: OrderType.REGULAR,
       status,
       managerId: 7,

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TELEGRAM_CAPTION_LIMIT } from '../../attachments/attachments.constants';
 import { AttachmentsService, type TelegramFileRef } from '../../attachments/attachments.service';
+import { PrismaService } from '../../../common/prisma/prisma.service';
 import type { Manager, Order } from '../../../generated/prisma/client';
 import { TelegramSender } from '../core/telegram-sender';
 
@@ -9,6 +10,7 @@ export class DraftAttachmentNotifier {
   constructor(
     private readonly attachments: AttachmentsService,
     private readonly sender: TelegramSender,
+    private readonly prisma: PrismaService,
   ) {}
 
   async notify(
@@ -30,7 +32,10 @@ export class DraftAttachmentNotifier {
       merged = canMergeCaption;
     } finally {
       if (!merged) {
-        await this.sender.sendToAdmins(notice);
+        const adminMessageId = await this.sender.sendToAdmins(notice);
+        if (adminMessageId !== null) {
+          await this.prisma.order.update({ where: { id: order.id }, data: { adminMessageId } });
+        }
       }
     }
   }

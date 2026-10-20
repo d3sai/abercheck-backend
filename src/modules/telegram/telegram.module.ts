@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TelegrafModule } from 'nestjs-telegraf';
 import type { EnvironmentVariables } from '../../common/config/env.validation';
+import { AdminOrdersModule } from '../admin-orders/admin-orders.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { ManagersModule } from '../managers/managers.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -32,6 +33,7 @@ import { PendingFilesStore } from './order-draft/pending-files.store';
 import { ReportedPaymentService } from './order-draft/reported-payment.service';
 import { RequisitesDraftService } from './order-draft/requisites-draft.service';
 import { RequisitesDraftStore } from './order-draft/requisites-draft.store';
+import { OrderDeleteService } from './orders-list/order-delete.service';
 import { OrderListService } from './orders-list/order-list.service';
 import { TelegramSender } from './core/telegram-sender';
 
@@ -45,6 +47,7 @@ import { TelegramSender } from './core/telegram-sender';
         launchOptions: false,
       }),
     }),
+    AdminOrdersModule,
     AttachmentsModule,
     ManagersModule,
     OrdersModule,
@@ -78,6 +81,7 @@ import { TelegramSender } from './core/telegram-sender';
     ForeignDraftService,
     OrderDraftService,
     OrderListService,
+    OrderDeleteService,
     AdminFlowService,
     DailyReportJob,
   ],
