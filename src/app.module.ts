@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AdminOrdersModule } from './modules/admin-orders/admin-orders.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CabinetModule } from './modules/cabinet/cabinet.module';
 import { validateEnv } from './common/config/env.validation';
@@ -18,6 +19,7 @@ import { TelegramModule } from './modules/telegram/telegram.module';
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     PrismaModule,
+    AdminOrdersModule,
     AuthModule,
     CabinetModule,
     HealthModule,

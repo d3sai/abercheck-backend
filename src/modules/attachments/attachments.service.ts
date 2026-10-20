@@ -227,13 +227,20 @@ export class AttachmentsService {
   async remove(orderId: number, id: number): Promise<void> {
     const attachment = await this.find(orderId, id);
     await this.prisma.orderAttachment.delete({ where: { id: attachment.id } });
+    await this.discardMessage(attachment);
+  }
+
+  async discardMessage(attachment: OrderAttachment): Promise<void> {
     if (attachment.keepMessageOnDelete) {
       return;
     }
     await this.bot.telegram
       .deleteMessage(this.storageChatId, attachment.telegramMessageId)
       .catch((error) =>
-        this.logger.warn(`Failed to delete Telegram message for attachment #${id}`, error),
+        this.logger.warn(
+          `Failed to delete Telegram message for attachment #${attachment.id}`,
+          error,
+        ),
       );
   }
 }

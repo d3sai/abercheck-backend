@@ -156,3 +156,39 @@ describe('AttachmentsService.saveFromTelegram', () => {
     expect(attachments.map((a) => a.telegramFileId)).toEqual(['f1', 'f2']);
   });
 });
+
+describe('AttachmentsService.discardMessage', () => {
+  const ADMIN_CHAT_ID = -1001234567890;
+  const bot = { telegram: { deleteMessage: jest.fn() } };
+  const config = { get: jest.fn().mockReturnValue(ADMIN_CHAT_ID) };
+  const attachment = (keepMessageOnDelete: boolean) =>
+    ({ id: 3, telegramMessageId: 77, keepMessageOnDelete }) as never;
+  let service: AttachmentsService;
+
+  beforeEach(() => {
+    config.get.mockReturnValue(ADMIN_CHAT_ID);
+    service = new AttachmentsService({} as never, bot as never, config as never);
+  });
+
+  afterEach(() => jest.resetAllMocks());
+
+  it('should leave the Telegram message when keepMessageOnDelete is set', async () => {
+    await service.discardMessage(attachment(true));
+
+    expect(bot.telegram.deleteMessage).not.toHaveBeenCalled();
+  });
+
+  it('should delete the stored Telegram message otherwise', async () => {
+    bot.telegram.deleteMessage.mockResolvedValue(true);
+
+    await service.discardMessage(attachment(false));
+
+    expect(bot.telegram.deleteMessage).toHaveBeenCalledWith(ADMIN_CHAT_ID, 77);
+  });
+
+  it('should resolve when Telegram refuses to delete the message', async () => {
+    bot.telegram.deleteMessage.mockRejectedValue(new Error('message to delete not found'));
+
+    await expect(service.discardMessage(attachment(false))).resolves.toBeUndefined();
+  });
+});

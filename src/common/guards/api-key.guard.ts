@@ -6,7 +6,7 @@ import type { EnvironmentVariables } from '../../common/config/env.validation';
 
 export const API_KEY_HEADER = 'x-api-key';
 
-const digest = (value: string): Buffer => createHash('sha256').update(value).digest();
+export const digest = (value: string): Buffer => createHash('sha256').update(value).digest();
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {

@@ -40,6 +40,12 @@ export class EnvironmentVariables {
   @MinLength(32)
   EXTERNAL_API_KEY!: string;
 
+  // Optional on purpose: when unset the admin routes answer 401 and the app still boots.
+  @IsOptional()
+  @IsString()
+  @MinLength(32)
+  ADMIN_API_KEY?: string;
+
   @Matches(/^\d+:[\w-]{30,}$/, {
     message: 'TELEGRAM_BOT_TOKEN must be a token issued by @BotFather',
   })

@@ -13,6 +13,17 @@ describe('validateEnv', () => {
     expect(validateEnv(valid)).toMatchObject({ NODE_ENV: NodeEnv.Development, PORT: '3000' });
   });
 
+  it('should accept a missing ADMIN_API_KEY and a 32-char one', () => {
+    expect(validateEnv(valid).ADMIN_API_KEY).toBeUndefined();
+    expect(validateEnv({ ...valid, ADMIN_API_KEY: 'a'.repeat(32) }).ADMIN_API_KEY).toBe(
+      'a'.repeat(32),
+    );
+  });
+
+  it('should reject a short ADMIN_API_KEY', () => {
+    expect(() => validateEnv({ ...valid, ADMIN_API_KEY: 'a'.repeat(10) })).toThrow(/ADMIN_API_KEY/);
+  });
+
   it('should listen on a TCP port bound to the host given by the hosting', () => {
     const env = validateEnv({ ...valid, PORT: '3000', HOST: '127.12.34.56' });
 
