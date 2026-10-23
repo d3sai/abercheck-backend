@@ -522,6 +522,86 @@ describe('parseRequisites', () => {
     });
   });
 
+  describe('a rate of its own for some numbers', () => {
+    const lines = [
+      '0000-072475  456,6 грн',
+      '0000-072477 507,4 грн',
+      '0000-072654 432,6 грн',
+      'сума: 1 396,6 грн',
+      '4149439025213368 Хабурський Ігор 1 396,6 грн 12:23',
+      '45,3',
+      '23.10.2026',
+    ];
+    const override = 'замовлення : 0000-072475, 0000-072477 - по курсу 44';
+
+    it('should give the listed numbers their own rate and keep the message rate for the rest', () => {
+      const plan = planOf([...lines, override].join('\n'));
+
+      expect(plan.kind).toBe('group');
+      expect(plan.rate).toBe('45.3');
+      expect(plan.items.map((item) => `${item.number} ${item.rate}`)).toEqual([
+        '0000-072475 44',
+        '0000-072477 44',
+        '0000-072654 null',
+      ]);
+      expect(plan.label).toBe('Хабурський Ігор');
+      expect(plan.comment).toBe('23.10.2026');
+      expect(plan.warnings).toEqual([]);
+    });
+
+    it('should not take the line for the client name when it comes first', () => {
+      const plan = planOf([override, ...lines].join('\n'));
+
+      expect(plan.label).toBe('Хабурський Ігор');
+    });
+
+    it('should read several such lines and a rate written without «по»', () => {
+      const plan = planOf(
+        [...lines, '0000-072475 курс 44', 'замовлення: 0000-072654 курс: 46,5'].join('\n'),
+      );
+
+      expect(plan.items.map((item) => item.rate)).toEqual(['44', null, '46.5']);
+    });
+
+    it('should refuse a number that is not among the numbers with amounts', () => {
+      const result = parseRequisites(
+        [...lines, 'замовлення: 0000-072999 - по курсу 44'].join('\n'),
+      );
+
+      expect(!result.ok && result.errors.join(' ')).toContain('номер 0000-072999');
+    });
+
+    it('should refuse a rate that is not a valid number', () => {
+      const result = parseRequisites([...lines, 'замовлення: 0000-072475 - по курсу 0'].join('\n'));
+
+      expect(!result.ok && result.errors.join(' ')).toContain('Курс «0» не схожий на число');
+    });
+
+    it('should not take a number line with an amount for a rate line', () => {
+      const plan = planOf(lines.join('\n'));
+
+      expect(plan.items.map((item) => item.rate)).toEqual([null, null, null]);
+    });
+
+    it('should apply the rate of a lone number to the whole order', () => {
+      const plan = planOf(
+        '0000-072475 456,6 грн\nХабурський Ігор\nзамовлення: 0000-072475 по курсу 44\n23.10.2026 12:23',
+      );
+
+      expect(plan.kind).toBe('single');
+      expect(plan.rate).toBe('44');
+    });
+
+    it('should drop the skipped numbers from the rate line, and the line itself once none is left', () => {
+      const text = [...lines, override].join('\n');
+
+      expect(withoutNumbers(text, ['0000-072475'])).toContain(
+        'замовлення : , 0000-072477 - по курсу 44',
+      );
+      expect(withoutNumbers(text, ['0000-072475', '0000-072477'])).not.toContain('по курсу');
+    });
+  });
+
   describe('a message without a name or a date with time', () => {
     it.each([
       ['0000-068641 100 грн\n07.09.2026 14:57', 'Не знайшов ФОП'],

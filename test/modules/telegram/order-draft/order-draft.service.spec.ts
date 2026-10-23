@@ -784,6 +784,36 @@ UA549358710000067320000088286"`;
       expect(reply.html).toContain('3 номерів');
     });
 
+    it('should give the numbers listed in a rate line their own rate and the rest the message rate', async () => {
+      orders.createGroup.mockResolvedValue(groupOrders());
+      const preview = await begin(
+        [
+          '0000-072475 456,6 грн',
+          '0000-072477 507,4 грн',
+          '0000-072654 432,6 грн',
+          'сума: 1 396,6 грн',
+          '4149439025213368 Хабурський Ігор 1 396,6 грн 12:23',
+          '45,3',
+          '23.10.2026',
+          'замовлення : 0000-072475, 0000-072477 - по курсу 44',
+        ].join('\n'),
+      );
+      expect(preview?.html).toContain('№ <b>0000-072475</b> — 456,60 грн · курс 44');
+      expect(preview?.html).toContain('№ <b>0000-072654</b> — 432,60 грн · курс 45,3');
+
+      await service.confirmRequisites(MANAGER);
+
+      expect(orders.createGroup).toHaveBeenCalledWith(
+        MANAGER.id,
+        [
+          { orderNumber: '0000-072475', amountDue: '456.60', exchangeRate: '44' },
+          { orderNumber: '0000-072477', amountDue: '507.40', exchangeRate: '44' },
+          { orderNumber: '0000-072654', amountDue: '432.60' },
+        ],
+        expect.objectContaining({ exchangeRate: '45.3' }),
+      );
+    });
+
     it('should create several numbers paid in dollars as a dollar group', async () => {
       orders.createGroup.mockResolvedValue(
         groupOrders().map((order) => ({ ...order, currency: 'USD' })),

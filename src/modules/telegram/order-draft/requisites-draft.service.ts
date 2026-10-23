@@ -171,6 +171,7 @@ export class RequisitesDraftService {
           orderNumber: item.number,
           amountDue: item.amount.toFixed(2),
           clientName: item.fop ?? undefined,
+          exchangeRate: item.rate ?? undefined,
         })),
         common,
       );

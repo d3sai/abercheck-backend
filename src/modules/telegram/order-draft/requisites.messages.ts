@@ -57,6 +57,7 @@ export function requisitesHint(): BotReply {
       `<pre>${example}</pre>`,
       '',
       'Коментар — за потреби окремим рядком «Коментар: …».',
+      'Інший курс для окремих номерів — рядком «замовлення: 0000-066092, 0000-066093 - по курсу 44».',
       'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
     ].join('\n'),
@@ -92,11 +93,14 @@ export interface PreviewContext {
 export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext): BotReply {
   const lines: string[] = plan.kind === 'group' ? ['<b>Кілька номерів однією оплатою:</b>'] : [];
 
+  const ownRates = plan.kind === 'group' && plan.items.some((item) => item.rate);
   if (plan.kind === 'group') {
     for (const item of plan.items) {
       const note = item.note ? ` ${escapeHtml(item.note)}` : '';
+      const rate = ownRates ? (item.rate ?? plan.rate) : null;
+      const rateNote = rate ? ` · курс ${escapeHtml(rate.replace('.', ','))}` : '';
       lines.push(
-        `№ <b>${escapeHtml(item.number)}</b> — ${money(item.amount, plan.currency)}${note}`,
+        `№ <b>${escapeHtml(item.number)}</b> — ${money(item.amount, plan.currency)}${note}${rateNote}`,
       );
     }
     lines.push(`Разом: <b>${money(plan.total, plan.currency)}</b>`);
@@ -106,7 +110,7 @@ export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext)
     }
     lines.push(`Сума: <b>${money(plan.total, plan.currency)}</b>`);
   }
-  if (plan.rate) {
+  if (plan.rate && !ownRates) {
     lines.push(`Курс: ${escapeHtml(plan.rate.replace('.', ','))}`);
   }
   if (plan.comment) {
@@ -194,12 +198,14 @@ export function adminRequisitesMessage(
     first.orderNumber === first.baseNumber
       ? '💳 <b>Оплата на реквізити</b>'
       : '➕ <b>Оплата на реквізити · нова частина</b>';
+  const ownRates = new Set(orders.map((order) => order.exchangeRate?.toFixed(4))).size > 1;
   const numbers =
     orders.length > 1
-      ? orders.map(
-          (order) =>
-            `№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amountDue, order.currency)}`,
-        )
+      ? orders.map((order) => {
+          const rate =
+            ownRates && order.exchangeRate ? ` · курс ${formatRate(order.exchangeRate)}` : '';
+          return `№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amountDue, order.currency)}${rate}`;
+        })
       : [`№ <b>${escapeHtml(first.orderNumber)}</b>`];
   return [
     title,
@@ -207,7 +213,7 @@ export function adminRequisitesMessage(
     orders.length > 1
       ? `Разом: ${money(total, first.currency)}`
       : `Сума: ${money(total, first.currency)}`,
-    ...(first.exchangeRate ? [`Курс: ${formatRate(first.exchangeRate)}`] : []),
+    ...(first.exchangeRate && !ownRates ? [`Курс: ${formatRate(first.exchangeRate)}`] : []),
     ...(first.comment ? [`Коментар: ${escapeHtml(first.comment)}`] : []),
     ...(requisites.length > 0
       ? [

@@ -277,3 +277,51 @@ describe('requisitesHint', () => {
     });
   });
 });
+
+describe('several rates in one message', () => {
+  const group = (overrides: Partial<RequisitesPlan> = {}) =>
+    plan({
+      kind: 'group',
+      rate: '45.3',
+      items: [
+        { number: '0000-072475', amount: d('456.6'), note: null, rate: '44' },
+        { number: '0000-072477', amount: d('507.4'), note: null, rate: null },
+      ],
+      total: d('964'),
+      ...overrides,
+    });
+
+  it('should show the rate next to each number when some have their own', () => {
+    const { html } = requisitesPreview(group(), { addsPart: false, skipped: [], files: 0 });
+
+    expect(html).toContain('№ <b>0000-072475</b> — 456,60 грн · курс 44');
+    expect(html).toContain('№ <b>0000-072477</b> — 507,40 грн · курс 45,3');
+    expect(html).not.toContain('Курс:');
+  });
+
+  it('should keep one rate line when no number has its own', () => {
+    const { html } = requisitesPreview(
+      group({ items: group().items.map((item) => ({ ...item, rate: null })) }),
+      { addsPart: false, skipped: [], files: 0 },
+    );
+
+    expect(html).toContain('Курс: 45,3');
+    expect(html).not.toContain('· курс');
+  });
+
+  it('should show the rate next to each number in the admin notice only when they differ', () => {
+    const orders = (second: string) => [
+      order({ orderNumber: '0000-072475', baseNumber: '0000-072475', exchangeRate: d('44') }),
+      order({ orderNumber: '0000-072477', baseNumber: '0000-072475', exchangeRate: d(second) }),
+    ];
+
+    const different = adminRequisitesMessage(orders('45.3'), 'Христина', []);
+    const same = adminRequisitesMessage(orders('44'), 'Христина', []);
+
+    expect(different).toContain('№ <b>0000-072475</b> — 6 667 грн · курс 44');
+    expect(different).toContain('№ <b>0000-072477</b> — 6 667 грн · курс 45,3');
+    expect(different).not.toContain('Курс:');
+    expect(same).toContain('Курс: 44');
+    expect(same).not.toContain('· курс');
+  });
+});

@@ -53,6 +53,7 @@ export interface GroupOrderItem {
   orderNumber: string;
   amountDue: string;
   clientName?: string;
+  exchangeRate?: string;
 }
 
 export type OrderWithManager = Order & { manager: Manager };
@@ -191,7 +192,7 @@ export class OrdersService {
                 clientName: item.clientName ?? common.clientName,
                 amountDue: item.amountDue,
                 currency: common.currency,
-                exchangeRate: common.exchangeRate,
+                exchangeRate: item.exchangeRate ?? common.exchangeRate,
                 paidAt: common.paidAt,
                 comment: index === 0 ? common.comment : `Оплата разом із № ${baseNumber}`,
                 managerId,

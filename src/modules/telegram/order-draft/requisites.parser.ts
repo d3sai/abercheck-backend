@@ -11,6 +11,8 @@ export interface PlanItem {
   note: string | null;
   /** The note without remarks in brackets, e.g. «(залишок)»; only read for several numbers. */
   fop?: string | null;
+  /** A rate of its own, from a «замовлення: … - по курсу 44» line; otherwise the plan's rate. */
+  rate?: string | null;
 }
 
 export type PlanKind = 'single' | 'group';
@@ -43,6 +45,8 @@ const TOTAL_LABEL = new RegExp(
 );
 const RATE_LABELED = /^\s*курс\s*[:\-–—]?\s*(\d{1,4}(?:[.,]\d{1,4})?)\s*%?\s*$/iu;
 const RATE_LONE = /^\s*(\d{1,3}(?:[.,]\d{1,4})?)\s*(%?)\s*$/u;
+const RATE_PHRASE =
+  /(?<!\p{L})курс(?:у|ом)?(?!\p{L})\s*[:\-–—]?\s*(\d{1,4}(?:[.,]\d{1,4})?)(?!\d)/iu;
 const COMMENT_LABEL = /^\s*коментар\s*[:\-–—]\s*(.+?)\s*$/iu;
 const DATE_ONLY = /^\s*\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:\s+\d{1,2}:\d{2})?\s*$/u;
 const NUMBER_AT_START = /^\s*(?:[№#]\s*)?(\d{4}-\d{6})(?!\d)(.*)$/u;
@@ -188,6 +192,16 @@ export function loneRate(line: string): string | null {
   return inRange ? match[1]! : null;
 }
 
+// «замовлення: 0000-072475, 0000-072477 - по курсу 44»: other numbers keep the rate of the message.
+export function rateOverride(line: string): { numbers: string[]; rate: string } | null {
+  const numbers = line.match(NUMBER_ANYWHERE);
+  const rate = RATE_PHRASE.exec(line);
+  if (!numbers || !rate || amountRegex().test(line.replace(NUMBER_ANYWHERE, ' '))) {
+    return null;
+  }
+  return { numbers: [...new Set(numbers)], rate: rate[1]! };
+}
+
 type RestKind = 'blank' | 'date' | 'text';
 export interface RestLine {
   text: string;
@@ -200,7 +214,9 @@ interface Scan {
     amount: Prisma.Decimal | null;
     note: string | null;
     fixedFrom?: string;
+    rate?: string;
   }[];
+  rateOverrides: { numbers: string[]; rate: string }[];
   other: Prisma.Decimal[];
   statedTotal: Prisma.Decimal | null;
   rate: string | null;
@@ -227,6 +243,7 @@ function isBareAmountLine(trimmed: string): boolean {
 function scan(lines: string[], allowNearMiss: boolean): Scan {
   const result: Scan = {
     numbers: [],
+    rateOverrides: [],
     other: [],
     statedTotal: null,
     rate: null,
@@ -262,6 +279,11 @@ function scan(lines: string[], allowNearMiss: boolean): Scan {
     const total = TOTAL_LABEL.exec(trimmed);
     if (total) {
       result.statedTotal = toDecimal(total[1]!);
+      continue;
+    }
+    const override = rateOverride(trimmed);
+    if (override) {
+      result.rateOverrides.push(override);
       continue;
     }
 
@@ -354,7 +376,8 @@ function guessLabel(lines: string[]): string {
       TOTAL_LABEL.test(trimmed) ||
       RATE_LABELED.test(trimmed) ||
       COMMENT_LABEL.test(trimmed) ||
-      loneRate(trimmed) !== null
+      loneRate(trimmed) !== null ||
+      rateOverride(trimmed) !== null
     ) {
       continue;
     }
@@ -510,6 +533,25 @@ export function parseRequisites(raw: string): RequisitesResult {
   for (const number of found.duplicates) {
     warnings.push(`Номер ${number} вказано кілька разів — врахував один раз.`);
   }
+  for (const override of found.rateOverrides) {
+    const parsed = parseExchangeRate(override.rate);
+    if (!parsed.ok) {
+      errors.push(
+        `Курс «${override.rate}» не схожий на число — напишіть, наприклад, «по курсу 44».`,
+      );
+      continue;
+    }
+    for (const number of override.numbers) {
+      const target = numbers.find((item) => item.number === number);
+      if (target) {
+        target.rate = parsed.value;
+      } else {
+        errors.push(
+          `У рядку з курсом ${override.rate} є номер ${number}, якого немає серед номерів із сумами.`,
+        );
+      }
+    }
+  }
   const lineRecords = deriveRequisiteLines(found.rest);
   const accounts = found.rest.filter(
     (line) => line.kind === 'text' && (CARD.test(line.text) || IBAN.test(line.text)),
@@ -566,7 +608,15 @@ export function parseRequisites(raw: string): RequisitesResult {
       total = own;
     }
     if (total) {
-      items = [{ number: numbers[0]!.number, amount: total, note: numbers[0]!.note, fop: null }];
+      items = [
+        {
+          number: numbers[0]!.number,
+          amount: total,
+          note: numbers[0]!.note,
+          fop: null,
+          rate: numbers[0]!.rate ?? null,
+        },
+      ];
     }
   } else {
     kind = 'group';
@@ -584,7 +634,15 @@ export function parseRequisites(raw: string): RequisitesResult {
     }
     items = numbers.flatMap((item) =>
       item.amount
-        ? [{ number: item.number, amount: item.amount, note: item.note, fop: fopOf(item.note) }]
+        ? [
+            {
+              number: item.number,
+              amount: item.amount,
+              note: item.note,
+              fop: fopOf(item.note),
+              rate: item.rate ?? null,
+            },
+          ]
         : [],
     );
     total = sum(items.map((item) => item.amount));
@@ -652,7 +710,9 @@ export function parseRequisites(raw: string): RequisitesResult {
       items,
       total,
       derivedTotal,
-      rate: normalizedRate?.ok ? normalizedRate.value : null,
+      rate:
+        (kind === 'single' ? items[0]?.rate : null) ??
+        (normalizedRate?.ok ? normalizedRate.value : null),
       label: kind === 'group' ? (items[0]?.fop ?? label) : label,
       warnings,
       comment,
@@ -664,10 +724,16 @@ export function parseRequisites(raw: string): RequisitesResult {
 export function withoutNumbers(text: string, numbers: string[]): string {
   return text
     .split(/\r?\n/)
-    .filter((line) => {
+    .flatMap((line) => {
       const trimmed = line.trim();
+      if (rateOverride(trimmed)) {
+        const kept = line.replace(NUMBER_ANYWHERE, (number) =>
+          numbers.includes(number) ? '' : number,
+        );
+        return rateOverride(kept) ? [kept] : [];
+      }
       const found = NUMBER_AT_START.exec(trimmed);
-      return !(found && numbers.includes(found[1]!)) && !TOTAL_LABEL.test(trimmed);
+      return (found && numbers.includes(found[1]!)) || TOTAL_LABEL.test(trimmed) ? [] : [line];
     })
     .join('\n');
 }
