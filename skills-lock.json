@@ -11,13 +11,19 @@
       "source": "op7418/humanizer-zh",
       "sourceType": "github",
       "skillPath": "SKILL.md",
-      "computedHash": "7bd195e3bcdcc24f078dfd4e3b3e37e8ac321c36f410a41241fc4175eab1825a"
+      "computedHash": "22b9f81aa36a7421b4ad4d8a0ca30cf4b391294389a7dd068d39e644be3ce955"
     },
     "javascript-typescript-jest": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
       "skillPath": "skills/javascript-typescript-jest/SKILL.md",
       "computedHash": "0073d19ab0275eb6a8200aced6789a53744667bd717b5d1f44ce708a1740e5d4"
+    },
+    "nestjs-solid-clean-code": {
+      "source": "d3sai/nestjs-solid-clean-code",
+      "sourceType": "github",
+      "skillPath": "nestjs-solid-clean-code/SKILL.md",
+      "computedHash": "a917485016c12e01ce873d54931d1b965e472945c019d08a9d6b49ff5073a7f2"
     },
     "prisma-cli": {
       "source": "prisma/skills",
