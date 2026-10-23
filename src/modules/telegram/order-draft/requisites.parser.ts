@@ -339,7 +339,7 @@ function fopOf(note: string | null): string | null {
     .replace(/\([^)]*\)/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return /\p{L}{3,}/u.test(fop) ? fop.slice(0, 255) : null;
+  return /\p{L}{3,}/u.test(fop) || CARD.test(fop) ? fop.slice(0, 255) : null;
 }
 
 const DEFAULT_LABEL = 'Оплата на реквізити';
@@ -381,7 +381,8 @@ export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): Requisi
   const lines = [...rest];
   const records: RequisiteInput[] = [];
   const seen: { nameWord: string; amount: string }[] = [];
-  let currentDateText: string | null = null;
+  let currentDateText: string | null =
+    lines.find((line) => line.kind === 'date')?.text.trim() ?? null;
 
   const findAccount = (fromIndex: number): string | null => {
     for (const line of [lines[fromIndex]!, ...lines.slice(fromIndex + 1, fromIndex + 6)]) {
@@ -509,11 +510,16 @@ export function parseRequisites(raw: string): RequisitesResult {
   for (const number of found.duplicates) {
     warnings.push(`Номер ${number} вказано кілька разів — врахував один раз.`);
   }
-  for (const card of found.cardsWithoutAmount) {
-    warnings.push(`У рядку з карткою «${card}» не знайшов суму.`);
-  }
-
   const lineRecords = deriveRequisiteLines(found.rest);
+  const accounts = found.rest.filter(
+    (line) => line.kind === 'text' && (CARD.test(line.text) || IBAN.test(line.text)),
+  );
+  const loneAccount = lineRecords.length === 0 && accounts.length === 1 ? accounts[0]!.text : null;
+  if (loneAccount === null) {
+    for (const card of found.cardsWithoutAmount) {
+      warnings.push(`У рядку з карткою «${card}» не знайшов суму.`);
+    }
+  }
   const lineTotal = sum(lineRecords.map((r) => new Prisma.Decimal(r.amount)));
 
   let kind: PlanKind;
@@ -534,6 +540,10 @@ export function parseRequisites(raw: string): RequisitesResult {
       );
     }
   };
+
+  // A payer written next to the numbers is the client of each order; otherwise the requisite lines
+  // below name them all — never half and half.
+  const payerPerNumber = numbers.some((item) => fopOf(item.note));
 
   if (numbers.length === 1) {
     kind = 'single';
@@ -566,9 +576,9 @@ export function parseRequisites(raw: string): RequisitesResult {
           `Біля номера ${item.number} немає суми — напишіть її зі словом «грн» (або знаком $) у тому ж рядку.`,
         );
       }
-      if (!fopOf(item.note)) {
+      if (payerPerNumber && !fopOf(item.note)) {
         errors.push(
-          `Біля номера ${item.number} немає ФОП чи ТОВ — напишіть його в тому ж рядку після суми.`,
+          `Біля номера ${item.number} немає ФОП, ТОВ чи номера картки — напишіть одне з них у тому ж рядку після суми.`,
         );
       }
     }
@@ -589,6 +599,17 @@ export function parseRequisites(raw: string): RequisitesResult {
     }
   }
 
+  // A lone card or IBAN without an amount carries the whole payment, as in the minus closing.
+  if (total && loneAccount !== null) {
+    const dateLine = found.rest.find((line) => line.kind === 'date');
+    lineRecords.push({
+      payerName: cleanName(loneAccount) || 'Не вказано',
+      account: (CARD.exec(loneAccount) ?? IBAN.exec(loneAccount))![0],
+      amount: total.toFixed(2),
+      paidAt: (dateLine ? parseDateTime(dateLine.text) : null) ?? new Date(),
+    });
+  }
+
   if (errors.length === 0 && total === null) {
     errors.push(
       'Не знайшов жодної суми. Пишіть суми зі словом «грн» (або знаком $) або додайте рядок «Загальна сума: 9 067 грн».',
@@ -603,8 +624,10 @@ export function parseRequisites(raw: string): RequisitesResult {
     }
   }
   const label = guessLabel(lines);
-  if (kind !== 'group' && label === DEFAULT_LABEL) {
-    errors.push('Не знайшов ФОП чи ТОВ. Додайте рядок «ФОП Прізвище Ім’я» або «ТОВ Назва».');
+  if ((kind !== 'group' || !payerPerNumber) && label === DEFAULT_LABEL) {
+    errors.push(
+      'Не знайшов ФОП, ТОВ чи картки з іменем. Додайте рядок «ФОП Прізвище Ім’я», «ТОВ Назва» або «4441 1110 6964 5962 Прізвище Ім’я».',
+    );
   }
   const dated = numericDates(text);
   if (!new RegExp(DATE.source, 'u').test(dated) || !new RegExp(TIME.source, 'u').test(dated)) {

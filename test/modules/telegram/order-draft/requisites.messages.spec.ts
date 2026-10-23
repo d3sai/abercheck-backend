@@ -8,10 +8,14 @@ import {
 import {
   adminRequisitesMessage,
   requisitesCreatedReply,
+  requisitesHint,
   requisitesPreview,
   multipleOrRequisitesGuard,
 } from '../../../../src/modules/telegram/order-draft/requisites.messages';
-import type { RequisitesPlan } from '../../../../src/modules/telegram/order-draft/requisites.parser';
+import {
+  parseRequisites,
+  type RequisitesPlan,
+} from '../../../../src/modules/telegram/order-draft/requisites.parser';
 import { MENU_LABEL } from '../../../../src/modules/telegram/core/menu';
 
 const d = (value: string) => new Prisma.Decimal(value);
@@ -260,5 +264,16 @@ describe('multipleOrRequisitesGuard', () => {
     expect(reply.html).toContain(MENU_LABEL.Requisites);
     expect(reply.html).toContain('/requisites');
     expect(reply.buttons).toBeUndefined();
+  });
+});
+
+describe('requisitesHint', () => {
+  it('should show an example the parser accepts as is', () => {
+    const example = /<pre>([\s\S]*?)<\/pre>/.exec(requisitesHint().html)![1]!;
+
+    expect(parseRequisites(example)).toMatchObject({
+      ok: true,
+      plan: { kind: 'group', warnings: [], requisiteLines: [{}, {}] },
+    });
   });
 });

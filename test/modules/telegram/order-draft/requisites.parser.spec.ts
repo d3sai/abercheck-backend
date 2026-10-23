@@ -127,8 +127,8 @@ UA549358710000067320000088286
 44,9`,
   oneNumberFopAndCard: `0000-066092
 07.09.2026
-ФОП Носенко Роман - 4 527,00 грн 14:57
-4441 1110 6964 5962 Андріанов Олександр - 2 140,00 грн 14:59
+ФОП Носенко Роман 4 527 грн 14:57
+4441 1110 6964 5962 Андріанов Олександр 2 140 грн 14:59
 45`,
   fiveNumbersTwoCards: `0000-068796
 511,86 грн ФОП Гук
@@ -395,11 +395,21 @@ describe('parseRequisites', () => {
     it.each([
       ['0000-068772 100 грн ФОП Гук\n0000-068773 50 грн', '0000-068773'],
       ['0000-068772 100 грн ФОП Гук\n0000-068773 50 грн (залишок)', '0000-068773'],
-      ['0000-068772 100 грн\n0000-068773 50 грн', '0000-068772'],
     ])('should name the number without one in «%s»', (text, number) => {
       const result = parseRequisites(`${text}${STAMP}`);
 
-      expect(!result.ok && result.errors.join(' ')).toContain(`Біля номера ${number} немає ФОП`);
+      expect(!result.ok && result.errors.join(' ')).toContain(
+        `Біля номера ${number} немає ФОП, ТОВ чи номера картки`,
+      );
+    });
+
+    it('should take a bare card number as the payer of a number', () => {
+      const plan = planOf(
+        `0000-068772 100 грн 4441 1110 6964 5962\n0000-068773 50 грн ФОП Іванов${STAMP}`,
+      );
+
+      expect(plan.kind).toBe('group');
+      expect(plan.items.map((item) => item.fop)).toEqual(['4441 1110 6964 5962', 'ФОП Іванов']);
     });
 
     it('should take a company as well as a FOP for a number', () => {
@@ -416,6 +426,99 @@ describe('parseRequisites', () => {
       );
 
       expect(plan.items.map((item) => item.fop)).toEqual(['ФОП Гук', 'ФОП Іванов']);
+    });
+  });
+
+  describe('several numbers with the requisites listed below them', () => {
+    const template = [
+      '0000-066092 3 000 грн',
+      '0000-066093 2 500 грн',
+      '0000-066094 1 167 грн',
+      'ФОП Носенко Роман 4 527 грн',
+      '4441 1110 6964 5962 Андріанов Олександр 2 140 грн',
+      'Загальна сума: 6 667 грн',
+      '07.09.2026 14:57',
+      '45',
+    ].join('\n');
+
+    it('should name every order after the first requisite and date requisites written before the date', () => {
+      const plan = planOf(template);
+
+      expect(plan.kind).toBe('group');
+      expect(amounts(plan)).toEqual([
+        '0000-066092 3000.00',
+        '0000-066093 2500.00',
+        '0000-066094 1167.00',
+      ]);
+      expect(plan.items.map((item) => item.fop)).toEqual([null, null, null]);
+      expect(plan.label).toBe('ФОП Носенко Роман');
+      expect(plan.total.toFixed(2)).toBe('6667.00');
+      expect(plan.rate).toBe('45');
+      expect(requisites(plan)).toEqual([
+        'ФОП Носенко Роман||4527.00',
+        'Андріанов Олександр|4441 1110 6964 5962|2140.00',
+      ]);
+      expect(plan.requisiteLines.map((r) => r.paidAt.toISOString())).toEqual([
+        '2026-09-07T11:57:00.000Z',
+        '2026-09-07T11:57:00.000Z',
+      ]);
+      expect(plan.warnings).toEqual([]);
+    });
+
+    it('should read the date on its own line and a time on each requisite', () => {
+      const plan = planOf(
+        [
+          '0000-072475  456,6 грн',
+          '0000-072477 507,4 грн',
+          'сума: 964 грн',
+          '4149439025213368 Хабурський Ігор 600 грн 12:23',
+          '4149439025213368 Івченко Євгеній 364 грн 12:30 ',
+          '45,3',
+          '23.10.2026',
+        ].join('\n'),
+      );
+
+      expect(plan.total.toFixed(2)).toBe('964.00');
+      expect(plan.rate).toBe('45.3');
+      expect(plan.comment).toBe('23.10.2026');
+      expect(requisites(plan)).toEqual([
+        'Хабурський Ігор|4149439025213368|600.00',
+        'Івченко Євгеній|4149439025213368|364.00',
+      ]);
+      expect(plan.requisiteLines.map((r) => r.paidAt.toISOString())).toEqual([
+        '2026-10-23T09:23:00.000Z',
+        '2026-10-23T09:30:00.000Z',
+      ]);
+      expect(plan.warnings).toEqual([]);
+    });
+
+    it('should let a lone card without an amount carry the whole payment', () => {
+      const plan = planOf(
+        '0000-072475 456,6 грн\n0000-072477 507,4 грн\n4149439025213368 Хабурський Ігор\nЗагальна сума: 964 грн\n23.10.2026 12:23\n45,3',
+      );
+
+      expect(plan.label).toBe('Хабурський Ігор');
+      expect(requisites(plan)).toEqual(['Хабурський Ігор|4149439025213368|964.00']);
+      expect(plan.warnings).toEqual([]);
+    });
+
+    it('should warn when the requisites do not add up to the numbers', () => {
+      const plan = planOf(template.replace('2 140 грн', '2 000 грн').replace(/.*Загальна.*\n/, ''));
+
+      expect(has(plan, 'оплата 6 527 грн')).toBe(true);
+    });
+
+    it('should take a name line as the client of every number when none has its own', () => {
+      const plan = planOf(`0000-068772 100 грн\n0000-068773 50 грн${STAMP}`);
+
+      expect(plan.items.map((item) => item.fop)).toEqual([null, null]);
+      expect(plan.label).toBe('Гук Іван');
+    });
+
+    it('should refuse numbers with no requisites or name anywhere', () => {
+      const result = parseRequisites('0000-068772 100 грн\n0000-068773 50 грн\n07.09.2026 14:57');
+
+      expect(!result.ok && result.errors.join(' ')).toContain('Не знайшов ФОП, ТОВ чи картки');
     });
   });
 
