@@ -106,11 +106,10 @@ export class OrderCreationFlowService {
     return Object.keys(labeled).length > 0 ? labeled : parseFreeform(text);
   }
 
+  // A lone «сума: 34960 грн» is a total of the requisites message, not the template of one order.
   needsRequisitesButton(text: string): boolean {
-    return (
-      Object.keys(parseTemplate(text, FIELDS_WITH_ALIASES)).length === 0 &&
-      hasMultipleOrdersOrRequisites(text)
-    );
+    const labeled = parseTemplate(text, FIELDS_WITH_ALIASES);
+    return !labeled.orderNumber && !labeled.clientName && hasMultipleOrdersOrRequisites(text);
   }
 
   async process(manager: Manager, raw: Record<string, string>): Promise<BotReply> {

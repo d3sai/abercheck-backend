@@ -188,6 +188,23 @@ describe('OrderDraftService', () => {
       expect(orders.create).not.toHaveBeenCalled();
     });
 
+    it('should guide to /requisites when a total line «сума:» sits among several numbers and cards', async () => {
+      const reply = await service.handleText(
+        MANAGER,
+        [
+          '0000-070217 4972,00 грн',
+          '0000-072611 11124,00 грн',
+          'сума: 16096 грн',
+          '4441 1110 4233 7547 Мічурін Остап Володимирович 16 096,00 Грн 09:35',
+          '27.10.2026',
+          '45,7',
+        ].join('\n'),
+      );
+
+      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
     it('should refuse a message that mentions a card, even with just one number', async () => {
       const reply = await service.handleText(
         MANAGER,
