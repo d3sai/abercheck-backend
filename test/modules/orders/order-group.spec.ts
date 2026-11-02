@@ -31,14 +31,15 @@ describe('order group', () => {
       const parts = [part(1, '700'), part(2, '300')];
 
       expect(summarizeGroup(parts, d('0'))).toMatchObject({ status: OrderStatus.AWAITING_PAYMENT });
-      expect(summarizeGroup(parts, d('999.99'))).toMatchObject({
+      expect(summarizeGroup(parts, d('989.99'))).toMatchObject({
         status: OrderStatus.PARTIALLY_PAID,
       });
       expect(summarizeGroup(parts, d('1000'))).toMatchObject({
         due: d('1000'),
         status: OrderStatus.PAID,
       });
-      expect(summarizeGroup(parts, d('1000.01'))).toMatchObject({ status: OrderStatus.OVERPAID });
+      expect(summarizeGroup(parts, d('1010'))).toMatchObject({ status: OrderStatus.PAID });
+      expect(summarizeGroup(parts, d('1010.01'))).toMatchObject({ status: OrderStatus.OVERPAID });
     });
 
     it('should leave cancelled parts out of what is due', () => {

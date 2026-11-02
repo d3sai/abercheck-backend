@@ -10,9 +10,14 @@ describe('calculateOrderStatus', () => {
     ['0', OrderStatus.AWAITING_PAYMENT],
     ['3614.32', OrderStatus.PARTIALLY_PAID],
     ['6158.41', OrderStatus.PAID],
-    ['6158.40', OrderStatus.PARTIALLY_PAID],
-    ['6158.42', OrderStatus.OVERPAID],
-    ['6208.41', OrderStatus.OVERPAID],
+    ['6158.40', OrderStatus.PAID],
+    ['6158.42', OrderStatus.PAID],
+    ['6096.83', OrderStatus.PAID],
+    ['6096.82', OrderStatus.PARTIALLY_PAID],
+    ['6219.99', OrderStatus.PAID],
+    ['6220.00', OrderStatus.OVERPAID],
+    ['6208.41', OrderStatus.PAID],
+    ['6658.41', OrderStatus.OVERPAID],
   ])('should return %s paid → %s', (paid, expected) => {
     expect(calculateOrderStatus(due, d(paid), OrderStatus.AWAITING_PAYMENT)).toBe(expected);
   });
