@@ -292,12 +292,42 @@ describe('parseRequisites', () => {
       expect(requisites(plan)).toEqual(['ФОП Пеленський А.Й||4629.04', 'ТОВ Абертайм||4419.89']);
     });
 
-    it('should treat a restated payment as one requisite, not two, and point it out', () => {
-      const plan = planOf(SAMPLES.sameAmountTwice);
+    it('should treat a payment written twice with the same minute as one requisite, and point it out', () => {
+      const plan = planOf(SAMPLES.sameAmountTwice.replace('10:11', '10:12'));
 
       expect(plan.total.toFixed(2)).toBe('2514.62');
       expect(plan.requisiteLines).toHaveLength(1);
       expect(has(plan, 'порахував')).toBe(true);
+    });
+
+    it('should keep the same payer and amount twice when the payments are a minute apart', () => {
+      const plan = planOf(SAMPLES.sameAmountTwice);
+
+      expect(plan.requisiteLines).toHaveLength(2);
+      expect(plan.total.toFixed(2)).toBe('5029.24');
+      expect(has(plan, 'порахував')).toBe(true);
+    });
+
+    it('should keep the same payer and amount twice when the payments are two minutes apart', () => {
+      const plan = planOf(
+        [
+          '0000-070217 4972,00 грн',
+          '0000-072611 11124,00 грн',
+          '0000-072625 18864,00 грн',
+          'сума: 34960 грн',
+          '4441 1110 4233 7547 Мічурін Остап Володимирович 14 960,00 Грн 09:35',
+          '5355 1761 2748 1958 Лоза Тетяна Вікторівна 10 000,00 Грн 09:33',
+          '4441 1110 4233 7547 Мічурін Остап Володимирович 14 960,00 Грн 09:37',
+          '27.10.2026',
+          '45,7',
+        ].join('\n'),
+      );
+
+      expect(plan.requisiteLines.map((line) => line.amount)).toEqual([
+        '14960.00',
+        '10000.00',
+        '14960.00',
+      ]);
     });
 
     it('should use a written total, compare it with the lines, fix a number missing a zero, and record each card as a requisite', () => {

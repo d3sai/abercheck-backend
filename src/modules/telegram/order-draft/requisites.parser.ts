@@ -365,7 +365,6 @@ function fopOf(note: string | null): string | null {
 }
 
 const DEFAULT_LABEL = 'Оплата на реквізити';
-
 function guessLabel(lines: string[]): string {
   for (const line of lines) {
     const trimmed = line.trim();
@@ -403,7 +402,7 @@ function buildComment(rest: RestLine[], comments: string[]): string | null {
 export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): RequisiteInput[] {
   const lines = [...rest];
   const records: RequisiteInput[] = [];
-  const seen: { nameWord: string; amount: string }[] = [];
+  const seen: { nameWord: string; amount: string; paidAt: Date }[] = [];
   let currentDateText: string | null =
     lines.find((line) => line.kind === 'date')?.text.trim() ?? null;
 
@@ -451,15 +450,17 @@ export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): Requisi
 
     const nameWord = payerName.split(' ')[0]?.toLowerCase() ?? '';
     const amountKey = amount.toFixed(2);
+    // Same payer, amount and minute is one payment written twice; even a minute apart is two payments.
     const isRestatement = seen.some(
       (s) =>
         s.amount === amountKey &&
+        s.paidAt.getTime() === paidAt.getTime() &&
         (payerName.toLowerCase().includes(s.nameWord) || s.nameWord === nameWord),
     );
     if (isRestatement) {
       return;
     }
-    seen.push({ nameWord, amount: amountKey });
+    seen.push({ nameWord, amount: amountKey, paidAt });
     records.push({
       payerName,
       account: account ?? null,
