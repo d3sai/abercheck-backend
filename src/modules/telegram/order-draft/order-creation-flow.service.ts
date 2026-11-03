@@ -26,6 +26,7 @@ import {
   parseTemplate,
   parseText,
 } from './order-draft.parsers';
+import { parseFinanceReply } from './finance-reply.parser';
 import { type DraftField, type PartOffer, PartOfferStore } from './part-offer.store';
 import { PendingFilesStore } from './pending-files.store';
 import { hasMultipleOrdersOrRequisites, numericDates, parseDateTime } from './requisites.parser';
@@ -102,12 +103,16 @@ export class OrderCreationFlowService {
   }
 
   extractFields(text: string): Record<string, string> | null {
+    const finance = parseFinanceReply(text);
+    if (finance) return finance.fields;
     const labeled = parseTemplate(text, FIELDS_WITH_ALIASES);
     return Object.keys(labeled).length > 0 ? labeled : parseFreeform(text);
   }
 
   // A lone «сума: 34960 грн» is a total of the requisites message, not the template of one order.
   needsRequisitesButton(text: string): boolean {
+    const finance = parseFinanceReply(text);
+    if (finance) return finance.requisites;
     const labeled = parseTemplate(text, FIELDS_WITH_ALIASES);
     return !labeled.orderNumber && !labeled.clientName && hasMultipleOrdersOrRequisites(text);
   }

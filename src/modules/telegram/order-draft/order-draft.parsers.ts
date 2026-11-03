@@ -83,7 +83,7 @@ export function parseTemplate(
   return result;
 }
 
-const ORDER_NUMBER_SHAPE = /^[№#]?\s*\d[\d\s]*-\s*\d[\d\s]*$/;
+export const ORDER_NUMBER_SHAPE = /^[№#]?\s*\d[\d\s]*-\s*\d[\d\s]*$/;
 
 export function parseFreeform(text: string): Record<string, string> | null {
   const lines = text

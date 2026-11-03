@@ -1510,6 +1510,94 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
     });
   });
 
+  describe('a pasted finance bot reply', () => {
+    const NOTICE = [
+      '✅ Ваш запит на 6\u00a0274,68 грн · замовлення 0000-074404 прийнято',
+      'Прийняв: Admin',
+      'ФОП: ТОВ Абертайм',
+    ].join('\n');
+
+    it('should create a regular order from the notice and a rate line', async () => {
+      orders.findWithBalance.mockResolvedValue(null);
+      orders.create.mockResolvedValue(createdOrder());
+
+      await service.handleText(MANAGER, `${NOTICE}\n45,7\n03.11.2026 11:38`);
+
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        {
+          orderType: 'REGULAR',
+          orderNumber: '0000-074404',
+          clientName: 'ТОВ Абертайм',
+          amountDue: '6274.68',
+          currency: 'UAH',
+          exchangeRate: '45.7',
+          comment: '03.11.2026 11:38',
+        },
+        { notify: true, addPart: false },
+      );
+    });
+
+    it('should read the notice from a file caption too', async () => {
+      orders.findWithBalance.mockResolvedValue(null);
+      orders.create.mockResolvedValue(createdOrder());
+
+      await service.addFile(MANAGER, file(), `${NOTICE}\n45,7`);
+
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        expect.objectContaining({ orderNumber: '0000-074404', exchangeRate: '45.7' }),
+        expect.anything(),
+      );
+    });
+
+    it('should ask for the missing number with the usual error', async () => {
+      const reply = await service.handleText(
+        MANAGER,
+        '✅ Ваш запит на 1\u00a0601 грн прийнято\nФОП: ТОВ Абертайм',
+      );
+
+      expect(reply?.html).toContain("«Номер» — поле обов'язкове.");
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
+    it('should take the number added on its own line when the notice has none', async () => {
+      orders.findWithBalance.mockResolvedValue(null);
+      orders.create.mockResolvedValue(createdOrder());
+
+      await service.handleText(
+        MANAGER,
+        '✅ Ваш запит на 1\u00a0601 грн прийнято\nФОП: ТОВ Абертайм\n0000-074404\n45,7',
+      );
+
+      expect(orders.create).toHaveBeenCalledWith(
+        MANAGER.id,
+        expect.objectContaining({ orderNumber: '0000-074404' }),
+        expect.anything(),
+      );
+    });
+
+    it('should guide to /requisites when the notice says several numbers were found', async () => {
+      const reply = await service.handleText(
+        MANAGER,
+        `${NOTICE}\n⚠️ знайдено кілька номерів — зареєстровано лише перший\n45,7`,
+      );
+
+      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
+    it('should guide to /requisites when the notice carries a payouts block', async () => {
+      const reply = await service.handleText(
+        MANAGER,
+        `${NOTICE}\n\nРеквізити для оплати (1):\n\n1. Носенко Роман — 963 грн\n   на картку`,
+      );
+
+      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('onApplicationShutdown', () => {
     it('should warn a manager with buffered files', async () => {
       await service.addFile(MANAGER, file());
