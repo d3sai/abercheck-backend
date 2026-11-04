@@ -29,7 +29,7 @@ export class DailyReportJob {
       }
 
       const report = await this.reports.build(previousKyivDayStart(todayStart));
-      await this.sender.sendToAdmins(dailyReportMessage(report, underpaid));
+      await this.sender.sendToTopic('reports', dailyReportMessage(report, underpaid));
       this.logger.log(`Daily report sent, ${underpaid.length} orders marked underpaid`);
     } catch (error) {
       this.logger.error('Daily report failed', error);

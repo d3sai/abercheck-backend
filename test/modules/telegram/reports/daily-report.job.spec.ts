@@ -6,7 +6,7 @@ import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-s
 
 describe('DailyReportJob', () => {
   const reports = { markUnderpaid: jest.fn(), build: jest.fn() };
-  const sender = { send: jest.fn(), sendToAdmins: jest.fn() };
+  const sender = { send: jest.fn(), sendToTopic: jest.fn() };
   let job: DailyReportJob;
 
   const now = new Date('2026-09-11T06:00:00Z');
@@ -69,7 +69,8 @@ describe('DailyReportJob', () => {
       expect.stringContaining('Залишок: 60 грн'),
     );
     expect(reports.build).toHaveBeenCalledWith(new Date('2026-09-09T21:00:00Z'));
-    expect(sender.sendToAdmins).toHaveBeenCalledWith(
+    expect(sender.sendToTopic).toHaveBeenCalledWith(
+      'reports',
       expect.stringMatching(/Звіт за 10\.09\.2026[\s\S]*Без доплати до кінця дня \(1\)/),
     );
     expect(reports.markUnderpaid.mock.invocationCallOrder[0]).toBeLessThan(
@@ -86,14 +87,14 @@ describe('DailyReportJob', () => {
     const [todayStart] = reports.markUnderpaid.mock.calls[0] as [Date];
     expect(todayStart).toBeInstanceOf(Date);
     expect(Number.isNaN(todayStart.getTime())).toBe(false);
-    expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('📊'));
+    expect(sender.sendToTopic).toHaveBeenCalledWith('reports', expect.stringContaining('📊'));
   });
 
   it('should not throw when the report fails', async () => {
     reports.markUnderpaid.mockRejectedValue(new Error('db down'));
 
     await expect(job.run(now)).resolves.toBeUndefined();
-    expect(sender.sendToAdmins).not.toHaveBeenCalled();
+    expect(sender.sendToTopic).not.toHaveBeenCalled();
   });
 
   it('should preview yesterday or today without touching statuses', async () => {

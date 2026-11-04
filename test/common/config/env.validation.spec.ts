@@ -69,4 +69,57 @@ describe('validateEnv', () => {
   it('should reject a short WEB_JWT_SECRET', () => {
     expect(() => validateEnv({ ...valid, WEB_JWT_SECRET: 'short' })).toThrow(/WEB_JWT_SECRET/);
   });
+
+  describe('finance sync', () => {
+    const token = 't'.repeat(16);
+    const finance = {
+      FINANCE_API_URL: 'http://localhost:4100',
+      FINANCE_API_TOKEN: token,
+      FINANCE_WEBHOOK_TOKEN: token,
+    };
+
+    it('should pass when no finance variable is set', () => {
+      expect(validateEnv(valid).FINANCE_API_URL).toBeUndefined();
+    });
+
+    it('should accept the URL together with both tokens', () => {
+      expect(validateEnv({ ...valid, ...finance })).toMatchObject(finance);
+    });
+
+    it('should fail when the URL is set without the tokens', () => {
+      expect(() => validateEnv({ ...valid, FINANCE_API_URL: finance.FINANCE_API_URL })).toThrow(
+        /FINANCE_API_TOKEN[\s\S]*FINANCE_WEBHOOK_TOKEN|FINANCE_WEBHOOK_TOKEN[\s\S]*FINANCE_API_TOKEN/,
+      );
+    });
+
+    it('should reject a short token and a non-http URL', () => {
+      expect(() => validateEnv({ ...valid, ...finance, FINANCE_API_TOKEN: 'short' })).toThrow(
+        /FINANCE_API_TOKEN/,
+      );
+      expect(() => validateEnv({ ...valid, ...finance, FINANCE_API_URL: 'ftp://x' })).toThrow(
+        /FINANCE_API_URL/,
+      );
+    });
+
+    it('should treat blank finance variables as unset', () => {
+      expect(
+        validateEnv({ ...valid, FINANCE_API_URL: '', FINANCE_API_TOKEN: '' }).FINANCE_API_URL,
+      ).toBeUndefined();
+    });
+  });
+
+  describe('forum topics', () => {
+    it('should parse topic ids as numbers and leave them optional', () => {
+      expect(validateEnv(valid).TELEGRAM_TOPIC_REQUESTS_ID).toBeUndefined();
+      expect(
+        validateEnv({ ...valid, TELEGRAM_TOPIC_REQUESTS_ID: '12', TELEGRAM_TOPIC_PAYMENTS_ID: '' }),
+      ).toMatchObject({ TELEGRAM_TOPIC_REQUESTS_ID: 12, TELEGRAM_TOPIC_PAYMENTS_ID: undefined });
+    });
+
+    it.each(['0', '-3', 'abc', '1.5'])('should reject topic id %p', (value) => {
+      expect(() => validateEnv({ ...valid, TELEGRAM_TOPIC_REPORTS_ID: value })).toThrow(
+        /TELEGRAM_TOPIC_REPORTS_ID/,
+      );
+    });
+  });
 });
