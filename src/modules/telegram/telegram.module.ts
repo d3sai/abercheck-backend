@@ -10,6 +10,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { RefundsModule } from '../refunds/refunds.module';
 import { RequisitesModule } from '../requisites/requisites.module';
 import { ReportsModule } from '../reports/reports.module';
+import { FinanceSyncModule } from '../finance-sync/finance-sync.module';
 import { AccessNotifier } from './access/access-notifier';
 import { AdminFlowService } from './admin/admin-flow.service';
 import { AdminUpdate } from './admin/admin.update';
@@ -43,7 +44,7 @@ import { TelegramSender } from './core/telegram-sender';
       inject: [ConfigService],
       useFactory: (config: ConfigService<EnvironmentVariables, true>) => ({
         token: config.get('TELEGRAM_BOT_TOKEN', { infer: true }),
-        include: [TelegramModule],
+        include: [TelegramModule, FinanceSyncModule],
         launchOptions: false,
       }),
     }),
@@ -85,5 +86,6 @@ import { TelegramSender } from './core/telegram-sender';
     AdminFlowService,
     DailyReportJob,
   ],
+  exports: [TelegramSender],
 })
 export class TelegramModule {}

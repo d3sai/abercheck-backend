@@ -135,9 +135,8 @@ export class AdminUpdate {
     const result =
       (await this.flow.answerAttachPrompt(telegramId, ctx.text)) ??
       (await this.flow.answerRefundPrompt(telegramId, ctx.text));
-    if (result) {
-      await reply(ctx, result, message?.message_id);
-    }
+    if (!result) return next();
+    await reply(ctx, result, message?.message_id);
   }
 
   private async finish(ctx: Context, result: BotReply): Promise<void> {

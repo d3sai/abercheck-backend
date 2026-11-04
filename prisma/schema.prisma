@@ -76,7 +76,8 @@ model Manager {
   sessionVersion Int           @default(0) @map("session_version")
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  orders Order[]
+  orders       Order[]
+  requestCards FinanceRequestCard[]
 
   @@map("managers")
 }
@@ -218,4 +219,42 @@ model TelegramLoginHash {
 
   @@index([expiresAt])
   @@map("telegram_login_hashes")
+}
+
+model FinanceRequestCard {
+  requestId        String   @id @map("request_id")
+  number           String
+  managerId        Int      @map("manager_id")
+  managerChatId    BigInt   @map("manager_chat_id")
+  managerMessageId Int?     @map("manager_message_id")
+  groupChatId      BigInt   @map("group_chat_id")
+  groupMessageId   Int      @map("group_message_id")
+  pendingRate      String?  @map("pending_rate")
+  notifiedStatus   String?  @map("notified_status")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  manager Manager @relation(fields: [managerId], references: [id])
+
+  @@unique([groupChatId, groupMessageId])
+  @@index([managerChatId, managerMessageId])
+  @@map("finance_request_cards")
+}
+
+model FinanceMessageSeen {
+  messageId String   @id @map("message_id")
+  seenAt    DateTime @default(now()) @map("seen_at") @db.Timestamptz(3)
+
+  @@map("finance_messages_seen")
+}
+
+// Bot messages the manager can reply to: telegram does not nest `reply_to_message`, so the request must be remembered.
+model FinanceChatMessage {
+  chatId    BigInt   @map("chat_id")
+  messageId Int      @map("message_id")
+  requestId String   @map("request_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([chatId, messageId])
+  @@map("finance_chat_messages")
 }

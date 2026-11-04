@@ -134,6 +134,17 @@ describe('AdminUpdate', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
+    it('should fall through when the admin has no open prompt, so other handlers see the reply', async () => {
+      managers.findActiveByTelegramId.mockResolvedValue({ role: ManagerRole.ADMIN });
+      flow.answerAttachPrompt.mockResolvedValue(null);
+      flow.answerRefundPrompt.mockResolvedValue(null);
+      const next = jest.fn();
+
+      await update.answer(replyCtx() as never, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
     it('should fall through for a manager who is not an admin', async () => {
       managers.findActiveByTelegramId.mockResolvedValue({ role: ManagerRole.MANAGER });
       const next = jest.fn();
