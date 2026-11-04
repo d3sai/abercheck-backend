@@ -70,6 +70,25 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...valid, WEB_JWT_SECRET: 'short' })).toThrow(/WEB_JWT_SECRET/);
   });
 
+  describe('MINI_APP_URL', () => {
+    it('should be optional and treat blank as unset', () => {
+      expect(validateEnv(valid).MINI_APP_URL).toBeUndefined();
+      expect(validateEnv({ ...valid, MINI_APP_URL: '  ' }).MINI_APP_URL).toBeUndefined();
+    });
+
+    it('should accept an https URL', () => {
+      const url = 'https://cabinet.example.ua/tg/request';
+      expect(validateEnv({ ...valid, MINI_APP_URL: url }).MINI_APP_URL).toBe(url);
+    });
+
+    it.each(['http://cabinet.example.ua/tg', 'ftp://x.ua', 'cabinet.example.ua/tg', 'not a url'])(
+      'should reject %s',
+      (url) => {
+        expect(() => validateEnv({ ...valid, MINI_APP_URL: url })).toThrow(/MINI_APP_URL/);
+      },
+    );
+  });
+
   describe('finance sync', () => {
     const token = 't'.repeat(16);
     const finance = {

@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { type Manager, OrderType } from '../../../generated/prisma/client';
+import type { Manager } from '../../../generated/prisma/client';
 import { OrdersService } from '../../orders/orders.service';
 import { RequisitesService } from '../../requisites/requisites.service';
 import type { BotReply } from '../core/bot-reply';
 import { TelegramSender } from '../core/telegram-sender';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
+import { createMinusOrder } from './draft-orders';
 import { DraftModeStore } from './draft-mode.store';
 import {
   adminMinusMessage,
@@ -77,31 +78,12 @@ export class MinusClosingDraftService {
       return { html: '⚠️ Немає даних для відправки. Надішліть повідомлення ще раз.' };
     }
     const { plan } = draft;
-    const order = await this.orders.create(
-      manager.id,
-      {
-        orderType: OrderType.MINUS_CLOSING,
-        clientName: plan.clientName,
-        amountDue: plan.total.toFixed(2),
-        currency: plan.currency,
-        exchangeRate: plan.rate ?? undefined,
-        comment: plan.comment ?? undefined,
-        paidAt: plan.paidAt ?? undefined,
-        ourFop: plan.ourFop ?? undefined,
-        period: plan.period ?? undefined,
-        sheetUrl: plan.sheetUrl ?? undefined,
-      },
-      { notify: false },
+    const { order, added } = await createMinusOrder(
+      { orders: this.orders, requisites: this.requisites },
+      manager,
+      plan,
+      () => this.drafts.disarm(manager.telegramId),
     );
-    this.drafts.disarm(manager.telegramId);
-
-    const added =
-      plan.requisiteLines.length > 0
-        ? await this.requisites.addMany(order.id, plan.requisiteLines, {
-            telegramId: manager.telegramId,
-            name: manager.name,
-          })
-        : [];
     const files = this.pendingFiles.take(manager.telegramId);
     const notice = adminMinusMessage(order, manager.name, added);
     if (files.length > 0) {

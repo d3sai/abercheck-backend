@@ -6,7 +6,7 @@ import type { Manager } from '../../../generated/prisma/client';
 import { ManagersService } from '../../managers/managers.service';
 import { HELP, NOT_A_MANAGER, newManagerNotice, startReply } from '../access/access.messages';
 import { ADMIN_HELP } from '../admin/admin.update';
-import { MENU_LABEL } from './menu';
+import { MENU_LABEL, NEW_REQUEST_LABEL } from './menu';
 import { DeleteAction, OrderDeleteService } from '../orders-list/order-delete.service';
 import { OrderListService } from '../orders-list/order-list.service';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
@@ -61,6 +61,10 @@ export class BotUpdate implements OnApplicationBootstrap {
         { command: 'help', description: 'Команди адміністратора' },
       ],
       { type: 'chat', chat_id: this.sender.adminChatId },
+    );
+    // Always set: the menu button is stored by Telegram, so unsetting MINI_APP_URL must reset it.
+    await this.sender.setDefaultMenuButton(
+      this.sender.miniAppUrl ? { text: NEW_REQUEST_LABEL, url: this.sender.miniAppUrl } : null,
     );
   }
 

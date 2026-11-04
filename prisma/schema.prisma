@@ -222,23 +222,45 @@ model TelegramLoginHash {
 }
 
 model FinanceRequestCard {
-  requestId        String   @id @map("request_id")
+  requestId        String    @id @map("request_id")
   number           String
-  managerId        Int      @map("manager_id")
-  managerChatId    BigInt   @map("manager_chat_id")
-  managerMessageId Int?     @map("manager_message_id")
-  groupChatId      BigInt   @map("group_chat_id")
-  groupMessageId   Int      @map("group_message_id")
-  pendingRate      String?  @map("pending_rate")
-  notifiedStatus   String?  @map("notified_status")
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  managerId        Int       @map("manager_id")
+  managerChatId    BigInt    @map("manager_chat_id")
+  managerMessageId Int?      @map("manager_message_id")
+  groupChatId      BigInt    @map("group_chat_id")
+  groupMessageId   Int       @map("group_message_id")
+  pendingRate      String?   @map("pending_rate")
+  notifiedStatus   String?   @map("notified_status")
+  // Set atomically when the manager completes the request; orderIds are the orders it created.
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz(3)
+  orderIds         Int[]     @default([]) @map("order_ids")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  manager Manager @relation(fields: [managerId], references: [id])
+  manager Manager              @relation(fields: [managerId], references: [id])
+  files   FinanceRequestFile[]
 
   @@unique([groupChatId, groupMessageId])
   @@index([managerChatId, managerMessageId])
   @@map("finance_request_cards")
+}
+
+// A receipt the manager sent in the bot chat before completing the request; it is attached to the
+// created order at completion and the row is deleted.
+model FinanceRequestFile {
+  id        Int      @id @default(autoincrement())
+  requestId String   @map("request_id")
+  fileId    String   @map("file_id")
+  filename  String
+  mimeType  String   @map("mime_type")
+  size      Int
+  kind      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  request FinanceRequestCard @relation(fields: [requestId], references: [requestId], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("finance_request_files")
 }
 
 model FinanceMessageSeen {

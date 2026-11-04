@@ -13,6 +13,7 @@ describe('RequestCardsRepository', () => {
   };
   const financeMessageSeen = { create: jest.fn(), deleteMany: jest.fn() };
   const financeChatMessage = { upsert: jest.fn(), findUnique: jest.fn() };
+  const financeRequestFile = { create: jest.fn(), findMany: jest.fn(), deleteMany: jest.fn() };
   let repository: RequestCardsRepository;
 
   beforeEach(async () => {
@@ -21,7 +22,12 @@ describe('RequestCardsRepository', () => {
         RequestCardsRepository,
         {
           provide: PrismaService,
-          useValue: { financeRequestCard, financeMessageSeen, financeChatMessage },
+          useValue: {
+            financeRequestCard,
+            financeMessageSeen,
+            financeChatMessage,
+            financeRequestFile,
+          },
         },
       ],
     }).compile();
@@ -155,6 +161,36 @@ describe('RequestCardsRepository', () => {
     });
   });
 
+  describe('completion', () => {
+    it('should claim a completion only while completedAt is null', async () => {
+      const now = new Date('2026-11-04T10:00:00Z');
+      financeRequestCard.updateMany.mockResolvedValueOnce({ count: 1 });
+      financeRequestCard.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(repository.claimCompletion('r1', now)).resolves.toBe(true);
+      await expect(repository.claimCompletion('r1', now)).resolves.toBe(false);
+
+      expect(financeRequestCard.updateMany).toHaveBeenCalledWith({
+        where: { requestId: 'r1', completedAt: null },
+        data: { completedAt: now },
+      });
+    });
+
+    it('should release a claim and store the order ids', async () => {
+      await repository.releaseCompletion('r1');
+      await repository.setOrderIds('r1', [3, 4]);
+
+      expect(financeRequestCard.updateMany).toHaveBeenCalledWith({
+        where: { requestId: 'r1' },
+        data: { completedAt: null },
+      });
+      expect(financeRequestCard.update).toHaveBeenCalledWith({
+        where: { requestId: 'r1' },
+        data: { orderIds: [3, 4] },
+      });
+    });
+  });
+
   describe('chat messages', () => {
     it('should remember and look up the request of a bot message', async () => {
       financeChatMessage.findUnique.mockResolvedValue({ requestId: 'r1' });
@@ -176,6 +212,31 @@ describe('RequestCardsRepository', () => {
       financeChatMessage.findUnique.mockResolvedValue(null);
 
       await expect(repository.requestOfChatMessage(555n, 41)).resolves.toBeNull();
+    });
+  });
+
+  describe('held receipts', () => {
+    const file = {
+      fileId: 'f1',
+      filename: 'photo.jpg',
+      mimeType: 'image/jpeg',
+      size: 10,
+      kind: 'photo' as const,
+    };
+
+    it('should store, list in arrival order and delete held files', async () => {
+      await repository.holdFile('r1', file);
+      await repository.heldFiles('r1');
+      await repository.deleteHeldFiles([1, 2]);
+
+      expect(financeRequestFile.create).toHaveBeenCalledWith({
+        data: { requestId: 'r1', ...file },
+      });
+      expect(financeRequestFile.findMany).toHaveBeenCalledWith({
+        where: { requestId: 'r1' },
+        orderBy: { id: 'asc' },
+      });
+      expect(financeRequestFile.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [1, 2] } } });
     });
   });
 });

@@ -4,10 +4,19 @@ export interface ApiErrorBody {
   statusCode: number;
   code: string;
   message: string;
+  details?: Record<string, unknown>;
 }
 
 export class ApiError extends HttpException {
-  constructor(status: HttpStatus, code: string, message: string) {
-    super({ statusCode: status, code, message } satisfies ApiErrorBody, status);
+  constructor(
+    status: HttpStatus,
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+  ) {
+    super(
+      { statusCode: status, code, message, ...(details && { details }) } satisfies ApiErrorBody,
+      status,
+    );
   }
 }

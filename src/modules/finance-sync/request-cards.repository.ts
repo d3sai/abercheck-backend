@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import type { FinanceRequestCard, Prisma } from '../../generated/prisma/client';
+import type { FinanceRequestCard, FinanceRequestFile, Prisma } from '../../generated/prisma/client';
 import { isUniqueViolation } from '../../common/prisma/prisma-errors';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type { TelegramFileRef } from '../attachments/attachments.service';
 
 export type NewRequestCard = Prisma.FinanceRequestCardUncheckedCreateInput;
 
@@ -47,6 +48,27 @@ export class RequestCardsRepository {
 
   setPendingRate(requestId: string, pendingRate: string | null): Promise<FinanceRequestCard> {
     return this.prisma.financeRequestCard.update({ where: { requestId }, data: { pendingRate } });
+  }
+
+  /** True only for the one caller that completes the request; everyone else must not create orders. */
+  async claimCompletion(requestId: string, now: Date): Promise<boolean> {
+    const { count } = await this.prisma.financeRequestCard.updateMany({
+      where: { requestId, completedAt: null },
+      data: { completedAt: now },
+    });
+    return count > 0;
+  }
+
+  /** Only while no order exists: with orders the claim must stay, or a retry would duplicate them. */
+  async releaseCompletion(requestId: string): Promise<void> {
+    await this.prisma.financeRequestCard.updateMany({
+      where: { requestId },
+      data: { completedAt: null },
+    });
+  }
+
+  setOrderIds(requestId: string, orderIds: number[]): Promise<FinanceRequestCard> {
+    return this.prisma.financeRequestCard.update({ where: { requestId }, data: { orderIds } });
   }
 
   /** True only for the caller that changed the status, so concurrent duplicates notify once. */
@@ -97,5 +119,21 @@ export class RequestCardsRepository {
       where: { chatId_messageId: { chatId, messageId } },
     });
     return row?.requestId ?? null;
+  }
+
+  /** A receipt sent before the request is completed; it waits here for the order. */
+  holdFile(requestId: string, file: TelegramFileRef): Promise<FinanceRequestFile> {
+    return this.prisma.financeRequestFile.create({ data: { requestId, ...file } });
+  }
+
+  heldFiles(requestId: string): Promise<FinanceRequestFile[]> {
+    return this.prisma.financeRequestFile.findMany({
+      where: { requestId },
+      orderBy: { id: 'asc' },
+    });
+  }
+
+  async deleteHeldFiles(ids: number[]): Promise<void> {
+    await this.prisma.financeRequestFile.deleteMany({ where: { id: { in: ids } } });
   }
 }

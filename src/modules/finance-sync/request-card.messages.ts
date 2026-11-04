@@ -35,6 +35,13 @@ const WARNING_TEXT: Partial<Record<RequestWarning, string>> = {
 const warningLines = (codes: RequestWarning[]): string[] =>
   codes.flatMap((code) => (WARNING_TEXT[code] ? [`⚠️ ${WARNING_TEXT[code]}`] : []));
 
+const plural = (count: number): string =>
+  count % 10 === 1 && count % 100 !== 11
+    ? 'замовлення'
+    : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)
+      ? 'замовлення'
+      : 'замовлень';
+
 const money = (value: string): string => formatMoneyIn(new Prisma.Decimal(value), 'UAH');
 const rate = (value: string): string => formatRate(new Prisma.Decimal(value));
 
@@ -115,10 +122,42 @@ export function groupCard(
   };
 }
 
-export function managerCard(view: FinanceRequestView): BotReply {
-  const html = body(view, null).join('\n');
-  return view.status === 'pending'
-    ? { html, buttons: [[button('✖ Скасувати запит', `fc:${view.id}`)]] }
+export interface ManagerCardOptions {
+  /** Set when the Mini App is configured; its buttons are private-chat-only, so never on the group card. */
+  miniAppUrl?: string;
+  /** The card's real state: set once the manager completed the request. */
+  completed?: { orderNumbers: string[] } | false;
+}
+
+const webApp = (text: string, miniAppUrl: string, mode: string, id: string) => {
+  const url = new URL(miniAppUrl);
+  url.searchParams.set('mode', mode);
+  url.searchParams.set('id', id);
+  return { text, web_app: { url: url.toString() } };
+};
+
+const completedLine = (orderNumbers: string[]): string => {
+  const count = orderNumbers.length;
+  if (count === 0) return '✅ Оформлено';
+  return `✅ Оформлено: № ${escapeHtml(orderNumbers.join(', '))}${count > 1 ? ` (${count} ${plural(count)})` : ''}`;
+};
+
+export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions = {}): BotReply {
+  const { miniAppUrl, completed } = opts;
+  const lines = body(view, null);
+  if (completed) return { html: [...lines, '', completedLine(completed.orderNumbers)].join('\n') };
+  const html = lines.join('\n');
+  if (view.status === 'pending') {
+    const cancel = button('✖ Скасувати запит', `fc:${view.id}`);
+    return {
+      html,
+      buttons: [
+        miniAppUrl ? [webApp('✏️ Змінити', miniAppUrl, 'edit', view.id), cancel] : [cancel],
+      ],
+    };
+  }
+  return view.status === 'accepted' && miniAppUrl
+    ? { html, buttons: [[webApp('📎 Додати дату', miniAppUrl, 'complete', view.id)]] }
     : { html };
 }
 

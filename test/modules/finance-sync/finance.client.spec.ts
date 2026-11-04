@@ -73,6 +73,22 @@ describe('FinanceClient', () => {
     });
   });
 
+  it('should post the edit body and unwrap the request', async () => {
+    fetchMock.mockResolvedValue(json(200, { request: { id: 'r1', comment: 'x' } }));
+
+    await expect(
+      client.edit('r1', { requesterTelegramId: 2, comment: 'x', officialDocs: false }),
+    ).resolves.toEqual({ id: 'r1', comment: 'x' });
+
+    const [url, init] = firstCall();
+    expect(url).toBe('http://finance.local/api/v1/internal/requests/r1/edit');
+    expect(JSON.parse(init.body as string)).toEqual({
+      requesterTelegramId: 2,
+      comment: 'x',
+      officialDocs: false,
+    });
+  });
+
   it('should pass requesterTelegramId as a query parameter for fops', async () => {
     const fops = { limitsEnabled: true, limitsStatus: 'ok', project: null, fops: [] };
     fetchMock.mockResolvedValue(json(200, fops));

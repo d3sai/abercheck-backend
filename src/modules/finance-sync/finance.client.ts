@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { optionalNonBlank } from '../../common/config/optional-config';
 import {
   CreateRequestBody,
+  EditRequestBody,
   FinanceApiError,
   FinanceFops,
   FinanceRequestView,
@@ -67,6 +68,10 @@ export class FinanceClient {
     },
   ): Promise<FinanceRequestView> {
     return (await this.post(id, 'accept', body)).request;
+  }
+
+  async edit(id: string, body: EditRequestBody): Promise<FinanceRequestView> {
+    return (await this.post(id, 'edit', body)).request;
   }
 
   async cancel(

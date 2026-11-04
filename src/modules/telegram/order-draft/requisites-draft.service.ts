@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { type Manager, type Order, OrderType } from '../../../generated/prisma/client';
-import { normalizeBaseNumber } from '../../orders/order-number';
+import type { Manager, Order } from '../../../generated/prisma/client';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
 import { OrdersService } from '../../orders/orders.service';
 import { RequisitesService } from '../../requisites/requisites.service';
@@ -8,11 +7,13 @@ import type { BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
+import { checkExistingNumbers, createRequisitesOrders } from './draft-orders';
 import { OrderCreationFlowService } from './order-creation-flow.service';
 import { PendingFilesStore } from './pending-files.store';
 import { type RequisitesDraft, RequisitesDraftStore } from './requisites-draft.store';
 import {
   adminRequisitesMessage,
+  existingNumberReply,
   requisitesCreatedReply,
   requisitesErrors,
   requisitesHint,
@@ -98,42 +99,18 @@ export class RequisitesDraftService {
     }
 
     let { plan } = parsed;
-    let addPart = false;
-    let skipped: string[] = [];
 
-    if (plan.kind === 'single') {
-      const number = plan.items[0]!.number;
-      const existing = await this.orders.findWithBalance(number);
-      if (existing) {
-        if (existing.order.orderNumber !== normalizeBaseNumber(number)) {
-          return {
-            html: `⚠️ Номер ${escapeHtml(number)} уже є в системі у складі № ${escapeHtml(existing.order.orderNumber)} — додати до нього не можна.`,
-          };
-        }
-        if (existing.order.currency !== plan.currency) {
-          return {
-            html: `⚠️ Номер ${escapeHtml(number)} уже є в системі в іншій валюті — частину в іншій валюті додати не можна.`,
-          };
-        }
-        addPart = true;
+    const check = await checkExistingNumbers(this.orders, plan);
+    if (!check.ok) {
+      return existingNumberReply(check);
+    }
+    const { addPart, skipped } = check;
+    if (skipped.length > 0) {
+      const rest = parseRequisites(withoutNumbers(original, skipped));
+      if (!rest.ok) {
+        return requisitesErrors(rest.errors);
       }
-    } else if (plan.kind === 'group') {
-      const found = await Promise.all(
-        plan.items.map((item) => this.orders.findWithBalance(item.number)),
-      );
-      skipped = plan.items.filter((_, index) => found[index]).map((item) => item.number);
-      if (skipped.length === plan.items.length) {
-        return {
-          html: `⚠️ Усі ці номери вже є в системі: ${skipped.join(', ')}.`,
-        };
-      }
-      if (skipped.length > 0) {
-        const rest = parseRequisites(withoutNumbers(original, skipped));
-        if (!rest.ok) {
-          return requisitesErrors(rest.errors);
-        }
-        plan = rest.plan;
-      }
+      plan = rest.plan;
     }
 
     this.drafts.setDraft(manager.telegramId, {
@@ -155,48 +132,12 @@ export class RequisitesDraftService {
   }
 
   private async createOrders(manager: Manager, draft: RequisitesDraft): Promise<Order[]> {
-    const { plan } = draft;
-    const common = {
-      clientName: plan.label,
-      currency: plan.currency,
-      exchangeRate: plan.rate ?? undefined,
-      comment: plan.comment ?? undefined,
-    };
-
-    let orders: Order[];
-    if (plan.kind === 'group') {
-      orders = await this.orders.createGroup(
-        manager.id,
-        plan.items.map((item) => ({
-          orderNumber: item.number,
-          amountDue: item.amount.toFixed(2),
-          clientName: item.fop ?? undefined,
-          exchangeRate: item.rate ?? undefined,
-        })),
-        common,
-      );
-    } else {
-      orders = [
-        await this.orders.create(
-          manager.id,
-          {
-            ...common,
-            orderType: OrderType.REGULAR,
-            orderNumber: plan.items[0]?.number,
-            amountDue: plan.total.toFixed(2),
-          },
-          { notify: false, addPart: draft.addPart },
-        ),
-      ];
-    }
-
-    const added =
-      plan.requisiteLines.length > 0
-        ? await this.requisites.addMany(orders[0]!.id, plan.requisiteLines, {
-            telegramId: manager.telegramId,
-            name: manager.name,
-          })
-        : [];
+    const { orders, added } = await createRequisitesOrders(
+      { orders: this.orders, requisites: this.requisites },
+      manager,
+      draft.plan,
+      draft.addPart,
+    );
 
     const files = this.pendingFiles.take(manager.telegramId);
     const notice = adminRequisitesMessage(orders, manager.name, added, draft.skipped);

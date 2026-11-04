@@ -20,6 +20,7 @@ describe('TelegramSender', () => {
       editMessageText: jest.fn(),
       deleteMessage: jest.fn(),
       setMyCommands: jest.fn(),
+      setChatMenuButton: jest.fn(),
     },
   };
   let env: Partial<EnvironmentVariables>;
@@ -278,6 +279,62 @@ describe('TelegramSender', () => {
       expect(sender.financeEnabled).toBe(false);
       env.FINANCE_API_URL = 'http://finance.local';
       expect(rebuild().financeEnabled).toBe(true);
+    });
+  });
+
+  describe('miniAppUrl', () => {
+    it('should follow MINI_APP_URL only while finance is enabled, treating blank as unset', () => {
+      expect(sender.miniAppUrl).toBeUndefined();
+      env.MINI_APP_URL = 'https://cab.example.ua/tg/request';
+      expect(rebuild().miniAppUrl).toBeUndefined();
+      env.FINANCE_API_URL = 'http://finance.local';
+      expect(rebuild().miniAppUrl).toBe('https://cab.example.ua/tg/request');
+      env.MINI_APP_URL = '  ';
+      expect(rebuild().miniAppUrl).toBeUndefined();
+    });
+
+    it('should never put a web_app button on the reply keyboard', async () => {
+      bot.telegram.sendMessage.mockResolvedValue({});
+      env.FINANCE_API_URL = 'http://finance.local';
+      env.MINI_APP_URL = 'https://cab.example.ua/tg/request';
+
+      await rebuild().send(111, 'text', undefined, true);
+
+      const options = bot.telegram.sendMessage.mock.calls[0]?.[2];
+      expect(JSON.stringify(options?.reply_markup)).toContain('keyboard');
+      expect(JSON.stringify(options?.reply_markup)).not.toContain('web_app');
+    });
+  });
+
+  describe('setDefaultMenuButton', () => {
+    it('should set a web_app menu button for every chat', async () => {
+      await sender.setDefaultMenuButton({
+        text: '📝 Новий запит',
+        url: 'https://cab.example.ua/tg/request',
+      });
+
+      expect(bot.telegram.setChatMenuButton).toHaveBeenCalledWith({
+        menuButton: {
+          type: 'web_app',
+          text: '📝 Новий запит',
+          web_app: { url: 'https://cab.example.ua/tg/request' },
+        },
+      });
+    });
+
+    it('should restore the default commands menu for null', async () => {
+      await sender.setDefaultMenuButton(null);
+
+      expect(bot.telegram.setChatMenuButton).toHaveBeenCalledWith({
+        menuButton: { type: 'default' },
+      });
+    });
+
+    it('should log and swallow a Telegram failure', async () => {
+      bot.telegram.setChatMenuButton.mockRejectedValue(new Error('boom'));
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await expect(sender.setDefaultMenuButton(null)).resolves.toBeUndefined();
     });
   });
 

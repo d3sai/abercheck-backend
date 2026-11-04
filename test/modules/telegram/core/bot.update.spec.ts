@@ -527,3 +527,43 @@ describe('BotUpdate', () => {
     });
   });
 });
+
+describe('BotUpdate bootstrap', () => {
+  const build = (miniAppUrl?: string) => {
+    const sender = {
+      miniAppUrl,
+      adminChatId: ADMIN_CHAT_ID,
+      registerCommands: jest.fn().mockResolvedValue(undefined),
+      setDefaultMenuButton: jest.fn().mockResolvedValue(undefined),
+    };
+    const update = new BotUpdate(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      sender as unknown as TelegramSender,
+    );
+    return { sender, update };
+  };
+
+  it('should make «Новий запит» the default menu button when MINI_APP_URL is set', async () => {
+    const { sender, update } = build('https://cab.example.ua/tg/request');
+
+    await update.onApplicationBootstrap();
+
+    expect(sender.setDefaultMenuButton).toHaveBeenCalledTimes(1);
+    expect(sender.setDefaultMenuButton).toHaveBeenCalledWith({
+      text: '📝 Новий запит',
+      url: 'https://cab.example.ua/tg/request',
+    });
+  });
+
+  it('should reset the menu button to the commands menu without MINI_APP_URL', async () => {
+    const { sender, update } = build();
+
+    await update.onApplicationBootstrap();
+
+    expect(sender.setDefaultMenuButton).toHaveBeenCalledWith(null);
+    expect(sender.registerCommands).toHaveBeenCalledTimes(2);
+  });
+});

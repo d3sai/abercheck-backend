@@ -76,6 +76,15 @@ export interface CreateRequestBody {
   groupMessageId: number;
 }
 
+// Finance cannot clear the rate, and `orders` are locked once the request exists.
+export interface EditRequestBody {
+  requesterTelegramId: number;
+  sum?: number;
+  exchangeRate?: number;
+  comment?: string | null;
+  officialDocs?: boolean;
+}
+
 export interface FinanceEvent {
   type: 'accepted' | 'cancelled' | 'edited' | 'paid' | 'message';
   requestId: string;

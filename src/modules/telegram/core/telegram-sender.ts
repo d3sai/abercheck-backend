@@ -24,6 +24,7 @@ export class TelegramSender {
   private readonly logger = new Logger(TelegramSender.name);
   readonly adminChatId: number;
   readonly financeEnabled: boolean;
+  readonly miniAppUrl: string | undefined;
   private readonly topics: Record<TelegramTopic, number | undefined>;
 
   constructor(
@@ -32,6 +33,7 @@ export class TelegramSender {
   ) {
     this.adminChatId = config.get('TELEGRAM_ADMIN_CHAT_ID', { infer: true });
     this.financeEnabled = optionalNonBlank(config, 'FINANCE_API_URL') !== undefined;
+    this.miniAppUrl = this.financeEnabled ? optionalNonBlank(config, 'MINI_APP_URL') : undefined;
     this.topics = {
       requests: optionalPositiveInt(config, 'TELEGRAM_TOPIC_REQUESTS_ID'),
       payments: optionalPositiveInt(config, 'TELEGRAM_TOPIC_PAYMENTS_ID'),
@@ -141,6 +143,19 @@ export class TelegramSender {
       .catch((error) =>
         this.logger.warn(`Failed to delete admin chat message ${messageId}`, error),
       );
+  }
+
+  /** No `chat_id`: this becomes the default menu button of every private chat; null restores the commands menu. */
+  async setDefaultMenuButton(app: { text: string; url: string } | null): Promise<void> {
+    try {
+      await this.bot.telegram.setChatMenuButton({
+        menuButton: app
+          ? { type: 'web_app', text: app.text, web_app: { url: app.url } }
+          : { type: 'default' },
+      });
+    } catch (error) {
+      this.logger.warn('Failed to set the default menu button', error);
+    }
   }
 
   async registerCommands(commands: BotCommand[], scope: BotCommandScope): Promise<void> {

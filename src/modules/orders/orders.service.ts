@@ -266,6 +266,19 @@ export class OrdersService {
     return this.groupsWithBalance([...new Set(orders.map((order) => order.baseNumber))]);
   }
 
+  /** Order numbers for ids, in the order of `ids`; an id that no longer exists is skipped. */
+  async numbersByIds(ids: number[]): Promise<string[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const found = await this.prisma.order.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, orderNumber: true },
+    });
+    const byId = new Map(found.map((order) => [order.id, order.orderNumber]));
+    return ids.flatMap((id) => byId.get(id) ?? []);
+  }
+
   async list(
     { managerId, statuses }: OrderFilter,
     limit: number,

@@ -5,10 +5,14 @@ import { PrismaService } from '../../../src/common/prisma/prisma.service';
 import { FinanceSyncModule } from '../../../src/modules/finance-sync/finance-sync.module';
 import { FinanceSyncUpdate } from '../../../src/modules/finance-sync/finance-sync.update';
 import type { ManagerActionsService } from '../../../src/modules/finance-sync/manager-actions.service';
+import type { RequestReceiptsService } from '../../../src/modules/finance-sync/request-receipts.service';
 import type { FinancierActionsService } from '../../../src/modules/finance-sync/financier-actions.service';
-import type { RequestCreateService } from '../../../src/modules/finance-sync/request-create.service';
+import { AttachmentsModule } from '../../../src/modules/attachments/attachments.module';
+import { AttachmentsService } from '../../../src/modules/attachments/attachments.service';
 import { ManagersModule } from '../../../src/modules/managers/managers.module';
 import { ManagersService } from '../../../src/modules/managers/managers.service';
+import { OrdersModule } from '../../../src/modules/orders/orders.module';
+import { OrdersService } from '../../../src/modules/orders/orders.service';
 import { TelegramSender } from '../../../src/modules/telegram/core/telegram-sender';
 import { TelegramModule } from '../../../src/modules/telegram/telegram.module';
 
@@ -34,6 +38,18 @@ class ManagersStub {}
 })
 class TelegramStub {}
 
+@Module({
+  providers: [{ provide: AttachmentsService, useValue: {} }],
+  exports: [AttachmentsService],
+})
+class AttachmentsStub {}
+
+@Module({
+  providers: [{ provide: OrdersService, useValue: {} }],
+  exports: [OrdersService],
+})
+class OrdersStub {}
+
 describe('FinanceSyncModule', () => {
   it('should wire every provider, given what TelegramModule and ManagersModule export', async () => {
     const moduleRef = await Test.createTestingModule({ imports: [GlobalStubs, FinanceSyncModule] })
@@ -41,6 +57,10 @@ describe('FinanceSyncModule', () => {
       .useModule(TelegramStub)
       .overrideModule(ManagersModule)
       .useModule(ManagersStub)
+      .overrideModule(AttachmentsModule)
+      .useModule(AttachmentsStub)
+      .overrideModule(OrdersModule)
+      .useModule(OrdersStub)
       .compile();
 
     expect(moduleRef.get(FinanceSyncUpdate)).toBeInstanceOf(FinanceSyncUpdate);
@@ -48,8 +68,6 @@ describe('FinanceSyncModule', () => {
 });
 
 describe('FinanceSyncUpdate', () => {
-  const managers = { findActiveByTelegramId: jest.fn() };
-  const requests = { handle: jest.fn() };
   const actions = {
     pressFop: jest.fn(),
     askRate: jest.fn(),
@@ -57,49 +75,16 @@ describe('FinanceSyncUpdate', () => {
     onText: jest.fn(),
   };
   const managerActions = { cancel: jest.fn(), onText: jest.fn() };
+  const receipts = { onFile: jest.fn() };
   const update = new FinanceSyncUpdate(
-    managers as unknown as ManagersService,
-    requests as unknown as RequestCreateService,
     actions as unknown as FinancierActionsService,
     managerActions as unknown as ManagerActionsService,
+    receipts as unknown as RequestReceiptsService,
   );
-  const ctx = (chatType = 'private') => ({
-    chat: { type: chatType },
-    from: { id: 555 },
-    payload: '0000-070217 4972\nдокументи так',
-    reply: jest.fn(),
-  });
-
   afterEach(() => jest.resetAllMocks());
 
-  it('should hand an active manager’s payload to the service and reply with its answer', async () => {
-    managers.findActiveByTelegramId.mockResolvedValue({ id: 1 });
-    requests.handle.mockResolvedValue({ html: 'ok' });
-    const c = ctx();
-
-    await update.testRequest(c as never);
-
-    expect(requests.handle).toHaveBeenCalledWith({ id: 1 }, c.payload);
-    expect(c.reply).toHaveBeenCalledWith('ok', expect.objectContaining({ parse_mode: 'HTML' }));
-  });
-
-  it('should not reply when the service already sent the card', async () => {
-    managers.findActiveByTelegramId.mockResolvedValue({ id: 1 });
-    requests.handle.mockResolvedValue(null);
-    const c = ctx();
-
-    await update.testRequest(c as never);
-
-    expect(c.reply).not.toHaveBeenCalled();
-  });
-
-  it('should ignore a group chat', async () => {
-    const c = ctx('supergroup');
-
-    await update.testRequest(c as never);
-
-    expect(managers.findActiveByTelegramId).not.toHaveBeenCalled();
-    expect(requests.handle).not.toHaveBeenCalled();
+  it('should no longer register the /testrequest command', () => {
+    expect(Object.getOwnPropertyNames(FinanceSyncUpdate.prototype)).not.toContain('testRequest');
   });
 
   it('should delegate group and manager actions', async () => {
@@ -138,6 +123,60 @@ describe('FinanceSyncUpdate', () => {
 
       expect(managerActions.onText).not.toHaveBeenCalled();
       expect(next).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('files', () => {
+    it('should hand a document to the receipts service as a TelegramFileRef', async () => {
+      const c = {
+        message: {
+          document: {
+            file_id: 'd1',
+            file_name: 'a.pdf',
+            mime_type: 'application/pdf',
+            file_size: 7,
+          },
+        },
+      };
+      const next = jest.fn();
+
+      await update.document(c as never, next);
+
+      expect(receipts.onFile).toHaveBeenCalledWith(
+        c,
+        { fileId: 'd1', filename: 'a.pdf', mimeType: 'application/pdf', size: 7, kind: 'document' },
+        next,
+      );
+    });
+
+    it('should hand the largest photo size to the receipts service', async () => {
+      const c = {
+        message: {
+          photo: [
+            { file_id: 's', file_size: 1 },
+            { file_id: 'l', file_size: 9 },
+          ],
+        },
+      };
+      const next = jest.fn();
+
+      await update.photo(c as never, next);
+
+      expect(receipts.onFile).toHaveBeenCalledWith(
+        c,
+        { fileId: 'l', filename: 'photo.jpg', mimeType: 'image/jpeg', size: 9, kind: 'photo' },
+        next,
+      );
+    });
+
+    it('should call next when the update carries no file', async () => {
+      const next = jest.fn();
+
+      await update.document({ message: { text: 'x' } } as never, next);
+      await update.photo({ message: { text: 'x' } } as never, next);
+
+      expect(next).toHaveBeenCalledTimes(2);
+      expect(receipts.onFile).not.toHaveBeenCalled();
     });
   });
 });

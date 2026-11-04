@@ -1,0 +1,117 @@
+import { Injectable, Logger } from '@nestjs/common';
+import type { Context } from 'telegraf';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import type { Manager, Order } from '../../generated/prisma/client';
+import { AttachmentStorageError } from '../attachments/attachments.errors';
+import {
+  ALLOWED_MIME_TYPES,
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILES_PER_UPLOAD,
+} from '../attachments/attachments.constants';
+import { AttachmentsService, type TelegramFileRef } from '../attachments/attachments.service';
+import { ManagersService } from '../managers/managers.service';
+import type { BotReply } from '../telegram/core/bot-reply';
+import { isPrivate, reply } from '../telegram/core/telegram-context';
+import { RequestCardsRepository } from './request-cards.repository';
+
+type Next = () => Promise<void>;
+
+const NO_ORDER = 'Запит оформлено, але бот не знайшов замовлення — додайте квитанцію в кабінеті';
+
+/** Receipts a manager sends in the bot chat as a reply to their request. */
+@Injectable()
+export class RequestReceiptsService {
+  private readonly logger = new Logger(RequestReceiptsService.name);
+
+  constructor(
+    private readonly cards: RequestCardsRepository,
+    private readonly prisma: PrismaService,
+    private readonly attachments: AttachmentsService,
+    private readonly managers: ManagersService,
+  ) {}
+
+  /** Handles only files replied to a card or a relayed message of the sender's own request. */
+  async onFile(ctx: Context, file: TelegramFileRef, next: Next): Promise<void> {
+    const message = ctx.message;
+    const target = message && 'reply_to_message' in message ? message.reply_to_message : undefined;
+    if (!target || !ctx.from || !isPrivate(ctx)) return next();
+
+    const chatId = BigInt(ctx.chat!.id);
+    const requestId =
+      (await this.cards.byManagerMessage(chatId, target.message_id))?.requestId ??
+      (await this.cards.requestOfChatMessage(chatId, target.message_id));
+    if (!requestId) return next();
+
+    const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from.id));
+    if (!manager || (await this.cards.byRequestId(requestId))?.managerId !== manager.id) {
+      return next();
+    }
+    await reply(ctx, await this.receive(manager, requestId, file), message!.message_id);
+  }
+
+  async receive(manager: Manager, requestId: string, file: TelegramFileRef): Promise<BotReply> {
+    if (!ALLOWED_MIME_TYPES.has(file.mimeType)) {
+      return { html: '⚠️ Такий тип файлу не підтримується. Додайте фото, PDF або зображення.' };
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return { html: '⚠️ Файл завеликий. Максимум 10 МБ.' };
+    }
+
+    // read fresh: completion may have finished while the file travelled
+    const card = await this.cards.byRequestId(requestId);
+    if (!card?.completedAt) {
+      // Telegram's media group takes 10 items, so more held files could never be attached
+      if ((await this.cards.heldFiles(requestId)).length >= MAX_FILES_PER_UPLOAD) {
+        return { html: `⚠️ Максимум ${MAX_FILES_PER_UPLOAD} файлів на замовлення.` };
+      }
+      await this.cards.holdFile(requestId, file);
+      return { html: '📎 Квитанцію збережено — додамо до замовлення після оформлення' };
+    }
+
+    // a crash between creating the orders and storing their ids leaves completedAt set with no ids
+    const orderId = card.orderIds[0];
+    const order =
+      orderId === undefined ? null : await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) {
+      this.logger.error(
+        `Request ${requestId} is completed but has no order to attach a receipt to`,
+      );
+      return { html: NO_ORDER };
+    }
+    try {
+      await this.attach(manager, order, [file]);
+    } catch (error) {
+      if (!(error instanceof AttachmentStorageError)) throw error;
+      return { html: '⚠️ Не вдалося зберегти квитанцію, спробуйте ще раз' };
+    }
+    return { html: `📎 Квитанцію додано до № ${order.orderNumber}` };
+  }
+
+  /** At completion: put the receipts sent earlier on the order. The rows go only after they are attached. */
+  async attachHeld(manager: Manager, requestId: string, order: Order): Promise<void> {
+    const held = await this.cards.heldFiles(requestId);
+    if (held.length === 0) return;
+    await this.attach(
+      manager,
+      order,
+      held.map(({ fileId, filename, mimeType, size, kind }) => ({
+        fileId,
+        filename,
+        mimeType,
+        size,
+        kind: kind as TelegramFileRef['kind'],
+      })),
+    );
+    await this.cards.deleteHeldFiles(held.map(({ id }) => id));
+  }
+
+  // group orders attach their files the same way: kept in the storage chat even if the order is deleted
+  private attach(manager: Manager, order: Order, files: TelegramFileRef[]): Promise<unknown> {
+    return this.attachments.saveFromTelegram(
+      order,
+      files,
+      { telegramId: manager.telegramId, name: manager.name },
+      true,
+    );
+  }
+}

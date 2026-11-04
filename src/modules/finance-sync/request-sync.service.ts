@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { FinanceRequestCard } from '../../generated/prisma/client';
 import { isRecordNotFound } from '../../common/prisma/prisma-errors';
 import { ManagersService } from '../managers/managers.service';
+import { OrdersService } from '../orders/orders.service';
 import { escapeHtml } from '../telegram/core/format';
 import { TelegramSender } from '../telegram/core/telegram-sender';
 import { FinanceClient } from './finance.client';
@@ -23,6 +24,7 @@ export class RequestSyncService {
     private readonly finance: FinanceClient,
     private readonly cards: RequestCardsRepository,
     private readonly managers: ManagersService,
+    private readonly orders: OrdersService,
   ) {}
 
   /** The webhook is only a hint: redraw both cards from the re-read view, then relay what is new. */
@@ -52,7 +54,12 @@ export class RequestSyncService {
 
   async renderManager(card: FinanceRequestCard, view: FinanceRequestView): Promise<void> {
     if (card.managerMessageId === null) return;
-    const { html, buttons } = managerCard(view);
+    const { html, buttons } = managerCard(view, {
+      miniAppUrl: this.sender.miniAppUrl,
+      completed: card.completedAt
+        ? { orderNumbers: await this.orders.numbersByIds(card.orderIds) }
+        : false,
+    });
     await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
   }
 

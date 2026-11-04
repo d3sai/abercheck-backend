@@ -7,6 +7,7 @@ import {
 } from '../../../src/modules/finance-sync/finance.types';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import { RequestSyncService } from '../../../src/modules/finance-sync/request-sync.service';
+import type { OrdersService } from '../../../src/modules/orders/orders.service';
 import type { ManagersService } from '../../../src/modules/managers/managers.service';
 import type { TelegramSender } from '../../../src/modules/telegram/core/telegram-sender';
 
@@ -37,7 +38,13 @@ const view = (patch: Partial<FinanceRequestView> = {}) =>
   }) as unknown as FinanceRequestView;
 
 describe('RequestSyncService', () => {
-  const sender = { send: jest.fn(), editMessage: jest.fn(), sendDocument: jest.fn() };
+  const sender = {
+    miniAppUrl: undefined as string | undefined,
+    send: jest.fn(),
+    editMessage: jest.fn(),
+    sendDocument: jest.fn(),
+  };
+  const orders = { numbersByIds: jest.fn() };
   const finance = { fops: jest.fn(), get: jest.fn(), file: jest.fn() };
   const cards = {
     byRequestId: jest.fn(),
@@ -54,6 +61,7 @@ describe('RequestSyncService', () => {
     finance as unknown as FinanceClient,
     cards as unknown as RequestCardsRepository,
     managers as unknown as ManagersService,
+    orders as unknown as OrdersService,
   );
 
   beforeEach(() => {
@@ -66,6 +74,7 @@ describe('RequestSyncService', () => {
     sender.send.mockResolvedValue(77);
     sender.sendDocument.mockResolvedValue(78);
     managers.findById.mockResolvedValue({ name: 'Уляна' });
+    sender.miniAppUrl = undefined;
   });
   afterEach(() => jest.resetAllMocks());
 
@@ -135,6 +144,68 @@ describe('RequestSyncService', () => {
       expect(sender.send).toHaveBeenCalledWith(555n, '✅ Запит #42 прийнято', undefined, false, {
         replyTo: 31,
       });
+    });
+  });
+
+  describe('renderManager', () => {
+    const URL_ = 'https://cab.example.ua/tg/request';
+    type Edit = [bigint, number, string, { text: string }[][] | undefined];
+    const edit = (index = 0) => sender.editMessage.mock.calls[index] as Edit;
+
+    it('should add the Mini App buttons to a pending card when the URL is set', async () => {
+      sender.miniAppUrl = URL_;
+
+      await service.renderManager(card, view());
+
+      const buttons = edit()[3]!;
+      expect(buttons[0]!.map((b) => b.text)).toEqual(['✏️ Змінити', '✖ Скасувати запит']);
+      expect(orders.numbersByIds).not.toHaveBeenCalled();
+    });
+
+    it('should offer «Додати дату» on an accepted card that is not completed', async () => {
+      sender.miniAppUrl = URL_;
+
+      await service.renderManager(card, view({ status: 'accepted' }));
+
+      const buttons = edit()[3]!;
+      expect(buttons.flat().map((b) => b.text)).toEqual(['📎 Додати дату']);
+    });
+
+    it('should keep the «Оформлено» line and drop the buttons for a completed card', async () => {
+      sender.miniAppUrl = URL_;
+      orders.numbersByIds.mockResolvedValue(['0000-1', '0000-2']);
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), orderIds: [10, 11] },
+        view({ status: 'accepted' }),
+      );
+
+      expect(orders.numbersByIds).toHaveBeenCalledWith([10, 11]);
+      const [, , html, buttons] = edit();
+      expect(html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
+      expect(buttons).toBeUndefined();
+    });
+
+    it('should draw a completed card with no orders without a number', async () => {
+      orders.numbersByIds.mockResolvedValue([]);
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), orderIds: [] },
+        view({ status: 'accepted' }),
+      );
+
+      expect(edit()[2]).toMatch(/✅ Оформлено$/);
+    });
+
+    it('should show the line again on a webhook redraw', async () => {
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      cards.byRequestId.mockResolvedValue({ ...card, completedAt: new Date(), orderIds: [10] });
+      finance.get.mockResolvedValue({ request: view({ status: 'accepted' }) });
+
+      await service.handle({ type: 'accepted', requestId: 'req1', request: view() });
+
+      const managerEdit = [edit(0), edit(1)].find(([chat]) => chat === 555n)!;
+      expect(managerEdit[2]).toContain('✅ Оформлено: № 0000-1');
     });
   });
 

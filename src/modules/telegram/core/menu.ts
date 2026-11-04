@@ -11,6 +11,10 @@ export const MENU_LABEL = {
   Cancel: '❌ Скасувати',
 } as const;
 
+// Opens the Mini App from the chat menu button. Not a keyboard button: Telegram gives a Mini App
+// opened from a keyboard button no initData, so the form could not authenticate.
+export const NEW_REQUEST_LABEL = '📝 Новий запит';
+
 export const mainMenuKeyboard: ReplyKeyboardMarkup = {
   keyboard: [
     [{ text: MENU_LABEL.NewOrder }, { text: MENU_LABEL.NewMinus }],

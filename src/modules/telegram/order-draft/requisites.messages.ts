@@ -9,6 +9,7 @@ import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
 import { MENU_LABEL } from '../core/menu';
 import { formatRate } from '../notifications/order-templates';
+import type { NumberCheck } from './draft-orders';
 import type { RequisitesPlan } from './requisites.parser';
 
 export const RequisitesAction = {
@@ -230,4 +231,20 @@ export function adminRequisitesMessage(
     `Менеджер: ${escapeHtml(managerName)}`,
     `Створено: ${formatKyivDateTime(first.createdAt)}`,
   ].join('\n');
+}
+
+/** The bot's answer when a number of the plan already exists and the plan cannot go on. */
+export function existingNumberReply(check: Exclude<NumberCheck, { ok: true }>): BotReply {
+  switch (check.reason) {
+    case 'in-group':
+      return {
+        html: `⚠️ Номер ${escapeHtml(check.number)} уже є в системі у складі № ${escapeHtml(check.groupNumber)} — додати до нього не можна.`,
+      };
+    case 'other-currency':
+      return {
+        html: `⚠️ Номер ${escapeHtml(check.number)} уже є в системі в іншій валюті — частину в іншій валюті додати не можна.`,
+      };
+    case 'all-taken':
+      return { html: `⚠️ Усі ці номери вже є в системі: ${check.skipped.join(', ')}.` };
+  }
 }

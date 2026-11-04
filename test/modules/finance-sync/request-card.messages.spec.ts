@@ -225,6 +225,81 @@ describe('managerCard', () => {
   });
 });
 
+describe('managerCard with the Mini App', () => {
+  const miniAppUrl = 'https://cab.example.ua/tg/request';
+  const accepted = () => view({ status: 'accepted', responderName: 'Фін', fopLabel: 'А' });
+  const all = (reply: { buttons?: unknown[][] }) => rows(reply);
+
+  it('pending: «Змінити» opens the edit form next to «Скасувати запит»', () => {
+    const reply = managerCard(view(), { miniAppUrl });
+
+    expect(all(reply)).toEqual([
+      [
+        { text: '✏️ Змінити', web_app: { url: `${miniAppUrl}?mode=edit&id=${ID}` } },
+        { text: '✖ Скасувати запит', callback_data: `fc:${ID}` },
+      ],
+    ]);
+  });
+
+  it('accepted and not completed: «Додати дату» opens the completion form', () => {
+    const reply = managerCard(accepted(), { miniAppUrl, completed: false });
+
+    expect(all(reply)).toEqual([
+      [{ text: '📎 Додати дату', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } }],
+    ]);
+  });
+
+  it('encodes the request id and keeps the query already on the URL', () => {
+    const reply = managerCard(view({ id: 'a b&c' }), { miniAppUrl: `${miniAppUrl}?lang=uk` });
+
+    const url = (flat(reply)[0] as unknown as { web_app: { url: string } }).web_app.url;
+    expect(new URL(url).searchParams.get('id')).toBe('a b&c');
+    expect(new URL(url).searchParams.get('lang')).toBe('uk');
+    expect(new URL(url).searchParams.get('mode')).toBe('edit');
+  });
+
+  it('completed: the «Оформлено» line and none of the three buttons', () => {
+    const reply = managerCard(accepted(), {
+      miniAppUrl,
+      completed: { orderNumbers: ['0000-1', '0000-2'] },
+    });
+
+    expect(reply.buttons ?? []).toEqual([]);
+    expect(reply.html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
+  });
+
+  it('completed: one order has no count; no orders has no number', () => {
+    const one = managerCard(accepted(), { completed: { orderNumbers: ['0000-1'] } });
+    const none = managerCard(accepted(), { completed: { orderNumbers: [] } });
+
+    expect(one.html).toContain('✅ Оформлено: № 0000-1');
+    expect(one.html).not.toContain('(1');
+    expect(none.html.split('\n').at(-1)).toBe('✅ Оформлено');
+  });
+
+  it('completed never shows edit or cancel, even for a pending view', () => {
+    const reply = managerCard(view(), { miniAppUrl, completed: { orderNumbers: [] } });
+
+    expect(reply.buttons ?? []).toEqual([]);
+  });
+
+  it('cancelled: no buttons', () => {
+    expect(managerCard(view({ status: 'cancelled' }), { miniAppUrl }).buttons ?? []).toEqual([]);
+  });
+
+  it('without the URL: the cancel button only and no «Додати дату»', () => {
+    expect(flat(managerCard(view(), {}))).toEqual([
+      { text: '✖ Скасувати запит', callback_data: `fc:${ID}` },
+    ]);
+    expect(managerCard(accepted(), { completed: false }).buttons ?? []).toEqual([]);
+  });
+
+  it('groupCard never carries a web_app button', () => {
+    const json = JSON.stringify(groupCard(view(), fops(), null));
+    expect(json).not.toContain('web_app');
+  });
+});
+
 describe('callback data', () => {
   it('every callback fits 64 bytes and matches its pattern', () => {
     const all = [...flat(groupCard(view(), fops(), null)), ...flat(managerCard(view()))].map(

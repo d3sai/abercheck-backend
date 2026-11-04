@@ -546,6 +546,31 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('numbersByIds', () => {
+    it('should return the order numbers in the order of the given ids', async () => {
+      order.findMany.mockResolvedValue([
+        { id: 1, orderNumber: 'A-1' },
+        { id: 2, orderNumber: 'A-1(1)' },
+        { id: 3, orderNumber: 'B-2' },
+      ]);
+
+      await expect(service.numbersByIds([3, 1, 2])).resolves.toEqual(['B-2', 'A-1', 'A-1(1)']);
+      expect(order.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [3, 1, 2] } },
+        select: { id: true, orderNumber: true },
+      });
+    });
+
+    it('should skip an id that no longer exists and query nothing for an empty list', async () => {
+      order.findMany.mockResolvedValue([{ id: 1, orderNumber: 'A-1' }]);
+
+      await expect(service.numbersByIds([2, 1])).resolves.toEqual(['A-1']);
+      order.findMany.mockClear();
+      await expect(service.numbersByIds([])).resolves.toEqual([]);
+      expect(order.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findUnpaid', () => {
     const unpaidWhere = { status: { in: ['AWAITING_PAYMENT', 'PARTIALLY_PAID', 'UNDERPAID'] } };
 

@@ -88,6 +88,12 @@ export class EnvironmentVariables {
   @MinLength(16)
   FINANCE_WEBHOOK_TOKEN?: string;
 
+  // The Mini App request form (Telegram opens web apps over https only); unset hides its buttons.
+  @Transform(blankToUndefined)
+  @IsOptional()
+  @IsUrl({ require_tld: false, require_protocol: true, protocols: ['https'] })
+  MINI_APP_URL?: string;
+
   // Forum topics (message_thread_id) of the admin group; unset means the plain chat.
   @Transform(topicId)
   @IsOptional()
