@@ -19,6 +19,8 @@ export interface CashPlan {
   rate: string | null;
   paidAt: Date | null;
   handedBy: string | null;
+  /** «З відсотком» / «Без відсотка»; null when the line is missing or left as the template's «з відсотком чи без». */
+  withPercent: boolean | null;
   warnings: string[];
 }
 
@@ -26,7 +28,8 @@ export type CashResult = { ok: true; plan: CashPlan } | { ok: false; errors: str
 
 type Label = 'number' | 'date' | 'amount' | 'rate' | 'handedBy';
 
-const HEADER = /^оплата\s+готівкою\s*[:\-–—]?\s*$/iu;
+const HEADER = /^(?:оплата\s+готівкою|готівка)\s*[:\-–—]?\s*$/iu;
+const PERCENT = /^(?:(з)|без)\s+(?:урахуванням\s+)?(?:відсотк\p{L}*|%)/iu;
 const LABELS: [Label, RegExp][] = [
   ['number', /^(?:замовлення|номер)(?!\p{L})\s*[:\-–—]?\s*(.*)$/iu],
   ['date', /^дата(?:\s+(?:та|і)\s+час)?(?!\p{L})\s*[:\-–—]?\s*(.*)$/iu],
@@ -49,6 +52,7 @@ export function parseCash(raw: string): CashResult {
   let rate: string | null = null;
   let date: string | null = null;
   const handedBy: string[] = [];
+  let withPercent: boolean | null = null;
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -66,6 +70,12 @@ export function parseCash(raw: string): CashResult {
   for (const original of unitAfterAmount(raw).split(/\r?\n/)) {
     const line = original.replace(/\s+/g, ' ').trim();
     if (line === '' || HEADER.test(line) || LABEL_ONLY.test(line)) {
+      continue;
+    }
+    const percent = PERCENT.exec(line);
+    if (percent) {
+      // the template's own «з відсотком чи без» names both, so it says nothing
+      if (!/(?<!\p{L})без(?!\p{L})/iu.test(line) || !percent[1]) withPercent = Boolean(percent[1]);
       continue;
     }
     const labeled = LABELS.map(([label, re]) => [label, re.exec(line)?.[1]?.trim()] as const).find(
@@ -127,6 +137,7 @@ export function parseCash(raw: string): CashResult {
       rate,
       paidAt,
       handedBy: handedBy.length > 0 ? handedBy.join(' ').slice(0, 255) : null,
+      withPercent,
       warnings,
     },
   };

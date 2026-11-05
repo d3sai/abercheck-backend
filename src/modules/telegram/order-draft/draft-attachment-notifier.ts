@@ -13,6 +13,16 @@ export class DraftAttachmentNotifier {
     private readonly prisma: PrismaService,
   ) {}
 
+  /** Keeps the files with the order without telling the admins. */
+  async store(order: Order, manager: Manager, files: TelegramFileRef[]): Promise<void> {
+    await this.attachments.saveFromTelegram(
+      order,
+      files,
+      { telegramId: manager.telegramId, name: manager.name },
+      true,
+    );
+  }
+
   async notify(
     order: Order,
     manager: Manager,

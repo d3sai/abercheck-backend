@@ -1374,6 +1374,21 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
         }),
       );
       expect(reply.html).toContain('Оплату готівкою записано');
+      expect(sender.sendToAdmins).not.toHaveBeenCalled();
+    });
+
+    it('should put «з відсотком» into the comment', async () => {
+      orders.createGroup.mockResolvedValue([createdOrder({ orderNumber: '0000-066498' })]);
+
+      expect((await begin(`${SAMPLE}\nБез відсотка`))?.html).toContain('З відсотком: ні');
+      await service.confirmCash(MANAGER);
+
+      const [, , options] = orders.createGroup.mock.calls[0] as [
+        unknown,
+        unknown,
+        { comment: string },
+      ];
+      expect(options.comment).toContain('з урахуванням %: ні');
     });
 
     it('should only record dollars on an existing dollar number', async () => {

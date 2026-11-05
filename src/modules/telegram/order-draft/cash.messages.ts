@@ -15,6 +15,7 @@ function cashLines(plan: CashPlan, exists: boolean): string[] {
     `Дата: ${plan.paidAt ? formatKyivDateTime(plan.paidAt) : '—'}`,
     `Сума: <b>${money(plan.amount, plan.currency)}</b>`,
     ...(plan.rate ? [`Курс: ${escapeHtml(plan.rate.replace('.', ','))}`] : []),
+    ...(plan.withPercent === null ? [] : [`З відсотком: ${plan.withPercent ? 'так' : 'ні'}`]),
     `Ким передано: ${plan.handedBy ? escapeHtml(plan.handedBy) : '—'}`,
   ];
 }
@@ -25,6 +26,7 @@ export function cashHint(): BotReply {
     'Дата: 01.09.2026 15:20',
     'Сума: 4260 грн',
     'Курс: 44,9',
+    'З відсотком',
     'Ким передано: Христина Павлів передала готівку Христині Вихопень (Саджениці)',
   ].join('\n');
   return {
@@ -60,18 +62,4 @@ export function cashCreatedReply(plan: CashPlan): BotReply {
   return {
     html: `💰 Оплату готівкою записано: № <b>${escapeHtml(plan.number)}</b> · ${money(plan.amount, plan.currency)}`,
   };
-}
-
-export function adminCashMessage(
-  plan: CashPlan,
-  exists: boolean,
-  managerName: string,
-  now = new Date(),
-): string {
-  return [
-    ...cashLines(plan, exists),
-    '',
-    `Менеджер: ${escapeHtml(managerName)}`,
-    `Створено: ${formatKyivDateTime(now)}`,
-  ].join('\n');
 }

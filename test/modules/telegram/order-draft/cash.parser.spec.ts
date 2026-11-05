@@ -29,6 +29,30 @@ describe('parseCash', () => {
     expect(cashPaymentId(plan)).toBe('cash:0000-066498:2026-09-01T12:20:00.000Z:4260.00');
   });
 
+  // The template the managers were given, as written.
+  const TEMPLATE = `Готівка
+Замовлення: 0000-066498
+Сума: 4260 грн
+Курс: 44,9
+З відсотком чим без
+Дата: 01.09.2026 15:20
+Ким передано: Христина Павлів передала готівку Христині Вихопень (Саджениці)`;
+
+  it.each([
+    ['З відсотком', true],
+    ['Без відсотка', false],
+    ['з урахуванням %', true],
+    ['без %', false],
+    ['З відсотком чим без', null],
+  ])('reads «%s» as withPercent %p and keeps it out of «ким передано»', (line, withPercent) => {
+    const result = parseCash(TEMPLATE.replace('З відсотком чим без', line));
+    if (!result.ok) throw new Error(result.errors.join('; '));
+    expect(result.plan.withPercent).toBe(withPercent);
+    expect(result.plan.handedBy).toBe(
+      'Христина Павлів передала готівку Христині Вихопень (Саджениці)',
+    );
+  });
+
   it('skips a heading with nothing after its colon, as pasted by a manager', () => {
     const result = parseCash(`Зразок :\n${SAMPLE}`);
     expect(result.ok && result.plan.handedBy).toBe(

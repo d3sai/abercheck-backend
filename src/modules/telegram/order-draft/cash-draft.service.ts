@@ -3,8 +3,7 @@ import type { Manager, Order } from '../../../generated/prisma/client';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
 import type { BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
-import { TelegramSender } from '../core/telegram-sender';
-import { adminCashMessage, cashCreatedReply, cashHint, cashPreview } from './cash.messages';
+import { cashCreatedReply, cashHint, cashPreview } from './cash.messages';
 import { type CashPlan, cashPaymentId, parseCash } from './cash.parser';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
 import { DraftModeStore } from './draft-mode.store';
@@ -37,7 +36,6 @@ export class CashDraftService {
     private readonly reported: ReportedPaymentService,
     private readonly pendingFiles: PendingFilesStore,
     private readonly drafts: CashDraftStore,
-    private readonly sender: TelegramSender,
     private readonly notifier: DraftAttachmentNotifier,
   ) {}
 
@@ -92,6 +90,7 @@ export class CashDraftService {
       CASH_LABEL,
       ...(plan.handedBy ? [plan.handedBy] : []),
       ...(plan.rate ? [`курс ${plan.rate.replace('.', ',')}`] : []),
+      ...(plan.withPercent === null ? [] : [`з урахуванням %: ${plan.withPercent ? 'так' : 'ні'}`]),
     ].join(' · ');
 
     let fileOrder: Order | undefined;
@@ -119,13 +118,9 @@ export class CashDraftService {
     }
     this.drafts.disarm(manager.telegramId);
 
+    // cash never goes to the financiers: receipts only land in the storage chat
     const files = this.pendingFiles.take(manager.telegramId);
-    const notice = adminCashMessage(plan, exists, manager.name);
-    if (files.length > 0 && fileOrder) {
-      await this.notifier.notify(fileOrder, manager, files, notice);
-    } else {
-      await this.sender.sendToAdmins(notice);
-    }
+    if (files.length > 0 && fileOrder) await this.notifier.store(fileOrder, manager, files);
     return cashCreatedReply(plan);
   }
 
