@@ -421,6 +421,44 @@ describe('parseRequisites', () => {
     });
   });
 
+  describe('an amount on a line of its own, below the payer', () => {
+    // Pasted from a spreadsheet: the payer cell (name, IBAN, time) and the amount cell end up on two lines.
+    const PASTED = `0000-074693 13 029,35 грн
+ФОП Івченко Євгеній Вадимович "IBAN: UA573052990000026005031228837 14:36
+" 13 029,35 грн
+46,6
+05.11.2026
+"IBAN: UA573052990000026005031228837
+IПН/ЄДРПОУ: 3153718452
+Призначення платежу
+Оплата за товар"`;
+
+    it('should take the payer, the IBAN and the time from the line above', () => {
+      const plan = planOf(PASTED);
+
+      expect(plan.rate).toBe('46.6');
+      expect(plan.requisiteLines).toEqual([
+        {
+          payerName: 'ФОП Івченко Євгеній Вадимович',
+          account: 'UA573052990000026005031228837',
+          amount: '13029.35',
+          paidAt: new Date('2026-11-05T12:36:00.000Z'),
+        },
+      ]);
+    });
+
+    it('should not borrow a line that already carries its own amount', () => {
+      const plan = planOf(
+        `0000-074693 300 грн\n05.11.2026\nІваненко Іван 100 грн 10:00\n200 грн 11:00`,
+      );
+
+      expect(plan.requisiteLines.map((line) => line.payerName)).toEqual([
+        'Іваненко Іван',
+        'Не вказано',
+      ]);
+    });
+  });
+
   describe('several numbers need a FOP each', () => {
     it.each([
       ['0000-068772 100 грн ФОП Гук\n0000-068773 50 грн', '0000-068773'],
