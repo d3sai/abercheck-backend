@@ -3,13 +3,27 @@ import {
   type Manager,
   type Order,
   OrderType,
+  type Prisma,
 } from '../../../generated/prisma/client';
 import { normalizeBaseNumber } from '../../orders/order-number';
 import type { OrderWithManager, OrderWithPaid, OrdersService } from '../../orders/orders.service';
-import type { RequisitesService } from '../../requisites/requisites.service';
+import type { RequisiteInput, RequisitesService } from '../../requisites/requisites.service';
 import type { OrderRequisite } from '../../../generated/prisma/client';
-import type { MinusPlan } from './minus-closing.parser';
 import type { RequisitesPlan } from './requisites.parser';
+
+export interface MinusPlan {
+  clientName: string;
+  period: string | null;
+  paidAt: Date | null;
+  currency: Currency;
+  total: Prisma.Decimal;
+  ourFop: string | null;
+  requisiteLines: RequisiteInput[];
+  comment: string | null;
+  rate: string | null;
+  sheetUrl: string | null;
+  warnings: string[];
+}
 
 /** What the bot flows and the Mini App completion share when they register orders. */
 export interface OrderDeps {

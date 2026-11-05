@@ -2,11 +2,8 @@ import { Currency } from '../../../../src/generated/prisma/client';
 import {
   detectCurrency,
   parseExchangeRate,
-  parseFreeform,
   parseMoney,
   parseOrderNumber,
-  parseTemplate,
-  parseText,
 } from '../../../../src/modules/telegram/order-draft/order-draft.parsers';
 
 const value = (result: ReturnType<typeof parseMoney>) => (result.ok ? result.value : null);
@@ -64,15 +61,6 @@ describe('order draft parsers', () => {
     expect(detectCurrency(input)).toBe(expected);
   });
 
-  it('should find the amount line of a freeform message written in dollars', () => {
-    expect(parseFreeform('0000-066717\nЧернявський Владислав\n150 $\nТерміново')).toEqual({
-      orderNumber: '0000-066717',
-      clientName: 'Чернявський Владислав',
-      amountDue: '150 $',
-      comment: 'Терміново',
-    });
-  });
-
   it.each([
     ['44,9', '44.9'],
     ['44,9%', '44.9'],
@@ -81,118 +69,5 @@ describe('order draft parsers', () => {
     ['44,12345', null],
   ])('parseExchangeRate(%p) → %p', (input, expected) => {
     expect(value(parseExchangeRate(input))).toBe(expected);
-  });
-
-  it('should trim text and enforce the length limit', () => {
-    const parse = parseText(5);
-
-    expect(value(parse('  abc  '))).toBe('abc');
-    expect(value(parse('   '))).toBeNull();
-    expect(value(parse('abcdef'))).toBeNull();
-  });
-
-  describe('parseTemplate', () => {
-    const fields = [
-      { field: 'orderNumber', label: 'Номер' },
-      { field: 'clientName', label: 'ФОП' },
-      { field: 'comment', label: 'Коментар' },
-    ];
-
-    it('should map each labelled line to its field', () => {
-      const text = ['Номер: 0000-066717', 'ФОП: Чернявський Владислав', 'Коментар: '].join('\n');
-
-      expect(parseTemplate(text, fields)).toEqual({
-        orderNumber: '0000-066717',
-        clientName: 'Чернявський Владислав',
-        comment: '',
-      });
-    });
-
-    it('should capture a multi-line value up to the next label', () => {
-      const text = ['Номер: 0000-066717', 'Коментар: рядок один', 'рядок два', 'ФОП: Іванов'].join(
-        '\n',
-      );
-
-      expect(parseTemplate(text, fields)).toEqual({
-        orderNumber: '0000-066717',
-        comment: 'рядок один\nрядок два',
-        clientName: 'Іванов',
-      });
-    });
-
-    it('should ignore text before the first label and be case-insensitive', () => {
-      const text = ['щось стороннє', 'номер: 0000-066717'].join('\n');
-
-      expect(parseTemplate(text, fields)).toEqual({ orderNumber: '0000-066717' });
-    });
-
-    it('should return an empty map when no label matches', () => {
-      expect(parseTemplate('просто текст', fields)).toEqual({});
-    });
-  });
-
-  describe('parseFreeform', () => {
-    it('should read number, name, amount, rate and comment by shape, one per line', () => {
-      const text = [
-        '0000-066717',
-        'Чернявський Владислав',
-        '6 158,41 грн',
-        '44,9',
-        'Терміново',
-      ].join('\n');
-
-      expect(parseFreeform(text)).toEqual({
-        orderNumber: '0000-066717',
-        clientName: 'Чернявський Владислав',
-        amountDue: '6 158,41 грн',
-        exchangeRate: '44,9',
-        comment: 'Терміново',
-      });
-    });
-
-    it('should treat a missing order number as a minus-closing order', () => {
-      const text = ['Чернявський Владислав', '6 158,41 грн', '44,9', 'Терміново'].join('\n');
-
-      expect(parseFreeform(text)).toEqual(
-        expect.objectContaining({ clientName: 'Чернявський Владислав', amountDue: '6 158,41 грн' }),
-      );
-      expect(parseFreeform(text)).not.toHaveProperty('orderNumber');
-    });
-
-    it('should work with only the required lines', () => {
-      const text = ['Чернявський Владислав', '6 158,41 грн'].join('\n');
-
-      expect(parseFreeform(text)).toEqual({
-        clientName: 'Чернявський Владислав',
-        amountDue: '6 158,41 грн',
-      });
-    });
-
-    it('should treat a non-numeric line after the amount as the start of the comment', () => {
-      const text = ['Чернявський Владислав', '6 158,41 грн', 'Терміново, дзвонити з ранку'].join(
-        '\n',
-      );
-
-      expect(parseFreeform(text)).toEqual({
-        clientName: 'Чернявський Владислав',
-        amountDue: '6 158,41 грн',
-        comment: 'Терміново, дзвонити з ранку',
-      });
-    });
-
-    it('should join a multi-line name and a multi-line comment', () => {
-      const text = ['ТОВ', 'Ромашка', '6 158,41 грн', 'рядок один', 'рядок два'].join('\n');
-
-      expect(parseFreeform(text)).toEqual({
-        clientName: 'ТОВ Ромашка',
-        amountDue: '6 158,41 грн',
-        comment: 'рядок один\nрядок два',
-      });
-    });
-
-    it('should return null when nothing reads as an amount', () => {
-      expect(parseFreeform(['0000-066717', 'Чернявський Владислав'].join('\n'))).toBeNull();
-      expect(parseFreeform('просто повідомлення без сум')).toBeNull();
-    });
   });
 });

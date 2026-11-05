@@ -385,6 +385,6 @@ describe('BotUpdate bootstrap', () => {
 
     const [commands] = (sender.registerCommands.mock.calls as [{ command: string }[]][])[0]!;
     const names = commands.map(({ command }) => command);
-    expect(names).toEqual(['kit', 'cash', 'foreign', 'list', 'cancel', 'help']);
+    expect(names).toEqual(['kit', 'cash', 'foreign', 'requests', 'list', 'cancel', 'help']);
   });
 });
