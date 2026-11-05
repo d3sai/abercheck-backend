@@ -349,6 +349,7 @@ export function cleanName(line: string): string {
     .replace(TIME, ' ')
     .replace(new RegExp(CARD.source, 'gu'), ' ')
     .replace(new RegExp(IBAN.source, 'gu'), ' ')
+    .replace(/(?<!\p{L})(?:iban|ібан)(?!\p{L})\s*:?/giu, ' ')
     .replace(/["“”«»]/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^[\s\-–—:,.;()]+|[\s\-–—:,;()]+$/g, '');
@@ -419,22 +420,31 @@ export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): Requisi
     return null;
   };
 
+  // A spreadsheet paste can split one payment: the payer cell (name, account, time) on one line,
+  // the amount on the next. A line with only an amount then takes them from the line above.
+  let above: string | null = null;
+
   lines.forEach((line, index) => {
     if (line.kind === 'date') {
       currentDateText = line.text.trim();
+      above = null;
       return;
     }
     if (line.kind !== 'text') {
       return;
     }
-    const trimmed = line.text.trim();
-    if (NOT_A_NAME.test(trimmed.replace(/^["“«\s]+/u, ''))) {
+    const own = line.text.trim();
+    if (NOT_A_NAME.test(own.replace(/^["“«\s]+/u, ''))) {
       return;
     }
-    const amount = paymentAmount(trimmed);
+    const amount = paymentAmount(own);
     if (!amount) {
+      above = own;
       return;
     }
+    const borrowed = above !== null && cleanName(own) === '' ? above : null;
+    above = null;
+    const trimmed = borrowed ? `${borrowed} ${own}` : own;
 
     const ownDate = new RegExp(DATE.source, 'u').exec(trimmed)?.[0];
     const ownTime = new RegExp(TIME.source, 'u').exec(trimmed)?.[0];
@@ -443,7 +453,10 @@ export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): Requisi
     const whenText = [dateText, ownTime].filter(Boolean).join(' ');
     const paidAt = (whenText ? parseDateTime(whenText) : null) ?? fallback ?? new Date();
 
-    const account = findAccount(index);
+    const borrowedAccount = borrowed
+      ? (CARD.exec(borrowed) ?? IBAN.exec(borrowed))?.[0]
+      : undefined;
+    const account = borrowedAccount ?? findAccount(index);
     const cleaned = cleanName(trimmed);
     const payerName =
       (firstAmount(trimmed) ? cleaned : cleaned.replace(TRAILING_BARE_AMOUNT, '')) || 'Не вказано';
