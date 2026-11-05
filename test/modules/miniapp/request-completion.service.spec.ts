@@ -45,6 +45,8 @@ function accepted(kind: RequestKind, patch: Partial<FinanceRequestView> = {}): F
     status: 'accepted',
     kind,
     sum: '1000.00',
+    sumUsd: null,
+    cashKind: null,
     orderNumber: null,
     orders: [],
     exchangeRate: '44.9',
@@ -487,7 +489,7 @@ describe('RequestCompletionService', () => {
     });
   });
 
-  describe('minus and dropship', () => {
+  describe('minus and cash_kit', () => {
     const row = { amount: '1000', date: '2026-11-04', time: '09:05' };
 
     it('should create MINUS_CLOSING with the sheet link and the percent answer', async () => {
@@ -523,18 +525,34 @@ describe('RequestCompletionService', () => {
       expect(result).toEqual({ orderNumbers: ['MC-1'], skipped: [] });
     });
 
-    it('should prefix a dropshipping client and keep the manager comment', async () => {
-      view('dropship', { clientLabel: 'Іваненко', withPercent: false, comment: 'терміново' });
-      orders.create.mockResolvedValue(order(10, 'MC-2'));
+    it.each([
+      ['kit', 'Кит · Іваненко'],
+      ['cash', 'Готівка · Іваненко'],
+    ] as const)(
+      'should create a USD MINUS_CLOSING for cash_kit %s at the request rate',
+      async (cashKind, clientName) => {
+        view('cash_kit', {
+          clientLabel: 'Іваненко',
+          sum: '45000.00',
+          sumUsd: '1000.50',
+          cashKind,
+          exchangeRate: '45.1',
+          comment: 'терміново',
+        });
+        orders.create.mockResolvedValue(order(10, 'MC-2'));
 
-      await service.complete(manager, 'req1', body([row]));
+        await service.complete(manager, 'req1', body([row]));
 
-      expect(callArg(orders.create, 1)).toMatchObject({
-        orderType: OrderType.MINUS_CLOSING,
-        clientName: 'Дропшипінг · Іваненко',
-        comment: 'терміново · з урахуванням %: ні',
-      });
-    });
+        expect(callArg(orders.create, 1)).toMatchObject({
+          orderType: OrderType.MINUS_CLOSING,
+          clientName,
+          currency: Currency.USD,
+          amountDue: '1000.50',
+          exchangeRate: '45.1',
+          comment: 'терміново',
+        });
+      },
+    );
 
     it('should answer 400 without a time', async () => {
       view('minus', { clientLabel: 'Гук Руслан' });
@@ -548,7 +566,7 @@ describe('RequestCompletionService', () => {
     });
 
     it('should answer 400 for more than one payment row', async () => {
-      view('dropship', { clientLabel: 'Іваненко' });
+      view('cash_kit', { clientLabel: 'Іваненко', sumUsd: '10', cashKind: 'cash' });
 
       const error = await failure(service.complete(manager, 'req1', body([row, row])));
 

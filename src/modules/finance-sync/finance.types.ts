@@ -1,5 +1,6 @@
 // Mirrors finance-backend src/modules/internal/internal-requests.dto.ts. Keep in step by hand.
-export type RequestKind = 'our_fop' | 'foreign_fop' | 'card' | 'minus' | 'dropship';
+export type RequestKind = 'our_fop' | 'foreign_fop' | 'card' | 'minus' | 'cash_kit';
+export type CashKind = 'cash' | 'kit';
 export type RequestStatus = 'pending' | 'accepted' | 'cancelled';
 export type RequestWarning = 'multi_order' | 'sum_mismatch' | 'iban_invalid' | 'card_invalid';
 
@@ -25,6 +26,8 @@ export interface FinanceRequestView {
   status: RequestStatus;
   kind: RequestKind | null;
   sum: string;
+  sumUsd: string | null;
+  cashKind: CashKind | null;
   orderNumber: string | null;
   orders: FinanceOrderView[];
   exchangeRate: string | null;
@@ -59,13 +62,15 @@ export interface FinanceFops {
   fops: FinanceFop[];
 }
 
-// `orders` for fop/card kinds, `sum` for minus/dropship (finance validates the pairing).
+// `orders` for fop/card kinds, `sum` for minus/cash_kit (finance validates the pairing).
 export interface CreateRequestBody {
   requesterTelegramId: number;
   requesterName: string;
   kind: RequestKind;
   orders?: { orderNumber: string; amount: number; exchangeRate?: number | null }[];
   sum?: number;
+  sumUsd?: number;
+  cashKind?: CashKind;
   exchangeRate?: number | null;
   comment?: string | null;
   officialDocs: boolean;
@@ -80,6 +85,8 @@ export interface CreateRequestBody {
 export interface EditRequestBody {
   requesterTelegramId: number;
   sum?: number;
+  sumUsd?: number;
+  cashKind?: CashKind;
   exchangeRate?: number;
   comment?: string | null;
   officialDocs?: boolean;

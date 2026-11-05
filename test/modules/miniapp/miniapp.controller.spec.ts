@@ -3,7 +3,10 @@ import { ApiError } from '../../../src/common/api-error';
 import type { FinanceRequestCard, Manager } from '../../../src/generated/prisma/client';
 import type { FinanceClient } from '../../../src/modules/finance-sync/finance.client';
 import { FinanceApiError } from '../../../src/modules/finance-sync/finance.types';
-import type { FinanceRequestView } from '../../../src/modules/finance-sync/finance.types';
+import type {
+  FinanceRequestView,
+  RequestKind,
+} from '../../../src/modules/finance-sync/finance.types';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import type { RequestCreateService } from '../../../src/modules/finance-sync/request-create.service';
 import type { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
@@ -56,7 +59,7 @@ describe('MiniappController', () => {
 
   describe('create', () => {
     const order = { orderNumber: '0000-070217', amount: '4972' };
-    const base = { officialDocs: true };
+    const base = { officialDocs: true, exchangeRate: '45' };
     const create = (dto: Partial<CreateMiniappRequestDto>) =>
       controller.create(manager, { ...base, ...dto } as CreateMiniappRequestDto);
 
@@ -115,6 +118,7 @@ describe('MiniappController', () => {
         clientLabel: ' Іван ',
         sheetUrl: 'https://s/1',
         withPercent: true,
+        exchangeRate: undefined,
       });
 
       expect(requests.create).toHaveBeenCalledWith(manager, {
@@ -133,29 +137,98 @@ describe('MiniappController', () => {
       await create({
         kind: 'card',
         orders: [{ ...order, exchangeRate: null }],
-        exchangeRate: null,
+        exchangeRate: '45',
         comment: null,
       } as unknown as Partial<CreateMiniappRequestDto>);
 
       expect(requests.create).toHaveBeenCalledWith(
         manager,
-        expect.objectContaining({ exchangeRate: null, comment: null }),
+        expect.objectContaining({ exchangeRate: '45', comment: null }),
       );
     });
 
-    it('should drop withPercent for dropship', async () => {
-      await create({ kind: 'dropship', sum: '700', clientLabel: 'Петро', withPercent: true });
+    it('should pass a cash_kit request with both sums and drop withPercent', async () => {
+      await create({
+        kind: 'cash_kit',
+        sum: '45000',
+        sumUsd: '1000.50',
+        cashKind: 'kit',
+        clientLabel: ' Петро ',
+        withPercent: true,
+      });
+
+      expect(requests.create).toHaveBeenCalledWith(manager, {
+        kind: 'cash_kit',
+        sum: '45000',
+        sumUsd: '1000.50',
+        cashKind: 'kit',
+        clientLabel: 'Петро',
+        sheetUrl: null,
+        withPercent: null,
+        exchangeRate: '45',
+        comment: null,
+        officialDocs: true,
+      });
+    });
+
+    it('should not carry the USD fields on a minus request', async () => {
+      await create({ kind: 'minus', sum: '100', clientLabel: 'A', sumUsd: '5', cashKind: 'cash' });
+
+      const [, input] = requests.create.mock.calls[0] as [unknown, Record<string, unknown>];
+      expect(input).not.toHaveProperty('sumUsd');
+      expect(input).not.toHaveProperty('cashKind');
+    });
+
+    it('should not require a rate for minus', async () => {
+      await create({ kind: 'minus', sum: '100', clientLabel: 'A', exchangeRate: undefined });
 
       expect(requests.create).toHaveBeenCalledWith(
         manager,
-        expect.objectContaining({ kind: 'dropship', withPercent: null }),
+        expect.objectContaining({ kind: 'minus', exchangeRate: null }),
       );
     });
 
     it.each([
+      ['our_fop', { orders: [order] }],
+      ['foreign_fop', { orders: [order] }],
+      ['card', { orders: [order] }],
+      ['cash_kit', { sum: '1', sumUsd: '1', cashKind: 'cash', clientLabel: 'A' }],
+    ] as [RequestKind, Partial<CreateMiniappRequestDto>][])(
+      'should answer 400 «Вкажіть курс.» for %s without a rate',
+      async (kind, rest) => {
+        for (const exchangeRate of [undefined, '  ']) {
+          const error = await failure(create({ kind, ...rest, exchangeRate }));
+
+          expect(error).toMatchObject({
+            status: 400,
+            code: 'invalid-request',
+            message: 'Вкажіть курс.',
+          });
+        }
+        expect(requests.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
       ['minus without clientLabel', { kind: 'minus', sum: '100' }],
       ['minus with a blank clientLabel', { kind: 'minus', sum: '100', clientLabel: '  ' }],
-      ['dropship without sum', { kind: 'dropship', clientLabel: 'A' }],
+      [
+        'cash_kit without sum',
+        { kind: 'cash_kit', sumUsd: '1', cashKind: 'kit', clientLabel: 'A' },
+      ],
+      [
+        'cash_kit without sumUsd',
+        { kind: 'cash_kit', sum: '1', cashKind: 'kit', clientLabel: 'A' },
+      ],
+      [
+        'cash_kit with a bad sumUsd',
+        { kind: 'cash_kit', sum: '1', sumUsd: '0', cashKind: 'kit', clientLabel: 'A' },
+      ],
+      ['cash_kit without cashKind', { kind: 'cash_kit', sum: '1', sumUsd: '1', clientLabel: 'A' }],
+      [
+        'cash_kit without clientLabel',
+        { kind: 'cash_kit', sum: '1', sumUsd: '1', cashKind: 'kit' },
+      ],
       ['minus with a bad sum', { kind: 'minus', sum: '10,5', clientLabel: 'A' }],
       ['our_fop without orders', { kind: 'our_fop' }],
       ['our_fop with 21 orders', { kind: 'our_fop', orders: Array(21).fill(order) }],
@@ -292,6 +365,23 @@ describe('MiniappController', () => {
       expect(sync.renderManager).toHaveBeenCalledWith(card, view);
       expect(sync.renderGroup).toHaveBeenCalledWith(card, view);
       expect(answer).toEqual({ request: view, managerName: 'Уляна', completed: false });
+    });
+
+    it('should send cash_kit fields as numbers', async () => {
+      await edit({ sumUsd: '1000.50', cashKind: 'cash' });
+
+      expect(finance.edit).toHaveBeenCalledWith('req1', {
+        requesterTelegramId: 555,
+        sumUsd: 1000.5,
+        cashKind: 'cash',
+      });
+    });
+
+    it('should refuse a blank rate: it cannot be cleared', async () => {
+      const error = await failure(edit({ exchangeRate: '' }));
+
+      expect(error).toMatchObject({ status: 400, code: 'invalid-request' });
+      expect(finance.edit).not.toHaveBeenCalled();
     });
 
     it('should send a sum as a number', async () => {

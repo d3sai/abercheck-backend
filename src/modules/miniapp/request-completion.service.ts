@@ -119,7 +119,7 @@ export class RequestCompletionService {
     const view = await this.acceptedView(requestId);
     const payments = toPayments(view.kind!, body.payments);
     const live =
-      view.kind === 'minus' || view.kind === 'dropship'
+      view.kind === 'minus' || view.kind === 'cash_kit'
         ? null
         : await this.liveItems(view, body.addPart === true);
 
@@ -303,6 +303,7 @@ export class RequestCompletionService {
     payment: Payment,
     progress: Progress,
   ): Promise<Made> {
+    const cashKit = view.kind === 'cash_kit';
     const client = view.clientLabel ?? '';
     const percent =
       view.withPercent === null ? null : `з урахуванням %: ${view.withPercent ? 'так' : 'ні'}`;
@@ -310,11 +311,11 @@ export class RequestCompletionService {
       { orders: this.orders, requisites: this.requisites },
       manager,
       {
-        clientName: view.kind === 'dropship' ? `Дропшипінг · ${client}` : client,
+        clientName: cashKit ? `${view.cashKind === 'kit' ? 'Кит' : 'Готівка'} · ${client}` : client,
         period: null,
         paidAt: payment.paidAt,
-        currency: Currency.UAH,
-        total: new Prisma.Decimal(view.sum),
+        currency: cashKit ? Currency.USD : Currency.UAH,
+        total: new Prisma.Decimal(cashKit ? view.sumUsd! : view.sum),
         ourFop: view.fopLabel,
         requisiteLines: [],
         comment: [view.comment, percent].filter(Boolean).join(' · ') || null,

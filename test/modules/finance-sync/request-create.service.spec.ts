@@ -205,20 +205,25 @@ describe('RequestCreateService', () => {
         },
       ],
       [
-        'dropship',
+        'cash_kit',
         {
-          kind: 'dropship',
-          sum: '700',
+          kind: 'cash_kit',
+          sum: '45000',
+          sumUsd: '1000.50',
+          cashKind: 'kit',
           clientLabel: 'Петро',
           sheetUrl: null,
           withPercent: null,
-          exchangeRate: null,
+          exchangeRate: '45',
           comment: null,
           officialDocs: true,
         },
         {
-          kind: 'dropship',
-          sum: 700,
+          kind: 'cash_kit',
+          sum: 45000,
+          sumUsd: 1000.5,
+          cashKind: 'kit',
+          exchangeRate: 45,
           clientLabel: 'Петро',
           sheetUrl: null,
           withPercent: null,
@@ -277,7 +282,7 @@ describe('RequestCreateService', () => {
 
     it.each([
       ['minus', 'minus'],
-      ['dropship', 'dropship'],
+      ['cash_kit', 'cash_kit'],
     ])('should warn that a retry can duplicate a %s request', async (_, kind) => {
       finance.create.mockRejectedValue(new FinanceApiError(0, 'timeout'));
 
