@@ -105,7 +105,7 @@ export function groupCard(
   if (view.status !== 'pending') return { html: lines.join('\n') };
 
   const fopRows =
-    fops && (view.kind === 'our_fop' || view.kind === 'minus')
+    fops && (view.kind === 'our_fop' || view.kind === 'minus' || view.kind === 'dropship')
       ? fops.fops.map((fop) => [
           button(
             `${fop.label} · ${fop.leftMonthWithReserve ? money(fop.leftMonthWithReserve) : '—'}`,

@@ -105,6 +105,10 @@ describe('groupCard', () => {
     expect(flat(minus)).toHaveLength(5);
   });
 
+  it('dropship gets FOP buttons too', () => {
+    expect(flat(groupCard(view({ kind: 'dropship', orders: [] }), fops(), null))).toHaveLength(5);
+  });
+
   it('kind labels', () => {
     expect(groupCard(view({ kind: 'foreign_fop' }), null, null).html).toContain('Чужий ФОП');
     expect(groupCard(view({ kind: 'dropship', orders: [] }), null, null).html).toContain(

@@ -20,6 +20,8 @@ type Next = () => Promise<void>;
 const PROMPT = /^Курс для запиту #(.+):$/;
 
 /** Group-chat actions of a financier: pick a FOP, set a rate, send payouts, refresh. */
+const FOP_NAME = /^\s*(?:ФОП|ТОВ|FOP)[\s.:,-]+\S.{0,60}$/iu;
+
 @Injectable()
 export class FinancierActionsService {
   constructor(
@@ -94,7 +96,10 @@ export class FinancierActionsService {
     const lone = loneRate(text);
     const rate = lone === null ? null : parseExchangeRate(lone);
     if (rate?.ok) return this.storeRate(ctx, card, rate.value);
-    if (CARD.test(text) || IBAN.test(text)) return this.acceptPayouts(ctx, card, text);
+    if (CARD.test(text) || IBAN.test(text))
+      return this.acceptReply(ctx, card, { payoutsText: text });
+    // the most common answer in the old finance bot: just a FOP name («Фоп Гук)»)
+    if (FOP_NAME.test(text)) return this.acceptReply(ctx, card, { fopName: text.trim() });
     return next();
   }
 
@@ -120,12 +125,16 @@ export class FinancierActionsService {
     }
   }
 
-  private async acceptPayouts(ctx: Context, card: FinanceRequestCard, text: string): Promise<void> {
+  private async acceptReply(
+    ctx: Context,
+    card: FinanceRequestCard,
+    answer: { payoutsText: string } | { fopName: string },
+  ): Promise<void> {
     let view: FinanceRequestView;
     try {
       view = await this.finance.accept(card.requestId, {
         responderTelegramId: ctx.from!.id,
-        payoutsText: text,
+        ...answer,
         exchangeRate: card.pendingRate ? Number(card.pendingRate) : undefined,
       });
     } catch (error) {

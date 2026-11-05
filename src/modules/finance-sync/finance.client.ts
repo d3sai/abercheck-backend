@@ -64,6 +64,7 @@ export class FinanceClient {
       responderTelegramId: number;
       fopId?: number;
       payoutsText?: string;
+      fopName?: string;
       exchangeRate?: number | null;
     },
   ): Promise<FinanceRequestView> {

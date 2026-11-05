@@ -335,6 +335,32 @@ describe('FinancierActionsService', () => {
       expect(sync.notifyManager).toHaveBeenCalledWith(acceptedView);
     });
 
+    it('should accept with the FOP name and the pending rate for a «ФОП …» reply', async () => {
+      cards.byGroupMessage.mockResolvedValue({ ...card, pendingRate: '44.9' });
+      finance.accept.mockResolvedValue(acceptedView);
+
+      await service.onText(textCtx(' Фоп Гук) ', toCard) as never, jest.fn());
+
+      expect(finance.accept).toHaveBeenCalledWith('req1', {
+        responderTelegramId: FINANCIER_ID,
+        fopName: 'Фоп Гук)',
+        exchangeRate: 44.9,
+      });
+      expect(sync.renderGroup).toHaveBeenCalledWith(expect.anything(), acceptedView);
+      expect(sync.notifyManager).toHaveBeenCalledWith(acceptedView);
+    });
+
+    it('should pass on a long sentence that only starts with «ФОП»', async () => {
+      const next = jest.fn();
+      const text =
+        'фоп сьогодні не працює, бо банк заблокував рахунок до кінця тижня, напишу пізніше';
+
+      await service.onText(textCtx(text, toCard) as never, next);
+
+      expect(finance.accept).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalled();
+    });
+
     it('should reply with the refusal when accepting payouts fails', async () => {
       finance.accept.mockRejectedValue(new FinanceApiError(422, 'payouts-unrecognized'));
       const c = textCtx('4149 4990 1234 5678', toCard);
