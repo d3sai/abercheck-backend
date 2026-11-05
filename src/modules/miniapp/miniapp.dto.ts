@@ -169,8 +169,8 @@ function rate(value: string): string {
 const optionalRate = (value: string | undefined | null): string | null =>
   value?.trim() ? rate(value) : null;
 
-function requiredRate(value: string | undefined | null): string {
-  if (!value?.trim()) throw invalid('Вкажіть курс.');
+function requiredRate(value: string | undefined | null, orderNumber: string): string {
+  if (!value?.trim()) throw invalid(`Вкажіть курс для № ${orderNumber}.`);
   return rate(value);
 }
 
@@ -182,8 +182,8 @@ const text = (value: string | undefined | null): string | null => {
 export function toCreateInput(dto: CreateMiniappRequestDto): CreateRequestInput {
   const common = {
     kind: dto.kind,
-    exchangeRate:
-      dto.kind === 'minus' ? optionalRate(dto.exchangeRate) : requiredRate(dto.exchangeRate),
+    // the form asks for a rate per order number, not for the whole request
+    exchangeRate: optionalRate(dto.exchangeRate),
     comment: text(dto.comment),
     officialDocs: dto.officialDocs,
   };
@@ -202,7 +202,7 @@ export function toCreateInput(dto: CreateMiniappRequestDto): CreateRequestInput 
       return {
         orderNumber: number.value,
         amount: money(row.amount),
-        exchangeRate: optionalRate(row.exchangeRate),
+        exchangeRate: requiredRate(row.exchangeRate, number.value),
       };
     });
     return { ...common, orders };

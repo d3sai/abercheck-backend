@@ -58,24 +58,23 @@ describe('MiniappController', () => {
   afterEach(() => jest.resetAllMocks());
 
   describe('create', () => {
-    const order = { orderNumber: '0000-070217', amount: '4972' };
-    const base = { officialDocs: true, exchangeRate: '45' };
+    const order = { orderNumber: '0000-070217', amount: '4972', exchangeRate: '45' };
+    const base = { officialDocs: true };
     const create = (dto: Partial<CreateMiniappRequestDto>) =>
       controller.create(manager, { ...base, ...dto } as CreateMiniappRequestDto);
 
     it('should pass an our_fop request with a normalised number to the service', async () => {
       const answer = await create({
         kind: 'our_fop',
-        orders: [{ ...order, orderNumber: ' 0000-070217 ' }],
-        exchangeRate: '45.7',
+        orders: [{ ...order, orderNumber: ' 0000-070217 ', exchangeRate: '45.7' }],
         comment: ' Терміново ',
       });
 
       expect(answer).toEqual({ requestId: 'req1', number: '42' });
       expect(requests.create).toHaveBeenCalledWith(manager, {
         kind: 'our_fop',
-        orders: [{ orderNumber: '0000-070217', amount: '4972', exchangeRate: null }],
-        exchangeRate: '45.7',
+        orders: [{ orderNumber: '0000-070217', amount: '4972', exchangeRate: '45.7' }],
+        exchangeRate: null,
         comment: 'Терміново',
         officialDocs: true,
       });
@@ -86,7 +85,7 @@ describe('MiniappController', () => {
         kind: 'foreign_fop',
         orders: [
           { ...order, exchangeRate: '44.5' },
-          { orderNumber: '0000-072611', amount: '11124.50' },
+          { orderNumber: '0000-072611', amount: '11124.50', exchangeRate: '45.1' },
         ],
       });
 
@@ -96,7 +95,7 @@ describe('MiniappController', () => {
           kind: 'foreign_fop',
           orders: [
             { orderNumber: '0000-070217', amount: '4972', exchangeRate: '44.5' },
-            { orderNumber: '0000-072611', amount: '11124.50', exchangeRate: null },
+            { orderNumber: '0000-072611', amount: '11124.50', exchangeRate: '45.1' },
           ],
         }),
       );
@@ -136,14 +135,14 @@ describe('MiniappController', () => {
     it('should treat null optional fields as absent on create', async () => {
       await create({
         kind: 'card',
-        orders: [{ ...order, exchangeRate: null }],
-        exchangeRate: '45',
+        orders: [order],
+        exchangeRate: null,
         comment: null,
       } as unknown as Partial<CreateMiniappRequestDto>);
 
       expect(requests.create).toHaveBeenCalledWith(
         manager,
-        expect.objectContaining({ exchangeRate: '45', comment: null }),
+        expect.objectContaining({ exchangeRate: null, comment: null }),
       );
     });
 
@@ -156,20 +155,16 @@ describe('MiniappController', () => {
       );
     });
 
-    it.each([
-      ['our_fop', { orders: [order] }],
-      ['foreign_fop', { orders: [order] }],
-      ['card', { orders: [order] }],
-    ] as [RequestKind, Partial<CreateMiniappRequestDto>][])(
-      'should answer 400 «Вкажіть курс.» for %s without a rate',
-      async (kind, rest) => {
+    it.each([['our_fop'], ['foreign_fop'], ['card']] as [RequestKind][])(
+      'should answer 400 for a %s order number without its rate',
+      async (kind) => {
         for (const exchangeRate of [undefined, '  ']) {
-          const error = await failure(create({ kind, ...rest, exchangeRate }));
+          const error = await failure(create({ kind, orders: [{ ...order, exchangeRate }] }));
 
           expect(error).toMatchObject({
             status: 400,
             code: 'invalid-request',
-            message: 'Вкажіть курс.',
+            message: 'Вкажіть курс для № 0000-070217.',
           });
         }
         expect(requests.create).not.toHaveBeenCalled();
