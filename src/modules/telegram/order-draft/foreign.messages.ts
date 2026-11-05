@@ -1,7 +1,6 @@
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn } from '../core/format';
-import { MENU_LABEL } from '../core/menu';
 import type { ForeignPlan } from './foreign.parser';
 
 export const ForeignAction = {
@@ -40,15 +39,6 @@ export function foreignHint(): BotReply {
       'Валюта: UAH, USD або EUR. «Курс» і «Коментар» можна не писати.',
       '',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
-    ].join('\n'),
-  };
-}
-
-export function foreignGuard(): BotReply {
-  return {
-    html: [
-      '⚠️ Схоже на оплату закордонного замовлення.',
-      `Натисніть «${escapeHtml(MENU_LABEL.Foreign)}» (/foreign) і надішліть це повідомлення ще раз.`,
     ].join('\n'),
   };
 }

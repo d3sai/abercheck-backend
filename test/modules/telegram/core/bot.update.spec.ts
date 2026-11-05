@@ -38,16 +38,8 @@ import {
   KitDraftService,
   KitDraftStore,
 } from '../../../../src/modules/telegram/order-draft/kit-draft.service';
-import { OrderCreationFlowService } from '../../../../src/modules/telegram/order-draft/order-creation-flow.service';
 import { OrderDraftService } from '../../../../src/modules/telegram/order-draft/order-draft.service';
-import { PartOfferStore } from '../../../../src/modules/telegram/order-draft/part-offer.store';
 import { PendingFilesStore } from '../../../../src/modules/telegram/order-draft/pending-files.store';
-import {
-  MinusClosingDraftService,
-  MinusDraftStore,
-} from '../../../../src/modules/telegram/order-draft/minus-closing-draft.service';
-import { RequisitesDraftService } from '../../../../src/modules/telegram/order-draft/requisites-draft.service';
-import { RequisitesDraftStore } from '../../../../src/modules/telegram/order-draft/requisites-draft.store';
 import { PrismaService } from '../../../../src/common/prisma/prisma.service';
 import { OrderDeleteService } from '../../../../src/modules/telegram/orders-list/order-delete.service';
 import { OrderListService } from '../../../../src/modules/telegram/orders-list/order-list.service';
@@ -92,13 +84,7 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     AdminUpdate,
     TelegramSender,
     OrderDraftService,
-    OrderCreationFlowService,
-    RequisitesDraftService,
-    MinusClosingDraftService,
     PendingFilesStore,
-    PartOfferStore,
-    RequisitesDraftStore,
-    MinusDraftStore,
     KitDraftService,
     KitDraftStore,
     CashDraftService,
@@ -239,27 +225,6 @@ describe('BotUpdate', () => {
     return sent;
   };
 
-  const press = async (data: string, fromId = MANAGER_ID): Promise<void> => {
-    sent = [];
-    edited = [];
-    await bot.handleUpdate({
-      update_id: ++updateId,
-      callback_query: {
-        id: `cb-${updateId}`,
-        chat_instance: 'instance',
-        data,
-        from: { id: fromId, is_bot: false, first_name: 'Христина' },
-        message: {
-          message_id: updateId,
-          date: 0,
-          chat: privateChat(fromId),
-          text: 'offer',
-        },
-      },
-    });
-    expect(loggedErrors).not.toHaveBeenCalled();
-  };
-
   const say = (text: string, options?: DeliverOptions) =>
     deliver(
       text.startsWith('/')
@@ -290,34 +255,18 @@ describe('BotUpdate', () => {
 
   describe('the main menu', () => {
     it.each(['/start', '/help', 'привіт'])(
-      'should show the nine buttons in reply to %s',
+      'should show the six buttons in reply to %s',
       async (text) => {
         const replies = await say(text);
 
         expect(replies).toHaveLength(1);
-        expect(menuOf(replies[0]!)).toHaveLength(9);
+        expect(menuOf(replies[0]!)).toHaveLength(6);
         expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
       },
     );
   });
 
   describe('a menu button pressed in a private chat', () => {
-    it('should answer "new order" with the regular order format', async () => {
-      const replies = await say(MENU_LABEL.NewOrder);
-
-      expect(replies).toHaveLength(1);
-      expect(replies[0]!.text).toContain('Нове замовлення');
-      expect(replies[0]!.text).toContain('Номер*');
-    });
-
-    it('should answer "close minus" with the debt-closing template', async () => {
-      const replies = await say(MENU_LABEL.NewMinus);
-
-      expect(replies).toHaveLength(1);
-      expect(replies[0]!.text).toContain('Закриття мінусу');
-      expect(replies[0]!.text).not.toContain('0000-066717');
-    });
-
     it('should answer "list" with the manager\'s open orders', async () => {
       const replies = await say(MENU_LABEL.List);
 
@@ -333,6 +282,7 @@ describe('BotUpdate', () => {
     });
 
     it('should forget the attached files on "cancel"', async () => {
+      await say(MENU_LABEL.Kit);
       const attached = await sendPdf();
       const cancelled = await say(MENU_LABEL.Cancel);
 
@@ -360,170 +310,31 @@ describe('BotUpdate', () => {
     });
   });
 
-  describe('another part of a number that is already taken', () => {
-    const existing = {
-      order: {
-        orderNumber: '0000-066717',
-        baseNumber: '0000-066717',
-        clientName: 'Чернявський Владислав',
-        amountDue: new Prisma.Decimal('6158.41'),
-        currency: 'UAH',
-      },
-      amountPaid: new Prisma.Decimal('0'),
-    };
-    const message = ['0000-066717', 'Другий ФОП', '1 000,00 грн'].join('\n');
-    const createdPart = {
-      id: 2,
-      orderNumber: '0000-066717(1)',
-      baseNumber: '0000-066717',
-      clientName: 'Другий ФОП',
-      amountDue: new Prisma.Decimal('1000'),
-      orderType: 'REGULAR',
-      status: OrderStatus.AWAITING_PAYMENT,
-    };
-
-    beforeEach(() => ordersMock.findWithBalance.mockResolvedValue(existing));
-
-    it('should ask for confirmation with two buttons instead of creating a duplicate', async () => {
-      const replies = await say(message);
+  describe('outside an armed mode', () => {
+    it('should answer a file with the help and the menu, without storing it', async () => {
+      const replies = await sendPdf();
 
       expect(replies).toHaveLength(1);
-      expect(replies[0]!.text).toContain('вже є в системі');
-      expect(
-        replies[0]!.reply_markup?.inline_keyboard?.flat().map((button) => button.callback_data),
-      ).toEqual(['part:add', 'part:skip']);
+      expect(replies[0]!.text).toContain('Новий запит');
+      expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
+      expect((await say(MENU_LABEL.Cancel)).map(({ text }) => text)).toEqual([
+        'Нема чого скасовувати.',
+      ]);
+    });
+
+    it('should not create anything from a pasted order', async () => {
+      const replies = await say('0000-066717\nЧернявський Владислав\n6 158,41 грн');
+
+      expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
       expect(ordersMock.create).not.toHaveBeenCalled();
     });
 
-    it('should add the part when the manager presses the button', async () => {
-      ordersMock.create.mockResolvedValue(createdPart);
-      await say(message);
+    it('should keep accepting files inside /kit', async () => {
+      await say('/kit');
 
-      await press('part:add');
+      const replies = await sendPdf();
 
-      expect(ordersMock.create).toHaveBeenCalledWith(
-        1,
-        expect.objectContaining({ orderNumber: '0000-066717', clientName: 'Другий ФОП' }),
-        { notify: true, addPart: true },
-      );
-      expect(edited).toHaveLength(1);
-      expect(edited[0]!.text).toContain('0000-066717(1)');
-    });
-
-    it('should drop the draft when the manager declines, and not add it later', async () => {
-      await say(message);
-
-      await press('part:skip');
-      expect(edited.map(({ text }) => text)).toEqual(['Скасовано.']);
-
-      await press('part:add');
-      expect(edited[0]!.text).toContain('Немає даних');
-      expect(ordersMock.create).not.toHaveBeenCalled();
-    });
-
-    it('should not let someone who is not a manager add anything', async () => {
-      await press('part:add', STRANGER_ID);
-
-      expect(sent[0]!.text).toContain('/start');
-      expect(edited).toHaveLength(0);
-      expect(ordersMock.create).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('one message: "кілька номерів / реквізити", armed by /requisites', () => {
-    const GROUP = `0000-068772 335,58 грн. ФОП Гук
-0000-068773 971,83 грн. ФОП Гук
-0000-068774 605,41 грн. ФОП Гук
-Загальна сума: 1 912,82 грн
-
-18.09.2026 21:28
-Гук Віктор Степанович ФОП
-44,9%`;
-    const groupOrders = () =>
-      [
-        ['0000-068772', '335.58'],
-        ['0000-068773', '971.83'],
-        ['0000-068774', '605.41'],
-      ].map(([number, amount]) => ({
-        id: 1,
-        orderNumber: number,
-        baseNumber: '0000-068772',
-        clientName: 'Гук Віктор Степанович ФОП',
-        amountDue: new Prisma.Decimal(amount!),
-        orderType: 'REGULAR',
-        status: OrderStatus.AWAITING_PAYMENT,
-        createdAt: new Date('2026-09-18T21:28:00Z'),
-      }));
-
-    it.each(['/requisites', MENU_LABEL.Requisites])(
-      'should show the format hint and arm waiting for the very next message in reply to %s',
-      async (text) => {
-        const replies = await say(text);
-
-        expect(replies[0]!.text).toContain('одним повідомленням');
-        expect(replies[0]!.reply_markup?.inline_keyboard).toBeUndefined();
-      },
-    );
-
-    it('should refuse a payment-report-shaped message with guidance when /requisites was never sent', async () => {
-      const replies = await say(GROUP);
-
-      expect(replies[0]!.text).not.toContain('Кілька номерів однією оплатою');
-      expect(replies[0]!.text).toContain('кілька номерів або чужі реквізити');
-      expect(replies[0]!.text).toContain(MENU_LABEL.Requisites);
-      expect(replies[0]!.text).toContain('/requisites');
-      expect(ordersMock.createGroup).not.toHaveBeenCalled();
-    });
-
-    it('should show a preview and create the group only after "Надіслати"', async () => {
-      ordersMock.findWithBalance.mockResolvedValue(null);
-      ordersMock.createGroup.mockResolvedValue(groupOrders());
-      await say('/requisites');
-
-      const preview = await say(GROUP);
-
-      expect(preview[0]!.text).toContain('Кілька номерів однією оплатою');
-      expect(preview[0]!.reply_markup?.inline_keyboard?.flat().map((b) => b.callback_data)).toEqual(
-        ['req:ok', 'req:edit', 'req:regular'],
-      );
-      expect(ordersMock.createGroup).not.toHaveBeenCalled();
-
-      await press('req:ok');
-
-      expect(ordersMock.createGroup).toHaveBeenCalledTimes(1);
-      expect(edited[0]!.text).toContain('зареєстровано');
-    });
-
-    it('should wait for a corrected message after "Виправити"', async () => {
-      await say('/requisites');
-      await say(GROUP);
-
-      await press('req:edit');
-      expect(edited[0]!.text).toContain('Надішліть виправлене');
-
-      await press('req:ok');
-      expect(edited[0]!.text).toContain('Немає даних');
-      expect(ordersMock.createGroup).not.toHaveBeenCalled();
-    });
-
-    it('should drop a pending preview once /new is used instead', async () => {
-      await say('/requisites');
-      await say(GROUP);
-
-      await say('/new');
-      await press('req:ok');
-
-      expect(edited[0]!.text).toContain('Немає даних');
-      expect(ordersMock.createGroup).not.toHaveBeenCalled();
-    });
-
-    it('should not let someone who is not a manager use it', async () => {
-      const replies = await say('/requisites', {
-        chat: privateChat(STRANGER_ID),
-        fromId: STRANGER_ID,
-      });
-
-      expect(replies[0]!.text).toContain('/start');
+      expect(replies[0]!.text).toContain('invoice.pdf');
     });
   });
 });
@@ -565,5 +376,15 @@ describe('BotUpdate bootstrap', () => {
 
     expect(sender.setDefaultMenuButton).toHaveBeenCalledWith(null);
     expect(sender.registerCommands).toHaveBeenCalledTimes(2);
+  });
+
+  it('should not register the commands of the removed modes', async () => {
+    const { sender, update } = build();
+
+    await update.onApplicationBootstrap();
+
+    const [commands] = (sender.registerCommands.mock.calls as [{ command: string }[]][])[0]!;
+    const names = commands.map(({ command }) => command);
+    expect(names).toEqual(['kit', 'cash', 'foreign', 'list', 'cancel', 'help']);
   });
 });

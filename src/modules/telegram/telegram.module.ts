@@ -23,17 +23,9 @@ import { CashDraftService, CashDraftStore } from './order-draft/cash-draft.servi
 import { DraftAttachmentNotifier } from './order-draft/draft-attachment-notifier';
 import { ForeignDraftService, ForeignDraftStore } from './order-draft/foreign-draft.service';
 import { KitDraftService, KitDraftStore } from './order-draft/kit-draft.service';
-import {
-  MinusClosingDraftService,
-  MinusDraftStore,
-} from './order-draft/minus-closing-draft.service';
-import { OrderCreationFlowService } from './order-draft/order-creation-flow.service';
 import { OrderDraftService } from './order-draft/order-draft.service';
-import { PartOfferStore } from './order-draft/part-offer.store';
 import { PendingFilesStore } from './order-draft/pending-files.store';
 import { ReportedPaymentService } from './order-draft/reported-payment.service';
-import { RequisitesDraftService } from './order-draft/requisites-draft.service';
-import { RequisitesDraftStore } from './order-draft/requisites-draft.store';
 import { OrderDeleteService } from './orders-list/order-delete.service';
 import { OrderListService } from './orders-list/order-list.service';
 import { TelegramSender } from './core/telegram-sender';
@@ -66,16 +58,10 @@ import { TelegramSender } from './core/telegram-sender';
     OrderNotifier,
     AccessNotifier,
     PendingFilesStore,
-    PartOfferStore,
-    RequisitesDraftStore,
-    MinusDraftStore,
     KitDraftStore,
     CashDraftStore,
     ForeignDraftStore,
     DraftAttachmentNotifier,
-    OrderCreationFlowService,
-    RequisitesDraftService,
-    MinusClosingDraftService,
     ReportedPaymentService,
     KitDraftService,
     CashDraftService,

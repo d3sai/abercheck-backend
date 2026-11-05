@@ -2,7 +2,6 @@ import { Test } from '@nestjs/testing';
 import { PrismaService } from '../../../../src/common/prisma/prisma.service';
 import { type Manager, Prisma } from '../../../../src/generated/prisma/client';
 import { AttachmentsService } from '../../../../src/modules/attachments/attachments.service';
-import { OrderNumberTakenError } from '../../../../src/modules/orders/orders.errors';
 import { OrdersService } from '../../../../src/modules/orders/orders.service';
 import { PaymentsService } from '../../../../src/modules/payments/payments.service';
 import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
@@ -21,19 +20,8 @@ import {
   KitDraftService,
   KitDraftStore,
 } from '../../../../src/modules/telegram/order-draft/kit-draft.service';
-import {
-  MinusClosingDraftService,
-  MinusDraftStore,
-} from '../../../../src/modules/telegram/order-draft/minus-closing-draft.service';
-import { OrderCreationFlowService } from '../../../../src/modules/telegram/order-draft/order-creation-flow.service';
-import {
-  DraftAction,
-  OrderDraftService,
-} from '../../../../src/modules/telegram/order-draft/order-draft.service';
-import { PartOfferStore } from '../../../../src/modules/telegram/order-draft/part-offer.store';
+import { OrderDraftService } from '../../../../src/modules/telegram/order-draft/order-draft.service';
 import { PendingFilesStore } from '../../../../src/modules/telegram/order-draft/pending-files.store';
-import { RequisitesDraftService } from '../../../../src/modules/telegram/order-draft/requisites-draft.service';
-import { RequisitesDraftStore } from '../../../../src/modules/telegram/order-draft/requisites-draft.store';
 
 describe('OrderDraftService', () => {
   const USER = 5000000000n;
@@ -85,31 +73,11 @@ describe('OrderDraftService', () => {
     ...overrides,
   });
 
-  const template = (overrides: Partial<Record<string, string>> = {}): string => {
-    const fields = {
-      Номер: '0000-066717',
-      ФОП: 'Чернявський Владислав',
-      Сума: '6 158,41',
-      Курс: '44,9',
-      Коментар: 'Терміново',
-      ...overrides,
-    };
-    return Object.entries(fields)
-      .map(([label, value]) => `${label}: ${value}`)
-      .join('\n');
-  };
-
   beforeEach(async () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         OrderDraftService,
-        OrderCreationFlowService,
-        RequisitesDraftService,
-        MinusClosingDraftService,
         PendingFilesStore,
-        PartOfferStore,
-        RequisitesDraftStore,
-        MinusDraftStore,
         KitDraftService,
         KitDraftStore,
         CashDraftService,
@@ -135,428 +103,19 @@ describe('OrderDraftService', () => {
 
   afterEach(() => jest.resetAllMocks());
 
-  it('should star the number, name and amount in the regular hint', () => {
-    const reply = service.hint();
-
-    expect(reply.html).toContain("Номер*, ФОП*, Сума*, Курс, Коментар (* — обов'язкове).");
-    expect(reply.html).toContain('0000-066717');
-    expect(reply.buttons).toBeUndefined();
-  });
-
-  it('should never label anything as optional', () => {
-    expect(service.hint().html).not.toMatch(/необов/i);
-  });
-
-  it('should ignore plain chat text with no recognizable fields', async () => {
-    await expect(service.handleText(MANAGER, 'привіт, як справи?')).resolves.toBeNull();
-  });
-
-  it('should read «ТОВ:» as the client name, like «ФОП:»', async () => {
-    orders.create.mockResolvedValue(createdOrder({ clientName: 'Абертайм' }));
-
-    await service.handleText(MANAGER, 'Номер: 0000-066717\nТОВ: Абертайм\nСума: 100');
-
-    expect(orders.create).toHaveBeenCalledWith(
-      MANAGER.id,
-      expect.objectContaining({ clientName: 'Абертайм', amountDue: '100' }),
-      expect.anything(),
-    );
-  });
-
-  it('should list every validation error without creating an order', async () => {
-    const reply = await service.handleText(
-      MANAGER,
-      template({ Номер: '1548', ФОП: '', Сума: 'сто' }),
-    );
-
-    expect(reply?.html).toContain('«Номер»');
-    expect(reply?.html).toContain('«ФОП» — поле');
-    expect(reply?.html).toContain('«Сума»');
+  it('should ignore plain text outside an armed mode', async () => {
+    expect(await service.handleText(MANAGER, 'просто текст')).toBeNull();
     expect(orders.create).not.toHaveBeenCalled();
-  });
-
-  describe('refusing several numbers / requisites outside the button, with guidance', () => {
-    it('should refuse a message with more than one order number', async () => {
-      const reply = await service.handleText(
-        MANAGER,
-        '0000-068772 335,58 грн. ФОП Гук\n0000-068773 971,83 грн. ФОП Гук\n44,9%\nГук Іван\n07.09.2026 14:57',
-      );
-
-      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
-      expect(reply?.html).toContain('💳 Кілька номерів / реквізити');
-      expect(reply?.html).toContain('/requisites');
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should guide to /requisites when a total line «сума:» sits among several numbers and cards', async () => {
-      const reply = await service.handleText(
-        MANAGER,
-        [
-          '0000-070217 4972,00 грн',
-          '0000-072611 11124,00 грн',
-          'сума: 16096 грн',
-          '4441 1110 4233 7547 Мічурін Остап Володимирович 16 096,00 Грн 09:35',
-          '27.10.2026',
-          '45,7',
-        ].join('\n'),
-      );
-
-      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should refuse a message that mentions a card, even with just one number', async () => {
-      const reply = await service.handleText(
-        MANAGER,
-        '0000-066092\nФОП Носенко Роман\n4441 1110 6964 5962 картка для довідки\n4 527,00 грн',
-      );
-
-      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should refuse a message that mentions an IBAN or a ЄДРПОУ/IBAN marker word, with no number at all', async () => {
-      const withIban = await service.handleText(
-        MANAGER,
-        'Закрила Любов Андрейчук\nUA549358710000067320000088286\n4 890,00 грн',
-      );
-      const withMarker = await service.handleText(
-        MANAGER,
-        'Закрила Любов Андрейчук\nЄДРПОУ 12345678\n4 890,00 грн',
-      );
-
-      expect(withIban?.html).toContain('кілька номерів або чужі реквізити');
-      expect(withMarker?.html).toContain('кілька номерів або чужі реквізити');
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should still work through /requisites once guided there', async () => {
-      const guided = await service.handleText(
-        MANAGER,
-        '0000-068772 335,58 грн. ФОП Гук\n0000-068773 971,83 грн. ФОП Гук\n44,9%\nГук Іван\n07.09.2026 14:57',
-      );
-      expect(guided?.html).toContain('/requisites');
-
-      service.startRequisites(USER);
-      orders.createGroup.mockResolvedValue([
-        createdOrder({ id: 1, orderNumber: '0000-068772', baseNumber: '0000-068772' }),
-        createdOrder({ id: 2, orderNumber: '0000-068773', baseNumber: '0000-068772' }),
-      ]);
-      const preview = await service.handleText(
-        MANAGER,
-        '0000-068772 335,58 грн. ФОП Гук\n0000-068773 971,83 грн. ФОП Гук\n44,9%\nГук Іван\n07.09.2026 14:57',
-      );
-
-      expect(preview?.html).toContain('Кілька номерів однією оплатою');
-    });
-
-    it('should put a cancel button under the confirmation of a created order', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-
-      const reply = await service.handleText(MANAGER, template());
-
-      expect(reply?.buttons).toEqual([
-        [{ text: '🗑 Скасувати замовлення', callback_data: 'del:0000-066717' }],
-      ]);
-    });
-
-    it('should leave the labelled classic template alone even if a field value looks like a card', async () => {
-      orders.create.mockResolvedValue(createdOrder({ comment: 'картка 4441 1110 6964 5962' }));
-
-      const reply = await service.handleText(
-        MANAGER,
-        template({ Коментар: 'картка 4441 1110 6964 5962' }),
-      );
-
-      expect(reply?.html).toContain('створено');
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        expect.objectContaining({ comment: 'картка 4441 1110 6964 5962' }),
-        { notify: true, addPart: false },
-      );
-    });
-
-    it('should leave a normal single-number classic order alone', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-
-      const reply = await service.handleText(
-        MANAGER,
-        ['0000-066717', 'Чернявський Владислав', '6 158,41 грн'].join('\n'),
-      );
-
-      expect(reply?.html).toContain('створено');
-      expect(orders.create).toHaveBeenCalled();
-    });
-
-    it('should refuse a template without a number instead of closing a minus', async () => {
-      const reply = await service.handleText(
-        MANAGER,
-        ['Чернявський Владислав', '6 158,41 грн'].join('\n'),
-      );
-
-      expect(reply?.html).toContain("«Номер» — поле обов'язкове.");
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('a number that already exists', () => {
-    const existing = {
-      order: {
-        orderNumber: '0000-066717',
-        clientName: 'Чернявський Владислав',
-        amountDue: new Prisma.Decimal('6158.41'),
-        currency: 'UAH',
-      },
-      amountPaid: new Prisma.Decimal('1000'),
-    };
-    const partOfNumber = () =>
-      createdOrder({ id: 2, orderNumber: '0000-066717(1)', baseNumber: '0000-066717' });
-
-    beforeEach(() => orders.findWithBalance.mockResolvedValue(existing));
-
-    it('should not create a duplicate, but offer to add a part', async () => {
-      const reply = await service.handleText(MANAGER, template());
-
-      expect(orders.findWithBalance).toHaveBeenCalledWith('0000-066717');
-      expect(reply?.html).toContain('вже є в системі');
-      expect(reply?.html).toContain('Чернявський Владислав');
-      expect(reply?.html).toContain('ще однією частиною');
-      expect(
-        reply?.buttons?.flat().map((b) => ('callback_data' in b ? b.callback_data : null)),
-      ).toEqual([DraftAction.AddPart, DraftAction.SkipPart]);
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should add the part with the remembered data once the manager confirms', async () => {
-      orders.create.mockResolvedValue(partOfNumber());
-      await service.handleText(MANAGER, template({ ФОП: 'Другий ФОП', Сума: '1 000' }));
-
-      const reply = await service.addPart(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        expect.objectContaining({
-          orderNumber: '0000-066717',
-          clientName: 'Другий ФОП',
-          amountDue: '1000',
-        }),
-        { notify: true, addPart: true },
-      );
-      expect(reply.html).toContain('Частину замовлення');
-      expect(reply.html).toContain('0000-066717(1)');
-    });
-
-    it('should keep the attached files for the part', async () => {
-      orders.create.mockResolvedValue(partOfNumber());
-      await service.addFile(MANAGER, file());
-      await service.handleText(MANAGER, template());
-
-      await service.addPart(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(MANAGER.id, expect.anything(), {
-        notify: false,
-        addPart: true,
-      });
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ orderNumber: '0000-066717(1)' }),
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нова частина замовлення'),
-      );
-    });
-
-    it('should add a part only once, however many times the button is pressed', async () => {
-      orders.create.mockResolvedValue(partOfNumber());
-      await service.handleText(MANAGER, template());
-
-      await service.addPart(MANAGER);
-      const again = await service.addPart(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledTimes(1);
-      expect(again.html).toContain('Немає даних');
-    });
-
-    it('should forget the data when the manager declines', async () => {
-      await service.handleText(MANAGER, template());
-
-      expect(service.skipPart(USER).html).toContain('Скасовано');
-      expect((await service.addPart(MANAGER)).html).toContain('Немає даних');
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should forget the data on /cancel', async () => {
-      await service.handleText(MANAGER, template());
-
-      expect(service.cancel(USER).html).toContain('Скасовано');
-      expect((await service.addPart(MANAGER)).html).toContain('Немає даних');
-    });
-
-    it('should not add a part once the offer has expired', async () => {
-      const now = jest.spyOn(Date, 'now');
-      now.mockReturnValue(1_000_000);
-      await service.handleText(MANAGER, template());
-
-      now.mockReturnValue(1_000_000 + 11 * 60_000);
-      const reply = await service.addPart(MANAGER);
-
-      expect(reply.html).toContain('Немає даних');
-      expect(orders.create).not.toHaveBeenCalled();
-      now.mockRestore();
-    });
-
-    it('should not mix up the data of different managers', async () => {
-      const other = { ...MANAGER, id: 8, telegramId: 6000000000n };
-      orders.create.mockResolvedValue(partOfNumber());
-      await service.handleText(MANAGER, template({ ФОП: 'Перший' }));
-
-      expect((await service.addPart(other)).html).toContain('Немає даних');
-      await service.addPart(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        expect.objectContaining({ clientName: 'Перший' }),
-        expect.anything(),
-      );
-    });
-  });
-
-  it('should create the order immediately once the message is complete', async () => {
-    orders.create.mockResolvedValue(createdOrder());
-
-    const reply = await service.handleText(MANAGER, template());
-
-    expect(orders.create).toHaveBeenCalledWith(
-      MANAGER.id,
-      {
-        orderType: 'REGULAR',
-        orderNumber: '0000-066717',
-        clientName: 'Чернявський Владислав',
-        amountDue: '6158.41',
-        currency: 'UAH',
-        exchangeRate: '44.9',
-        comment: 'Терміново',
-      },
-      { notify: true, addPart: false },
-    );
-    expect(reply?.html).toContain('створено');
-    expect(reply?.html).toContain('6 158,41');
-  });
-
-  it('should create a dollar order when the sum is written with $', async () => {
-    orders.create.mockResolvedValue(
-      createdOrder({ amountDue: new Prisma.Decimal('150'), currency: 'USD' }),
-    );
-
-    const reply = await service.handleText(MANAGER, template({ Сума: '150 $' }));
-
-    expect(orders.create).toHaveBeenCalledWith(
-      MANAGER.id,
-      expect.objectContaining({ amountDue: '150', currency: 'USD' }),
-      { notify: true, addPart: false },
-    );
-    expect(reply?.html).toContain('150 $');
-    expect(reply?.html).not.toContain('грн');
-  });
-
-  it('should not offer a part in another currency than the number already has', async () => {
-    orders.findWithBalance.mockResolvedValue({
-      order: { orderNumber: '0000-066717', clientName: 'Чернявський Владислав', currency: 'UAH' },
-      amountPaid: new Prisma.Decimal('0'),
-    });
-
-    const reply = await service.handleText(MANAGER, template({ Сума: '$150' }));
-
-    expect(reply?.html).toContain('в іншій валюті');
-    expect(reply?.buttons).toBeUndefined();
-    expect(orders.create).not.toHaveBeenCalled();
-  });
-
-  it('should tell how to write a sum in dollars in the /new hint', () => {
-    expect(service.hint().html).toContain('150 $');
-  });
-
-  it('should require the order number in the labelled template', async () => {
-    const reply = await service.handleText(MANAGER, template({ Номер: '' }));
-
-    expect(reply?.html).toContain("«Номер» — поле обов'язкове.");
-    expect(orders.create).not.toHaveBeenCalled();
-  });
-
-  describe('freeform, line-per-field messages', () => {
-    it('should create the order from unlabelled lines, like the old bot', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-
-      const reply = await service.handleText(
-        MANAGER,
-        ['0000-066717', 'Чернявський Владислав', '6 158,41 грн', '44,9', 'Терміново'].join('\n'),
-      );
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        {
-          orderType: 'REGULAR',
-          orderNumber: '0000-066717',
-          clientName: 'Чернявський Владислав',
-          amountDue: '6158.41',
-          currency: 'UAH',
-          exchangeRate: '44.9',
-          comment: 'Терміново',
-        },
-        { notify: true, addPart: false },
-      );
-      expect(reply?.html).toContain('створено');
-    });
-
-    it('should require the number line in a freeform message too', async () => {
-      const reply = await service.handleText(
-        MANAGER,
-        ['Чернявський Владислав', '6 158,41 грн'].join('\n'),
-      );
-
-      expect(reply?.html).toContain("«Номер» — поле обов'язкове.");
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should surface a validation error for a malformed order number line', async () => {
-      const reply = await service.handleText(
-        MANAGER,
-        ['1234-5678', 'Чернявський Владислав', '6158,41 грн'].join('\n'),
-      );
-
-      expect(reply?.html).toContain('«Номер»');
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-  });
-
-  it('should report a number taken between the check and the creation, keeping files buffered', async () => {
-    orders.create.mockRejectedValue(new OrderNumberTakenError('0000-066717'));
-
-    await service.addFile(MANAGER, file());
-    const reply = await service.handleText(MANAGER, template());
-
-    expect(reply?.html).toContain('вже є в системі');
-
-    orders.create.mockResolvedValue(createdOrder());
-    const retry = await service.handleText(MANAGER, template());
-    expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-      expect.anything(),
-      [file()],
-      { telegramId: MANAGER.telegramId, name: MANAGER.name },
-      true,
-      expect.any(String),
-    );
-    expect(retry?.html).toContain('створено');
   });
 
   it('should drop buffered files on cancel', async () => {
+    service.startKit(USER);
     await service.addFile(MANAGER, file());
 
     expect(service.cancel(USER).html).toContain('Скасовано');
 
-    orders.create.mockResolvedValue(createdOrder());
-    await service.handleText(MANAGER, template());
-    expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
+    service.startKit(USER);
+    expect((await service.addFile(MANAGER, file()))?.html).toContain('1/10');
   });
 
   it('should say there is nothing to cancel otherwise', () => {
@@ -564,32 +123,28 @@ describe('OrderDraftService', () => {
   });
 
   describe('attaching a file', () => {
+    beforeEach(() => {
+      service.startKit(USER);
+    });
+
+    it('should not store a file outside an armed mode', async () => {
+      service.cancel(USER);
+
+      expect(await service.addFile(MANAGER, file())).toBeNull();
+      expect(service.cancel(USER).html).toContain('Нема чого');
+    });
+
     it('should just acknowledge a standalone file with no caption', async () => {
       const reply = await service.addFile(MANAGER, file());
 
-      expect(reply.html).toContain('Додано');
-      expect(reply.html).toContain('1/10');
-    });
-
-    it('should create the order from a caption sent together with the file', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-
-      const reply = await service.addFile(MANAGER, file(), template());
-
-      expect(reply.html).toContain('створено');
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.anything(),
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нове замовлення'),
-      );
+      expect(reply?.html).toContain('Додано');
+      expect(reply?.html).toContain('1/10');
     });
 
     it('should reject an unsupported file type', async () => {
       const reply = await service.addFile(MANAGER, { ...file(), mimeType: 'application/zip' });
 
-      expect(reply.html).toContain('не підтримується');
+      expect(reply?.html).toContain('не підтримується');
     });
 
     it('should cap the number of buffered files', async () => {
@@ -599,669 +154,13 @@ describe('OrderDraftService', () => {
 
       const reply = await service.addFile(MANAGER, file('overflow.png'));
 
-      expect(reply.html).toContain('Максимум 10');
+      expect(reply?.html).toContain('Максимум 10');
     });
 
-    it('should nudge instead of the generic fallback when files are waiting for details', async () => {
-      await service.addFile(MANAGER, file());
+    it('should hand a caption to the armed mode', async () => {
+      const reply = await service.addFile(MANAGER, file(), 'це не схоже на повідомлення про Кит');
 
-      const reply = await service.handleText(MANAGER, 'ще не знаю що писати');
-
-      expect(reply?.html).toContain('без даних замовлення');
-    });
-
-    it('should notify admins with a single message merging the order and the file', async () => {
-      const order = createdOrder();
-      orders.create.mockResolvedValue(order);
-
-      await service.addFile(MANAGER, file(), template());
-
-      expect(orders.create).toHaveBeenCalledWith(MANAGER.id, expect.anything(), {
-        notify: false,
-        addPart: false,
-      });
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        order,
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нове замовлення'),
-      );
-      expect(sender.sendToAdmins).not.toHaveBeenCalled();
-    });
-
-    it('should fall back to a separate admin message when the merged caption would be too long', async () => {
-      const longComment = 'Дуже '.repeat(200).trim();
-      const order = createdOrder({ comment: longComment });
-      orders.create.mockResolvedValue(order);
-
-      await service.addFile(MANAGER, file(), template({ Коментар: longComment }));
-
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        order,
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        undefined,
-      );
-      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('Нове замовлення'));
-    });
-
-    it('should treat a file sent after a created order as the start of the next order', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-      await service.handleText(MANAGER, template());
-
-      const reply = await service.addFile(MANAGER, file('after.png'));
-
-      expect(reply.html).toContain('Додано');
-      expect(reply.html).toContain('1/10');
-      expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
-
-      orders.create.mockResolvedValue(
-        createdOrder({ id: 2, orderNumber: '0000-066718', baseNumber: '0000-066718' }),
-      );
-      await service.handleText(MANAGER, template({ Номер: '0000-066718' }));
-
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ orderNumber: '0000-066718' }),
-        [file('after.png')],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.any(String),
-      );
-    });
-  });
-
-  describe('one message: "кілька номерів / реквізити", armed by /requisites', () => {
-    const GROUP = `0000-068772 335,58 грн. ФОП Гук
-0000-068773 971,83 грн. ФОП Гук
-0000-068774 605,41 грн. ФОП Гук
-Загальна сума: 1 912,82 грн
-
-18.09.2026 21:28
-Гук Віктор Степанович ФОП
-44,9%`;
-    const SINGLE = `0000-068652
-19.09.2026
-ФОП Берчатов М.М - 59 438.85 грн 10:50
-ФОП Берчатова Л.О - 59 371.79 грн 10:50
-44,9%`;
-    const MINUS = `Закрила Любов Андрейчук :
-
-ФОП Солтик Олександра Олегівна 4 890,00  грн  13:04  17.09.2026
-
-"IBAN:
-UA549358710000067320000088286"`;
-
-    const dec = (value: string) => new Prisma.Decimal(value);
-    const groupOrders = () =>
-      [
-        ['0000-068772', '335.58'],
-        ['0000-068773', '971.83'],
-        ['0000-068774', '605.41'],
-      ].map(([number, amount], index) =>
-        createdOrder({
-          id: index + 1,
-          orderNumber: number,
-          baseNumber: '0000-068772',
-          amountDue: dec(amount!),
-        }),
-      );
-    const singleOrder = () =>
-      createdOrder({
-        orderNumber: '0000-068652',
-        baseNumber: '0000-068652',
-        amountDue: dec('118810.64'),
-        exchangeRate: dec('44.9'),
-      });
-    const addedRows = () => [
-      {
-        id: 1,
-        orderId: 1,
-        payerName: 'ФОП Берчатов М.М',
-        account: null,
-        amount: dec('59438.85'),
-        paidAt: new Date(),
-        addedByTelegramId: USER,
-        addedByName: 'Христина',
-        createdAt: new Date(),
-      },
-      {
-        id: 2,
-        orderId: 1,
-        payerName: 'ФОП Берчатова Л.О',
-        account: null,
-        amount: dec('59371.79'),
-        paidAt: new Date(),
-        addedByTelegramId: USER,
-        addedByName: 'Христина',
-        createdAt: new Date(),
-      },
-    ];
-
-    const begin = async (text: string) => {
-      service.startRequisites(USER);
-      return service.handleText(MANAGER, text);
-    };
-
-    it('should show the format hint and arm waiting for the very next message', () => {
-      const reply = service.startRequisites(USER);
-
-      expect(reply.html).toContain('одним повідомленням');
-      expect(reply.html).toContain('Файли');
-      expect(reply.buttons).toBeUndefined();
-    });
-
-    it('should refuse a payment-report-shaped message with guidance when the mode was never armed', async () => {
-      const reply = await service.handleText(MANAGER, GROUP);
-
-      expect(reply?.html).toContain('кілька номерів або чужі реквізити');
-      expect(reply?.html).toContain('/requisites');
-      expect(orders.createGroup).not.toHaveBeenCalled();
-    });
-
-    it('should show what it understood and create nothing until the manager agrees', async () => {
-      const reply = await begin(GROUP);
-
-      expect(reply?.html).toContain('Кілька номерів однією оплатою');
-      expect(reply?.html).toContain('№ <b>0000-068773</b> — 971,83 грн');
-      expect(reply?.html).toContain('Разом: <b>1 912,82 грн</b>');
-      expect(
-        reply?.buttons?.flat().map((b) => ('callback_data' in b ? b.callback_data : null)),
-      ).toEqual(['req:ok', 'req:edit', 'req:regular']);
-      expect(orders.createGroup).not.toHaveBeenCalled();
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should create several numbers as one group, as a REGULAR order, with no requisites of their own', async () => {
-      orders.createGroup.mockResolvedValue(groupOrders());
-      await begin(GROUP);
-
-      const reply = await service.confirmRequisites(MANAGER);
-
-      expect(orders.createGroup).toHaveBeenCalledWith(
-        MANAGER.id,
-        [
-          { orderNumber: '0000-068772', amountDue: '335.58', clientName: 'ФОП Гук' },
-          { orderNumber: '0000-068773', amountDue: '971.83', clientName: 'ФОП Гук' },
-          { orderNumber: '0000-068774', amountDue: '605.41', clientName: 'ФОП Гук' },
-        ],
-        {
-          clientName: 'ФОП Гук',
-          currency: 'UAH',
-          exchangeRate: '44.9',
-          comment: '18.09.2026 21:28',
-        },
-      );
-      expect(requisites.addMany).not.toHaveBeenCalled();
-      expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
-      expect(sender.sendToAdmins).toHaveBeenCalledWith(
-        expect.stringContaining('Разом: 1 912,82 грн'),
-      );
-      expect(reply.html).toContain('3 номерів');
-    });
-
-    it('should give the numbers listed in a rate line their own rate and the rest the message rate', async () => {
-      orders.createGroup.mockResolvedValue(groupOrders());
-      const preview = await begin(
-        [
-          '0000-072475 456,6 грн',
-          '0000-072477 507,4 грн',
-          '0000-072654 432,6 грн',
-          'сума: 1 396,6 грн',
-          '4149439025213368 Хабурський Ігор 1 396,6 грн 12:23',
-          '45,3',
-          '23.10.2026',
-          'замовлення : 0000-072475, 0000-072477 - по курсу 44',
-        ].join('\n'),
-      );
-      expect(preview?.html).toContain('№ <b>0000-072475</b> — 456,60 грн · курс 44');
-      expect(preview?.html).toContain('№ <b>0000-072654</b> — 432,60 грн · курс 45,3');
-
-      await service.confirmRequisites(MANAGER);
-
-      expect(orders.createGroup).toHaveBeenCalledWith(
-        MANAGER.id,
-        [
-          { orderNumber: '0000-072475', amountDue: '456.60', exchangeRate: '44' },
-          { orderNumber: '0000-072477', amountDue: '507.40', exchangeRate: '44' },
-          { orderNumber: '0000-072654', amountDue: '432.60' },
-        ],
-        expect.objectContaining({ exchangeRate: '45.3' }),
-      );
-    });
-
-    it('should create several numbers paid in dollars as a dollar group', async () => {
-      orders.createGroup.mockResolvedValue(
-        groupOrders().map((order) => ({ ...order, currency: 'USD' })),
-      );
-      const preview = await begin(
-        '0000-068772 100 $ ФОП Гук\n0000-068773 $50 ФОП Гук\nЗагальна сума: 150 $\nГук Іван\n07.09.2026 14:57',
-      );
-      expect(preview?.html).toContain('Разом: <b>150 $</b>');
-      expect(preview?.html).not.toContain('грн');
-
-      const reply = await service.confirmRequisites(MANAGER);
-
-      expect(orders.createGroup).toHaveBeenCalledWith(
-        MANAGER.id,
-        [
-          { orderNumber: '0000-068772', amountDue: '100.00', clientName: 'ФОП Гук' },
-          { orderNumber: '0000-068773', amountDue: '50.00', clientName: 'ФОП Гук' },
-        ],
-        expect.objectContaining({ currency: 'USD' }),
-      );
-      expect(reply.html).toContain('3 номерів');
-      expect(reply.html).toContain('$');
-      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('$'));
-    });
-
-    it('should create one dollar order for several recipients', async () => {
-      orders.create.mockResolvedValue({ ...singleOrder(), currency: 'USD' });
-      await begin(
-        '0000-068652\n19.09.2026\nФОП Берчатов М.М - 590.50 $ 10:50\nФОП Берчатова Л.О - 400 $ 10:50',
-      );
-
-      await service.confirmRequisites(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        expect.objectContaining({ currency: 'USD', amountDue: '990.50', orderType: 'REGULAR' }),
-        { notify: false, addPart: false },
-      );
-    });
-
-    it('should tell hryvnias and dollars in one message to be sent separately', async () => {
-      const reply = await begin('0000-068772 100 грн\n0000-068773 50 $');
-
-      expect(reply?.html).toContain('Гривні й долари в одному повідомленні');
-      expect(reply?.buttons).toBeUndefined();
-      expect(orders.createGroup).not.toHaveBeenCalled();
-    });
-
-    it('should create one REGULAR order for several recipients and attach each as a structured requisite', async () => {
-      orders.create.mockResolvedValue(singleOrder());
-      const preview = await begin(SINGLE);
-      expect(preview?.html).toContain('порахував');
-      expect(preview?.html).toContain('ФОП Берчатов М.М');
-
-      requisites.addMany.mockResolvedValue(addedRows());
-      const reply = await service.confirmRequisites(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        {
-          clientName: 'ФОП Берчатов М.М',
-          currency: 'UAH',
-          exchangeRate: '44.9',
-          comment: '19.09.2026',
-          orderType: 'REGULAR',
-          orderNumber: '0000-068652',
-          amountDue: '118810.64',
-        },
-        { notify: false, addPart: false },
-      );
-      expect(requisites.addMany).toHaveBeenCalledWith(
-        singleOrder().id,
-        [
-          expect.objectContaining({ payerName: 'ФОП Берчатов М.М', amount: '59438.85' }),
-          expect.objectContaining({ payerName: 'ФОП Берчатова Л.О', amount: '59371.79' }),
-        ],
-        { telegramId: USER, name: 'Христина' },
-      );
-      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('ФОП Берчатов М.М'));
-      expect(reply.html).toContain('№ <b>0000-068652</b>');
-    });
-
-    it('should send a message with no number to the minus button instead of closing a minus', async () => {
-      const reply = await begin(MINUS);
-
-      expect(reply?.html).toContain('/newminus');
-      expect(orders.create).not.toHaveBeenCalled();
-    });
-
-    it('should ask again when a message sent while armed has no amount', async () => {
-      const reply = await begin('0000-068652\nФОП Гук');
-
-      expect(reply?.html).toContain('Не знайшов жодної суми');
-      expect(orders.create).not.toHaveBeenCalled();
-
-      orders.create.mockResolvedValue(singleOrder());
-      const retry = await service.handleText(MANAGER, SINGLE);
-      expect(retry?.html).toContain('Підпис у списках');
-    });
-
-    it('should let the manager correct the message', async () => {
-      await begin(GROUP);
-
-      expect(service.editRequisites(USER).html).toContain('Надішліть виправлене');
-      expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
-      expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Підпис у списках');
-    });
-
-    it('should treat even a perfectly normal order sent while armed via the escape hatch', async () => {
-      // Nothing "wrong" with this text — it's just what a manager sends while /requisites is armed.
-      const classic = [
-        '0000-066092',
-        'Носенко Роман',
-        '4 527,00 грн',
-        '44,9',
-        'Терміново',
-        '07.09.2026 14:57',
-      ].join('\n');
-      const preview = await begin(classic);
-      expect(preview?.html).toContain('Підпис у списках');
-      orders.create.mockResolvedValue(
-        createdOrder({ orderNumber: '0000-066092', clientName: 'Носенко Роман' }),
-      );
-
-      const reply = await service.regularFromRequisites(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        {
-          orderType: 'REGULAR',
-          orderNumber: '0000-066092',
-          clientName: 'Носенко Роман',
-          amountDue: '4527.00',
-          currency: 'UAH',
-          exchangeRate: '44.9',
-          comment: 'Терміново\n07.09.2026 14:57',
-        },
-        { notify: true, addPart: false },
-      );
-      expect(reply.html).toContain('створено');
-      expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
-    });
-
-    it('should forget the draft on /cancel', async () => {
-      await begin(GROUP);
-
-      expect(service.cancel(USER).html).toBe('Скасовано.');
-      expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
-    });
-
-    it('should drop a pending preview when another flow starts (leaveModes)', async () => {
-      await begin(GROUP);
-
-      service.leaveModes(USER);
-
-      expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
-      expect((await service.handleText(MANAGER, GROUP))?.html).toContain(
-        'кілька номерів або чужі реквізити',
-      );
-    });
-
-    it('should not send an answer that is too old, nor to the wrong manager', async () => {
-      const now = jest.spyOn(Date, 'now');
-      now.mockReturnValue(1_000_000);
-      await begin(GROUP);
-
-      const other = { ...MANAGER, id: 8, telegramId: 6000000000n };
-      expect((await service.confirmRequisites(other)).html).toContain('Немає даних');
-
-      now.mockReturnValue(1_000_000 + 11 * 60_000);
-      expect((await service.confirmRequisites(MANAGER)).html).toContain('Немає даних');
-      expect(orders.createGroup).not.toHaveBeenCalled();
-      now.mockRestore();
-    });
-
-    it('should read a message sent as the caption of a file, once armed', async () => {
-      service.startRequisites(USER);
-      const reply = await service.addFile(MANAGER, file(), SINGLE);
-
-      expect(reply.html).toContain('Підпис у списках');
-      expect(reply.html).toContain('Файлів: 1');
-    });
-
-    it('should attach the files to the first order and merge the notice into their caption', async () => {
-      orders.createGroup.mockResolvedValue(groupOrders());
-      await service.addFile(MANAGER, file());
-      await begin(GROUP);
-
-      await service.confirmRequisites(MANAGER);
-
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ orderNumber: '0000-068772' }),
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Разом: 1 912,82 грн'),
-      );
-      expect(sender.sendToAdmins).not.toHaveBeenCalled();
-    });
-
-    describe('when a number is already in the system', () => {
-      const existing = (orderNumber: string) => ({
-        order: { orderNumber, clientName: 'Хтось', amountDue: dec('100'), currency: 'UAH' },
-        amountPaid: dec('0'),
-      });
-
-      it('should add one more part when the only number exists, and say so', async () => {
-        orders.findWithBalance.mockResolvedValue(existing('0000-068652'));
-        orders.create.mockResolvedValue(singleOrder());
-        const preview = await begin(SINGLE);
-        expect(preview?.html).toContain('ще однією частиною');
-
-        await service.confirmRequisites(MANAGER);
-
-        expect(orders.create).toHaveBeenCalledWith(MANAGER.id, expect.anything(), {
-          notify: false,
-          addPart: true,
-        });
-      });
-
-      it('should refuse a dollar part of a number that is in hryvnias', async () => {
-        orders.findWithBalance.mockResolvedValue(existing('0000-068652'));
-
-        const reply = await begin('0000-068652\n19.09.2026\nФОП Берчатов М.М - 590.50 $ 10:50');
-
-        expect(reply?.html).toContain('в іншій валюті');
-        expect(reply?.buttons).toBeUndefined();
-      });
-
-      it('should refuse when the number belongs to another group', async () => {
-        orders.findWithBalance.mockResolvedValue(existing('0000-000001'));
-
-        const reply = await begin(SINGLE);
-
-        expect(reply?.html).toContain('у складі № 0000-000001');
-        expect(reply?.buttons).toBeUndefined();
-      });
-
-      it('should leave existing numbers out of a group and work out the rest', async () => {
-        orders.findWithBalance.mockImplementation((number: string) =>
-          Promise.resolve(number === '0000-068773' ? existing('0000-068773') : null),
-        );
-        orders.createGroup.mockResolvedValue(
-          groupOrders().slice(0, 1).concat(groupOrders().slice(2)),
-        );
-
-        const preview = await begin(GROUP);
-        expect(preview?.html).toContain('Не додаю, бо вони вже є в системі: 0000-068773');
-        expect(preview?.html).toContain('Разом: <b>940,99 грн</b>');
-        expect(preview?.html).not.toContain('971,83');
-
-        const reply = await service.confirmRequisites(MANAGER);
-
-        expect(orders.createGroup).toHaveBeenCalledWith(
-          MANAGER.id,
-          [
-            { orderNumber: '0000-068772', amountDue: '335.58', clientName: 'ФОП Гук' },
-            { orderNumber: '0000-068774', amountDue: '605.41', clientName: 'ФОП Гук' },
-          ],
-          expect.objectContaining({ comment: '18.09.2026 21:28' }),
-        );
-        expect(sender.sendToAdmins).toHaveBeenCalledWith(
-          expect.stringContaining('Не додано (уже є в системі): 0000-068773'),
-        );
-        expect(reply.html).toContain('Не додано (уже є в системі): 0000-068773');
-      });
-
-      it('should refuse a group whose numbers all exist', async () => {
-        orders.findWithBalance.mockResolvedValue(existing('0000-068772'));
-
-        const reply = await begin(GROUP);
-
-        expect(reply?.html).toContain('Усі ці номери вже є в системі');
-      });
-    });
-
-    it('should ask to resend when a number appeared between the preview and the answer', async () => {
-      orders.create.mockRejectedValue(new OrderNumberTakenError('0000-068652'));
-      await begin(SINGLE);
-
-      const reply = await service.confirmRequisites(MANAGER);
-
-      expect(reply.html).toContain("щойно з'явився");
-      expect(sender.sendToAdmins).not.toHaveBeenCalled();
-      expect((await service.handleText(MANAGER, SINGLE))?.html).toContain('Підпис у списках');
-    });
-  });
-
-  describe('closing a minus, armed by /newminus', () => {
-    const EXAMPLE = `Закриття мінусу клієнта Гук Руслан за підрахунком 31 серпня 2026
-0000-065607
-05.09.2026 12.:36
-27 409 грн. (з урахуванням 1%)
-ФОП берчатов м. М
-https://docs.google.com/spreadsheets/d/abc/edit`;
-
-    const closing = () =>
-      createdOrder({
-        orderNumber: '1789996839638',
-        baseNumber: '1789996839638',
-        orderType: 'MINUS_CLOSING',
-        clientName: 'Гук Руслан',
-        amountDue: new Prisma.Decimal('27409'),
-        exchangeRate: null,
-        comment: '№ 0000-065607 · з урахуванням 1%',
-        paidAt: new Date('2026-09-05T09:36:00Z'),
-        ourFop: 'берчатов м. М',
-        period: 'за підрахунком 31 серпня 2026',
-        sheetUrl: 'https://docs.google.com/spreadsheets/d/abc/edit',
-      });
-
-    const begin = async (text: string) => {
-      service.startMinus(USER);
-      return service.handleText(MANAGER, text);
-    };
-
-    it('should create a closing in dollars', async () => {
-      orders.create.mockResolvedValue({
-        ...closing(),
-        amountDue: new Prisma.Decimal('1500'),
-        currency: 'USD',
-      });
-
-      const preview = await begin(
-        'Закриття мінусу Гук Руслан\n05.09.2026 12:36\nСума: $1 500\nФОП Берчатов',
-      );
-      expect(preview?.html).toContain('Загальна сума: <b>1 500 $</b>');
-      expect(preview?.html).not.toContain('грн');
-
-      const reply = await service.confirmMinus(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        expect.objectContaining({
-          orderType: 'MINUS_CLOSING',
-          currency: 'USD',
-          amountDue: '1500.00',
-        }),
-        { notify: false },
-      );
-      expect(reply.html).toContain('1 500 $');
-    });
-
-    it('should show the template and arm waiting for the very next message', () => {
-      const reply = service.startMinus(USER);
-
-      expect(reply.html).toContain('Закриття мінусу');
-      expect(reply.html).toContain('Таблиця:');
-    });
-
-    it('should preview the message in the template, then create the closing with every field', async () => {
-      orders.create.mockResolvedValue(closing());
-
-      const preview = await begin(EXAMPLE);
-      expect(preview?.html).toContain('Клієнт: <b>Гук Руслан</b> за підрахунком 31 серпня 2026');
-      expect(preview?.html).toContain('Наш ФОП: берчатов м. М');
-      expect(orders.create).not.toHaveBeenCalled();
-
-      const reply = await service.confirmMinus(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(
-        MANAGER.id,
-        {
-          orderType: 'MINUS_CLOSING',
-          clientName: 'Гук Руслан',
-          amountDue: '27409.00',
-          currency: 'UAH',
-          exchangeRate: undefined,
-          comment: '№ 0000-065607 · з урахуванням 1%',
-          paidAt: new Date('2026-09-05T09:36:00Z'),
-          ourFop: 'берчатов м. М',
-          period: 'за підрахунком 31 серпня 2026',
-          sheetUrl: 'https://docs.google.com/spreadsheets/d/abc/edit',
-        },
-        { notify: false },
-      );
-      expect(requisites.addMany).not.toHaveBeenCalled();
-      expect(reply.html).toContain('Закриття мінусу № <b>1789996839638</b> створено');
-      const [[notice]] = sender.sendToAdmins.mock.calls as [[string]];
-      expect(notice).toContain('Закриття заборгованості клієнта</b>\n№ <b>1789996839638</b>');
-      expect(notice).toContain('№ <b>1789996839638</b>');
-    });
-
-    it('should store card payments as requisites of the closing', async () => {
-      orders.create.mockResolvedValue(closing());
-
-      await begin(
-        'Закриття мінусу Кожушко Игорь\n06.09.2025 11:47\n2 287,00 Грн\n5168 7451 7598 8366 Носенко Роман 2 287,00 Грн\nбез %',
-      );
-      await service.confirmMinus(MANAGER);
-
-      expect(requisites.addMany).toHaveBeenCalledWith(
-        1,
-        [
-          expect.objectContaining({
-            payerName: 'Носенко Роман',
-            account: '5168 7451 7598 8366',
-            amount: '2287.00',
-          }),
-        ],
-        { telegramId: USER, name: 'Христина' },
-      );
-    });
-
-    it('should read a message without a number as a closing only while armed', async () => {
-      const armed = await begin('Гук Руслан\n27 409 грн\nФОП Берчатов М. М.\n05.09.2026 12:36');
-      expect(armed?.html).toContain('Закриття заборгованості клієнта');
-
-      service.cancel(USER);
-      const plain = await service.handleText(MANAGER, 'Гук Руслан\n27 409 грн');
-      expect(plain?.html).toContain("«Номер» — поле обов'язкове.");
-    });
-
-    it('should never stay armed together with the requisites mode', async () => {
-      service.startMinus(USER);
-      service.startRequisites(USER);
-
-      expect(
-        (await service.handleText(MANAGER, 'Закриття мінусу Кожушко Игорь\nФОП А - 2 287 грн'))
-          ?.html,
-      ).toContain('/newminus');
-    });
-
-    it('should let the manager correct the message', async () => {
-      await begin(EXAMPLE);
-
-      expect(service.editMinus(USER).html).toContain('Надішліть виправлене');
-      expect((await service.confirmMinus(MANAGER)).html).toContain('Немає даних');
-      expect((await service.handleText(MANAGER, EXAMPLE))?.html).toContain(
-        'Закриття заборгованості клієнта',
-      );
+      expect(reply?.html).toContain('Потрібно виправити');
     });
   });
 
@@ -1412,14 +311,6 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
       expect((await begin())?.html).toContain('у євро, а оплата в гривнях');
     });
-
-    it('should refuse the sample outside the button instead of taking the date for the ФОП', async () => {
-      const reply = await service.handleText(MANAGER, SAMPLE);
-
-      expect(reply?.html).toContain('схоже на дату');
-      expect(reply?.html).toContain('/cash');
-      expect(orders.create).not.toHaveBeenCalled();
-    });
   });
 
   describe('a foreign order payment, armed by /foreign', () => {
@@ -1476,15 +367,11 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
     });
 
-    it('should point to /foreign when the template comes outside the button', async () => {
-      const reply = await service.handleText(MANAGER, TEMPLATE);
-
-      expect(reply?.html).toContain('/foreign');
+    it('should ignore the template outside the armed mode', async () => {
+      expect(await service.handleText(MANAGER, TEMPLATE)).toBeNull();
+      expect(await service.addFile(MANAGER, file(), TEMPLATE)).toBeNull();
       expect(orders.create).not.toHaveBeenCalled();
       expect(orders.createGroup).not.toHaveBeenCalled();
-
-      const withFile = await service.addFile(MANAGER, file(), TEMPLATE);
-      expect(withFile.html).toContain('/foreign');
     });
 
     it('should create the order in the currency the template names', async () => {
@@ -1512,6 +399,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
   describe('onApplicationShutdown', () => {
     it('should warn a manager with buffered files', async () => {
+      service.startKit(USER);
       await service.addFile(MANAGER, file());
 
       await service.onApplicationShutdown();
@@ -1522,55 +410,8 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       );
     });
 
-    it('should warn a manager with an unanswered part offer', async () => {
-      orders.findWithBalance.mockResolvedValue({
-        order: {
-          orderNumber: '0000-066717',
-          clientName: 'Чернявський Владислав',
-          amountDue: new Prisma.Decimal('6158.41'),
-          currency: 'UAH',
-        },
-        amountPaid: new Prisma.Decimal('0'),
-      });
-      await service.handleText(MANAGER, template());
-
-      await service.onApplicationShutdown();
-
-      expect(sender.send).toHaveBeenCalledWith(MANAGER.telegramId, expect.any(String));
-    });
-
-    it('should not warn once the part offer has expired', async () => {
-      orders.findWithBalance.mockResolvedValue({
-        order: {
-          orderNumber: '0000-066717',
-          clientName: 'Чернявський Владислав',
-          amountDue: new Prisma.Decimal('6158.41'),
-          currency: 'UAH',
-        },
-        amountPaid: new Prisma.Decimal('0'),
-      });
-      const now = jest.spyOn(Date, 'now');
-      now.mockReturnValue(1_000_000);
-      await service.handleText(MANAGER, template());
-
-      now.mockReturnValue(1_000_000 + 11 * 60_000);
-      await service.onApplicationShutdown();
-
-      expect(sender.send).not.toHaveBeenCalled();
-      now.mockRestore();
-    });
-
-    it('should warn a manager who armed the requisites mode', async () => {
-      service.startRequisites(USER);
-
-      await service.onApplicationShutdown();
-
-      expect(sender.send).toHaveBeenCalledWith(USER, expect.any(String));
-    });
-
-    it('should warn a manager with a pending requisites preview', async () => {
-      service.startRequisites(USER);
-      await service.handleText(MANAGER, '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%');
+    it('should warn a manager who armed a mode', async () => {
+      service.startCash(USER);
 
       await service.onApplicationShutdown();
 
@@ -1578,6 +419,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
     });
 
     it('should warn each affected manager only once, and leave others alone', async () => {
+      service.startKit(USER);
       await service.addFile(MANAGER, file());
       const other = { ...MANAGER, id: 8, telegramId: 6000000000n };
 

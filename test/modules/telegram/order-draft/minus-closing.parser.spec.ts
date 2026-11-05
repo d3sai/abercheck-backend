@@ -180,7 +180,7 @@ describe('parseMinusClosing', () => {
     ]);
   });
 
-  it('should read the short labels the /newminus hint shows', () => {
+  it('should read the short labels the minus-closing hint shows', () => {
     const plan = planOf(
       [
         'Клієнт: Гук Руслан за підрахунком 31.08.2026',

@@ -9,12 +9,10 @@ import { ADMIN_HELP } from '../admin/admin.update';
 import { MENU_LABEL, NEW_REQUEST_LABEL } from './menu';
 import { DeleteAction, OrderDeleteService } from '../orders-list/order-delete.service';
 import { OrderListService } from '../orders-list/order-list.service';
-import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
+import { OrderDraftService } from '../order-draft/order-draft.service';
 import { CashAction } from '../order-draft/cash.messages';
 import { ForeignAction } from '../order-draft/foreign.messages';
 import { KitAction } from '../order-draft/kit.messages';
-import { MinusAction } from '../order-draft/minus-closing.messages';
-import { RequisitesAction } from '../order-draft/requisites.messages';
 import {
   type CommandContext,
   edit,
@@ -40,9 +38,6 @@ export class BotUpdate implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     await this.sender.registerCommands(
       [
-        { command: 'new', description: 'Нове замовлення' },
-        { command: 'newminus', description: 'Закрити мінус' },
-        { command: 'requisites', description: 'Кілька номерів або чужі реквізити' },
         { command: 'kit', description: 'Оплата на Кит' },
         { command: 'cash', description: 'Оплата готівкою' },
         { command: 'foreign', description: 'Оплата закордонного замовлення' },
@@ -149,31 +144,6 @@ export class BotUpdate implements OnApplicationBootstrap {
     await ctx.deleteMessage().catch(() => undefined);
   }
 
-  @Command('new')
-  async newOrder(@Ctx() ctx: Context): Promise<void> {
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      this.drafts.leaveModes(manager.telegramId);
-      await reply(ctx, this.drafts.hint());
-    }
-  }
-
-  @Command('newminus')
-  async newMinusOrder(@Ctx() ctx: Context): Promise<void> {
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await reply(ctx, this.drafts.startMinus(manager.telegramId));
-    }
-  }
-
-  @Command('requisites')
-  async requisites(@Ctx() ctx: Context): Promise<void> {
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await reply(ctx, this.drafts.startRequisites(manager.telegramId));
-    }
-  }
-
   @Command('kit')
   async kit(@Ctx() ctx: Context): Promise<void> {
     const manager = await this.activeManager(ctx);
@@ -202,66 +172,6 @@ export class BotUpdate implements OnApplicationBootstrap {
   async cancel(@Ctx() ctx: Context): Promise<void> {
     if (isPrivate(ctx) && ctx.from) {
       await reply(ctx, this.drafts.cancel(BigInt(ctx.from.id)));
-    }
-  }
-
-  @Action(DraftAction.AddPart)
-  async addPart(@Ctx() ctx: Context): Promise<void> {
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await ctx.answerCbQuery();
-      await edit(ctx, await this.drafts.addPart(manager));
-    }
-  }
-
-  @Action(DraftAction.SkipPart)
-  async skipPart(@Ctx() ctx: Context): Promise<void> {
-    if (isPrivate(ctx) && ctx.from) {
-      await ctx.answerCbQuery();
-      await edit(ctx, this.drafts.skipPart(BigInt(ctx.from.id)));
-    }
-  }
-
-  @Action(RequisitesAction.Send)
-  async sendRequisites(@Ctx() ctx: Context): Promise<void> {
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await ctx.answerCbQuery();
-      await edit(ctx, await this.drafts.confirmRequisites(manager));
-    }
-  }
-
-  @Action(RequisitesAction.Edit)
-  async editRequisites(@Ctx() ctx: Context): Promise<void> {
-    if (isPrivate(ctx) && ctx.from) {
-      await ctx.answerCbQuery();
-      await edit(ctx, this.drafts.editRequisites(BigInt(ctx.from.id)));
-    }
-  }
-
-  @Action(RequisitesAction.Regular)
-  async regularFromRequisites(@Ctx() ctx: Context): Promise<void> {
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await ctx.answerCbQuery();
-      await edit(ctx, await this.drafts.regularFromRequisites(manager));
-    }
-  }
-
-  @Action(MinusAction.Send)
-  async sendMinus(@Ctx() ctx: Context): Promise<void> {
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await ctx.answerCbQuery();
-      await edit(ctx, await this.drafts.confirmMinus(manager));
-    }
-  }
-
-  @Action(MinusAction.Edit)
-  async editMinus(@Ctx() ctx: Context): Promise<void> {
-    if (isPrivate(ctx) && ctx.from) {
-      await ctx.answerCbQuery();
-      await edit(ctx, this.drafts.editMinus(BigInt(ctx.from.id)));
     }
   }
 
@@ -322,12 +232,6 @@ export class BotUpdate implements OnApplicationBootstrap {
       return next();
     }
     switch (ctx.text) {
-      case MENU_LABEL.NewOrder:
-        return this.newOrder(ctx);
-      case MENU_LABEL.NewMinus:
-        return this.newMinusOrder(ctx);
-      case MENU_LABEL.Requisites:
-        return this.requisites(ctx);
       case MENU_LABEL.Kit:
         return this.kit(ctx);
       case MENU_LABEL.Cash:
@@ -391,7 +295,8 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (!manager) {
       return;
     }
-    await reply(ctx, await this.drafts.addFile(manager, file, caption));
+    const answer = await this.drafts.addFile(manager, file, caption);
+    await reply(ctx, answer ?? { html: HELP, menu: true });
   }
 
   private async activeManager(ctx: Context): Promise<Manager | null> {

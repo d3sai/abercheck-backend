@@ -2,9 +2,6 @@ import type { ReplyKeyboardMarkup } from 'telegraf/types';
 
 export const MENU_LABEL = {
   MyRequests: '🗂 Мої запити',
-  NewOrder: '📝 Нове замовлення',
-  NewMinus: '➖ Закрити мінус',
-  Requisites: '💳 Кілька номерів / реквізити',
   Kit: '💵 Оплата на Кит',
   Cash: '💰 Оплата готівкою',
   Foreign: '🌍 Оплата закордонного замовлення',
@@ -19,8 +16,6 @@ export const NEW_REQUEST_LABEL = '📝 Новий запит';
 export const mainMenuKeyboard: ReplyKeyboardMarkup = {
   keyboard: [
     [{ text: MENU_LABEL.MyRequests }],
-    [{ text: MENU_LABEL.NewOrder }, { text: MENU_LABEL.NewMinus }],
-    [{ text: MENU_LABEL.Requisites }],
     [{ text: MENU_LABEL.Kit }, { text: MENU_LABEL.Cash }],
     [{ text: MENU_LABEL.Foreign }],
     [{ text: MENU_LABEL.List }, { text: MENU_LABEL.Cancel }],

@@ -1,6 +1,7 @@
 import { type Manager, ManagerStatus } from '../../../generated/prisma/client';
 import type { BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
+import { NEW_REQUEST_LABEL } from '../core/menu';
 
 export function newManagerNotice(manager: Manager): string {
   return [
@@ -12,13 +13,9 @@ export function newManagerNotice(manager: Manager): string {
 }
 
 export const HELP = [
-  'Замовлення надсилайте одним повідомленням, кожне поле з нового рядка:',
-  "Номер*, ФОП/ТОВ*, Сума*, Курс, Коментар (* — обов'язкове).",
+  `Нові запити на оплату — кнопка «${NEW_REQUEST_LABEL}» біля поля повідомлення.`,
   '',
   'Кнопки внизу 👇 або команди:',
-  '/new — нове замовлення',
-  '/newminus — закрити мінус',
-  '/requisites — кілька номерів або чужі реквізити',
   '/kit — оплата на Кит',
   '/cash — оплата готівкою',
   '/foreign — оплата закордонного замовлення',

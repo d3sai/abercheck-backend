@@ -4,19 +4,9 @@ import {
   type OrderRequisite,
   Prisma,
 } from '../../../generated/prisma/client';
-import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
-import { type BotReply, button } from '../core/bot-reply';
+import type { BotReply } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
-import { MENU_LABEL } from '../core/menu';
 import { formatRate } from '../notifications/order-templates';
-import type { NumberCheck } from './draft-orders';
-import type { RequisitesPlan } from './requisites.parser';
-
-export const RequisitesAction = {
-  Send: 'req:ok',
-  Edit: 'req:edit',
-  Regular: 'req:regular',
-} as const;
 
 export function requisiteBlock(
   payerName: string,
@@ -34,47 +24,6 @@ export function requisiteBlock(
   return `<pre>${fields.map(escapeHtml).join('\n')}</pre>`;
 }
 
-export function requisitesHint(): BotReply {
-  const example = [
-    '0000-066092 3 000 грн',
-    '0000-066093 2 500 грн',
-    '0000-066094 1 167 грн',
-    'сума: 6 667 грн',
-    'ФОП Носенко Роман 4 527 грн 14:57',
-    '4441 1110 6964 5962 Андріанов Олександр 2 140 грн 14:59',
-    '45',
-    '07.09.2026',
-  ].join('\n');
-  return {
-    html: [
-      '💳 <b>Кілька номерів або чужі реквізити</b>',
-      "Надішліть одним повідомленням, кожен пункт з нового рядка (* — обов'язково):",
-      '• Номер і сума* — кожен номер окремим рядком',
-      '• Загальна сума — «сума: 6 667 грн»',
-      '• Реквізити* — ФОП, ТОВ чи картка з іменем, сумою і часом оплати; кілька — кожні з нового рядка',
-      '• Курс',
-      '• Дата*',
-      '',
-      `<pre>${example}</pre>`,
-      '',
-      'Коментар — за потреби окремим рядком «Коментар: …».',
-      'Інший курс для окремих номерів — рядком «замовлення: 0000-066092, 0000-066093 - по курсу 44».',
-      'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
-      `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
-    ].join('\n'),
-  };
-}
-
-export function multipleOrRequisitesGuard(): BotReply {
-  return {
-    html: [
-      '⚠️ Схоже на кілька номерів або чужі реквізити.',
-      `Натисніть «${escapeHtml(MENU_LABEL.Requisites)}» (/requisites) і надішліть це повідомлення ще раз.`,
-      `Якщо це оплата на Кит, натисніть «${escapeHtml(MENU_LABEL.Kit)}» (/kit).`,
-    ].join('\n'),
-  };
-}
-
 export function requisitesErrors(errors: string[]): BotReply {
   return {
     html: [
@@ -82,105 +31,6 @@ export function requisitesErrors(errors: string[]): BotReply {
       ...errors.map((error) => `• ${escapeHtml(error)}`),
       'Після виправлення надішліть його ще раз.',
     ].join('\n'),
-  };
-}
-
-export interface PreviewContext {
-  addsPart: boolean;
-  skipped: string[];
-  files: number;
-}
-
-export function requisitesPreview(plan: RequisitesPlan, context: PreviewContext): BotReply {
-  const lines: string[] = plan.kind === 'group' ? ['<b>Кілька номерів однією оплатою:</b>'] : [];
-
-  const ownRates = plan.kind === 'group' && plan.items.some((item) => item.rate);
-  if (plan.kind === 'group') {
-    for (const item of plan.items) {
-      const note = item.note ? ` ${escapeHtml(item.note)}` : '';
-      const rate = ownRates ? (item.rate ?? plan.rate) : null;
-      const rateNote = rate ? ` · курс ${escapeHtml(rate.replace('.', ','))}` : '';
-      lines.push(
-        `№ <b>${escapeHtml(item.number)}</b> — ${money(item.amount, plan.currency)}${note}${rateNote}`,
-      );
-    }
-    lines.push(`Разом: <b>${money(plan.total, plan.currency)}</b>`);
-  } else {
-    if (plan.kind === 'single') {
-      lines.push(`№ <b>${escapeHtml(plan.items[0]!.number)}</b>`);
-    }
-    lines.push(`Сума: <b>${money(plan.total, plan.currency)}</b>`);
-  }
-  if (plan.rate && !ownRates) {
-    lines.push(`Курс: ${escapeHtml(plan.rate.replace('.', ','))}`);
-  }
-  if (plan.comment) {
-    lines.push(`Коментар: ${escapeHtml(plan.comment)}`);
-  }
-  if (plan.requisiteLines.length > 0) {
-    lines.push('', 'Реквізити:');
-    plan.requisiteLines.forEach((item, index) => {
-      if (index > 0) {
-        lines.push('');
-      }
-      lines.push(
-        requisiteBlock(
-          item.payerName,
-          item.account,
-          new Prisma.Decimal(item.amount),
-          plan.currency,
-          item.paidAt,
-        ),
-      );
-    });
-  }
-  if (plan.kind !== 'group') {
-    lines.push('', `Підпис у списках: ${escapeHtml(plan.label)}`);
-  }
-  if (context.files > 0) {
-    lines.push(`Файлів: ${context.files}`);
-  }
-
-  const warnings = [
-    ...(context.addsPart
-      ? ['Такий номер уже є в системі — це буде ще однією частиною цього номера.']
-      : []),
-    ...(context.skipped.length > 0
-      ? [`Не додаю, бо вони вже є в системі: ${context.skipped.join(', ')}.`]
-      : []),
-    ...plan.warnings,
-  ];
-  if (warnings.length > 0) {
-    lines.push('', ...warnings.map((warning) => `⚠️ ${escapeHtml(warning)}`));
-  }
-
-  return {
-    html: lines.join('\n'),
-    buttons: [
-      [
-        button('✅ Надіслати', RequisitesAction.Send),
-        button('✏️ Виправити', RequisitesAction.Edit),
-      ],
-      [button('📝 Це звичайне замовлення', RequisitesAction.Regular)],
-    ],
-  };
-}
-
-export function requisitesCreatedReply(orders: Order[], skipped: string[]): BotReply {
-  const [first] = orders;
-  if (!first) {
-    return { html: '⚠️ Нічого не створено.' };
-  }
-  const total = orders.reduce((sum, order) => sum.plus(order.amountDue), new Prisma.Decimal(0));
-  const skippedNote =
-    skipped.length > 0 ? [`Не додано (уже є в системі): ${skipped.join(', ')}.`] : [];
-
-  const head =
-    orders.length > 1
-      ? `✅ Оплату зареєстровано: ${orders.length} номерів · ${money(total, first.currency)}`
-      : `✅ Оплату зареєстровано: № <b>${escapeHtml(first.orderNumber)}</b> · ${money(total, first.currency)}`;
-  return {
-    html: [head, 'Повідомлю про оплату.', ...skippedNote].join('\n'),
   };
 }
 
@@ -231,20 +81,4 @@ export function adminRequisitesMessage(
     `Менеджер: ${escapeHtml(managerName)}`,
     `Створено: ${formatKyivDateTime(first.createdAt)}`,
   ].join('\n');
-}
-
-/** The bot's answer when a number of the plan already exists and the plan cannot go on. */
-export function existingNumberReply(check: Exclude<NumberCheck, { ok: true }>): BotReply {
-  switch (check.reason) {
-    case 'in-group':
-      return {
-        html: `⚠️ Номер ${escapeHtml(check.number)} уже є в системі у складі № ${escapeHtml(check.groupNumber)} — додати до нього не можна.`,
-      };
-    case 'other-currency':
-      return {
-        html: `⚠️ Номер ${escapeHtml(check.number)} уже є в системі в іншій валюті — частину в іншій валюті додати не можна.`,
-      };
-    case 'all-taken':
-      return { html: `⚠️ Усі ці номери вже є в системі: ${check.skipped.join(', ')}.` };
-  }
 }

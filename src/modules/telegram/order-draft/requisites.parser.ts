@@ -522,9 +522,7 @@ export function parseRequisites(raw: string): RequisitesResult {
     } else {
       return {
         ok: false,
-        errors: [
-          'Немає номера. Якщо це мінус, натисніть «➖ Закрити мінус» (/newminus) і надішліть ще раз.',
-        ],
+        errors: ['Немає номера. Напишіть номер замовлення і надішліть ще раз.'],
       };
     }
   }

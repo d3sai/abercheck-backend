@@ -647,12 +647,12 @@ describe('parseRequisites', () => {
 
   describe('a message with no number', () => {
     it.each([SAMPLES.minusFourPayments, SAMPLES.minusTimeBeforeDate, SAMPLES.minusPayerInBrackets])(
-      'should point at the minus-closing button instead of closing a minus here',
+      'should ask for the order number instead of closing a minus here',
       (text) => {
         const result = parseRequisites(text);
 
         expect(result.ok).toBe(false);
-        expect(!result.ok && result.errors.join(' ')).toContain('/newminus');
+        expect(!result.ok && result.errors.join(' ')).toContain('Немає номера');
       },
     );
   });

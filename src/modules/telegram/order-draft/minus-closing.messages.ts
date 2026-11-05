@@ -4,17 +4,9 @@ import {
   type OrderRequisite,
   Prisma,
 } from '../../../generated/prisma/client';
-import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
-import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
 import { formatRate } from '../notifications/order-templates';
-import type { MinusPlan } from './minus-closing.parser';
 import { requisiteBlock } from './requisites.messages';
-
-export const MinusAction = {
-  Send: 'minus:ok',
-  Edit: 'minus:edit',
-} as const;
 
 interface ClosingView {
   orderNumber?: string;
@@ -53,55 +45,6 @@ function closingLines(view: ClosingView): string[] {
     ...(view.rate ? [`Курс: ${formatRate(view.rate)}`] : []),
     ...(view.sheetUrl ? [`Посилання на таблицю: ${escapeHtml(view.sheetUrl)}`] : []),
   ];
-}
-
-export function minusHint(): BotReply {
-  const example = [
-    'Клієнт: Гук Руслан за підрахунком 31.08.2026',
-    'Дата: 05.09.2026 12:36',
-    'Сума: 27 409 грн',
-    'Отримано на: ФОП Берчатов М. М.',
-    'Коментар: з урахуванням 1%',
-    'Курс: 44,9',
-    'Таблиця: https://docs.google.com/…',
-  ].join('\n');
-  return {
-    html: [
-      '➖ <b>Закриття мінусу</b>',
-      'Надішліть одним повідомленням.',
-      'Оплата на картку чи чужий ФОП/ТОВ: кожен платіж окремим рядком, наприклад:',
-      '',
-      `<pre>${escapeHtml(example)}</pre>`,
-      'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
-      '',
-      `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
-    ].join('\n'),
-  };
-}
-
-export function minusPreview(plan: MinusPlan, files: number): BotReply {
-  const lines = [
-    ...closingLines({
-      ...plan,
-      requisites: plan.requisiteLines.map((r) => ({ ...r, amount: new Prisma.Decimal(r.amount) })),
-      rate: plan.rate ? new Prisma.Decimal(plan.rate) : null,
-    }),
-    ...(files > 0 ? ['', `Файлів: ${files}`] : []),
-    ...(plan.warnings.length > 0 ? ['', ...plan.warnings.map((w) => `⚠️ ${escapeHtml(w)}`)] : []),
-  ];
-  return {
-    html: lines.join('\n'),
-    buttons: [[button('✅ Надіслати', MinusAction.Send), button('✏️ Виправити', MinusAction.Edit)]],
-  };
-}
-
-export function minusCreatedReply(order: Order): BotReply {
-  return {
-    html: [
-      `➖ Закриття мінусу № <b>${escapeHtml(order.orderNumber)}</b> створено · ${money(order.amountDue, order.currency)}`,
-      escapeHtml(order.clientName),
-    ].join('\n'),
-  };
 }
 
 export function adminMinusMessage(

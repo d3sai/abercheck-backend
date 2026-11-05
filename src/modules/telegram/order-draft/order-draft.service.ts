@@ -10,31 +10,17 @@ import { BOT_RESTART_NOTICE, type BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import { CashDraftService } from './cash-draft.service';
-import { DraftAction } from './draft-action';
 import { ForeignDraftService } from './foreign-draft.service';
-import { foreignGuard } from './foreign.messages';
-import { isForeignTemplate } from './foreign.parser';
 import { KitDraftService } from './kit-draft.service';
-import { MinusClosingDraftService } from './minus-closing-draft.service';
-import { OrderCreationFlowService } from './order-creation-flow.service';
-import { PartOfferStore } from './part-offer.store';
 import { PendingFilesStore } from './pending-files.store';
-import { multipleOrRequisitesGuard } from './requisites.messages';
-import { RequisitesDraftService } from './requisites-draft.service';
-
-export { DraftAction };
 
 @Injectable()
 export class OrderDraftService implements OnApplicationShutdown {
   constructor(
-    private readonly orderCreation: OrderCreationFlowService,
-    private readonly requisitesFlow: RequisitesDraftService,
-    private readonly minusFlow: MinusClosingDraftService,
     private readonly kitFlow: KitDraftService,
     private readonly cashFlow: CashDraftService,
     private readonly foreignFlow: ForeignDraftService,
     private readonly pendingFiles: PendingFilesStore,
-    private readonly partOffers: PartOfferStore,
     private readonly sender: TelegramSender,
   ) {}
 
@@ -42,22 +28,9 @@ export class OrderDraftService implements OnApplicationShutdown {
     const now = Date.now();
     const ids = new Set<bigint>([
       ...this.pendingFiles.pendingUserIds(),
-      ...this.partOffers.pendingUserIds(now),
       ...this.modes.flatMap((mode) => mode.pendingUserIds(now)),
     ]);
     await Promise.all([...ids].map((id) => this.sender.send(id, BOT_RESTART_NOTICE)));
-  }
-
-  hint(): BotReply {
-    return this.orderCreation.hint();
-  }
-
-  startRequisites(userId: bigint): BotReply {
-    return this.switchTo(userId, this.requisitesFlow);
-  }
-
-  startMinus(userId: bigint): BotReply {
-    return this.switchTo(userId, this.minusFlow);
   }
 
   startKit(userId: bigint): BotReply {
@@ -72,25 +45,20 @@ export class OrderDraftService implements OnApplicationShutdown {
     return this.switchTo(userId, this.foreignFlow);
   }
 
+  // null outside an armed mode: the caller shows the help instead.
   async handleText(manager: Manager, text: string): Promise<BotReply | null> {
-    const armed = await this.handleArmed(manager, text);
-    if (armed) {
-      return armed;
-    }
-    if (isForeignTemplate(text)) {
-      return foreignGuard();
-    }
-    if (this.orderCreation.needsRequisitesButton(text)) {
-      return multipleOrRequisitesGuard();
-    }
-    const raw = this.orderCreation.extractFields(text);
-    if (!raw) {
-      return this.orderCreation.nudge(manager.telegramId);
-    }
-    return this.orderCreation.process(manager, raw);
+    const armed = this.modes.find((mode) => mode.isArmed(manager.telegramId));
+    return armed ? armed.handle(manager, text) : null;
   }
 
-  async addFile(manager: Manager, file: TelegramFileRef, caption?: string): Promise<BotReply> {
+  async addFile(
+    manager: Manager,
+    file: TelegramFileRef,
+    caption?: string,
+  ): Promise<BotReply | null> {
+    if (!this.modes.some((mode) => mode.isArmed(manager.telegramId))) {
+      return null;
+    }
     if (!ALLOWED_MIME_TYPES.has(file.mimeType)) {
       return { html: '⚠️ Такий тип файлу не підтримується. Додайте фото, PDF або зображення.' };
     }
@@ -103,39 +71,18 @@ export class OrderDraftService implements OnApplicationShutdown {
 
     const files = this.pendingFiles.add(manager.telegramId, file);
     const text = caption?.trim();
-    if (!text) {
-      return {
+    const answer = text ? await this.handleText(manager, text) : null;
+    return (
+      answer ?? {
         html: `📎 Додано «${escapeHtml(file.filename)}» (${files.length}/${MAX_FILES_PER_UPLOAD}).`,
-      };
-    }
-    const armed = await this.handleArmed(manager, text);
-    if (armed) {
-      return armed;
-    }
-    if (isForeignTemplate(text)) {
-      return foreignGuard();
-    }
-    if (this.orderCreation.needsRequisitesButton(text)) {
-      return multipleOrRequisitesGuard();
-    }
-    const raw = this.orderCreation.extractFields(text);
-    if (raw) {
-      return this.orderCreation.process(manager, raw);
-    }
-    return {
-      html: `📎 Додано «${escapeHtml(file.filename)}» (${files.length}/${MAX_FILES_PER_UPLOAD}).`,
-    };
+      }
+    );
   }
 
   cancel(userId: bigint): BotReply {
     const hadFiles = this.pendingFiles.clear(userId);
-    const hadOffer = this.partOffers.delete(userId);
     const hadMode = this.leaveModes(userId);
-    return { html: hadFiles || hadOffer || hadMode ? 'Скасовано.' : 'Нема чого скасовувати.' };
-  }
-
-  leaveModes(userId: bigint): boolean {
-    return this.modes.map((mode) => mode.leave(userId)).some(Boolean);
+    return { html: hadFiles || hadMode ? 'Скасовано.' : 'Нема чого скасовувати.' };
   }
 
   editCash(userId: bigint): BotReply {
@@ -162,51 +109,16 @@ export class OrderDraftService implements OnApplicationShutdown {
     return this.kitFlow.confirm(manager);
   }
 
-  editMinus(userId: bigint): BotReply {
-    return this.minusFlow.edit(userId);
-  }
-
-  async confirmMinus(manager: Manager): Promise<BotReply> {
-    return this.minusFlow.confirm(manager);
-  }
-
-  editRequisites(userId: bigint): BotReply {
-    return this.requisitesFlow.edit(userId);
-  }
-
-  async regularFromRequisites(manager: Manager): Promise<BotReply> {
-    return this.requisitesFlow.regularFrom(manager);
-  }
-
-  async confirmRequisites(manager: Manager): Promise<BotReply> {
-    return this.requisitesFlow.confirm(manager);
-  }
-
-  async addPart(manager: Manager): Promise<BotReply> {
-    const offer = this.partOffers.take(manager.telegramId);
-    if (!offer || offer.expiresAt < Date.now()) {
-      return { html: '⚠️ Немає даних для додавання. Надішліть замовлення ще раз.' };
-    }
-    return this.orderCreation.createOrder(manager, offer.data, true);
-  }
-
-  skipPart(userId: bigint): BotReply {
-    this.partOffers.delete(userId);
-    return { html: 'Скасовано.' };
-  }
-
   private get modes() {
-    return [this.requisitesFlow, this.minusFlow, this.kitFlow, this.cashFlow, this.foreignFlow];
+    return [this.kitFlow, this.cashFlow, this.foreignFlow];
+  }
+
+  private leaveModes(userId: bigint): boolean {
+    return this.modes.map((mode) => mode.leave(userId)).some(Boolean);
   }
 
   private switchTo(userId: bigint, mode: { start(userId: bigint): BotReply }): BotReply {
-    this.partOffers.delete(userId);
     this.leaveModes(userId);
     return mode.start(userId);
-  }
-
-  private async handleArmed(manager: Manager, text: string): Promise<BotReply | null> {
-    const armed = this.modes.find((mode) => mode.isArmed(manager.telegramId));
-    return armed ? armed.handle(manager, text) : null;
   }
 }

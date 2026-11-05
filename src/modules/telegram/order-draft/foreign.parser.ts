@@ -49,11 +49,6 @@ const CURRENCY_HINT = 'Напишіть UAH, USD або EUR: «Сума: 100 EUR
 
 const currencyOf = (text: string): Currency | null =>
   CURRENCY_UNITS.find(([, re]) => re.test(text))?.[0] ?? null;
-// The template pasted outside /foreign: its header or the «На кого:» label.
-const FOREIGN_SHAPE = /^[^\p{L}\p{N}]*(?:оплата\s+закордонного\s+замовлення|на\s+кого\s*:)/imu;
-
-export const isForeignTemplate = (text: string): boolean => FOREIGN_SHAPE.test(text);
-
 export function parseForeign(raw: string): ForeignResult {
   if (raw.trim().length > REQUISITES_MAX_LENGTH) {
     return {
