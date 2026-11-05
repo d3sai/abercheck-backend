@@ -64,26 +64,11 @@ describe('RequestCardsRepository', () => {
     });
   });
 
-  it('should find the newest card of a group chat by request number', async () => {
-    await repository.byNumber(-100n, '42');
-
-    expect(financeRequestCard.findFirst).toHaveBeenCalledWith({
-      where: { groupChatId: -100n, number: '42' },
-      orderBy: { createdAt: 'desc' },
-    });
-  });
-
-  it('should store the manager message id and the pending rate', async () => {
+  it('should store the manager message id', async () => {
     await repository.setManagerMessage('r1', 9);
     expect(financeRequestCard.update).toHaveBeenCalledWith({
       where: { requestId: 'r1' },
       data: { managerMessageId: 9 },
-    });
-
-    await repository.setPendingRate('r1', null);
-    expect(financeRequestCard.update).toHaveBeenCalledWith({
-      where: { requestId: 'r1' },
-      data: { pendingRate: null },
     });
   });
 

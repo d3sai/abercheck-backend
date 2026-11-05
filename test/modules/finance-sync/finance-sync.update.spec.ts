@@ -70,7 +70,6 @@ describe('FinanceSyncModule', () => {
 describe('FinanceSyncUpdate', () => {
   const actions = {
     pressFop: jest.fn(),
-    askRate: jest.fn(),
     refresh: jest.fn(),
     onText: jest.fn(),
   };
@@ -91,12 +90,10 @@ describe('FinanceSyncUpdate', () => {
     const c = { match: [] };
 
     await update.fop(c as never);
-    await update.rate(c as never);
     await update.refresh(c as never);
     await update.cancel(c as never);
 
     expect(actions.pressFop).toHaveBeenCalledWith(c);
-    expect(actions.askRate).toHaveBeenCalledWith(c);
     expect(actions.refresh).toHaveBeenCalledWith(c);
     expect(managerActions.cancel).toHaveBeenCalledWith(c);
   });

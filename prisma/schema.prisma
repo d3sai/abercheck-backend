@@ -229,7 +229,6 @@ model FinanceRequestCard {
   managerMessageId Int?      @map("manager_message_id")
   groupChatId      BigInt    @map("group_chat_id")
   groupMessageId   Int       @map("group_message_id")
-  pendingRate      String?   @map("pending_rate")
   notifiedStatus   String?   @map("notified_status")
   // Set atomically when the manager completes the request; orderIds are the orders it created.
   completedAt      DateTime? @map("completed_at") @db.Timestamptz(3)

@@ -20,11 +20,6 @@ export class FinanceSyncUpdate {
     return this.actions.pressFop(ctx);
   }
 
-  @Action(FinanceAction.Rate)
-  rate(@Ctx() ctx: MatchContext): Promise<void> {
-    return this.actions.askRate(ctx);
-  }
-
   @Action(FinanceAction.Refresh)
   refresh(@Ctx() ctx: MatchContext): Promise<void> {
     return this.actions.refresh(ctx);

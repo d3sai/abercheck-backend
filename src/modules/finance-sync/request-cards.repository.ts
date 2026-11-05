@@ -33,14 +33,6 @@ export class RequestCardsRepository {
     });
   }
 
-  /** For a force-reply prompt, which only names the request number. */
-  byNumber(groupChatId: bigint, number: string): Promise<FinanceRequestCard | null> {
-    return this.prisma.financeRequestCard.findFirst({
-      where: { groupChatId, number },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
-
   byManagerMessage(
     managerChatId: bigint,
     managerMessageId: number,
@@ -53,10 +45,6 @@ export class RequestCardsRepository {
       where: { requestId },
       data: { managerMessageId },
     });
-  }
-
-  setPendingRate(requestId: string, pendingRate: string | null): Promise<FinanceRequestCard> {
-    return this.prisma.financeRequestCard.update({ where: { requestId }, data: { pendingRate } });
   }
 
   /** True only for the one caller that completes the request; everyone else must not create orders. */

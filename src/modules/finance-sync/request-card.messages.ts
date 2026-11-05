@@ -13,7 +13,6 @@ import type {
 
 export const FinanceAction = {
   Fop: /^ff:([\w-]+):(\d+)$/,
-  Rate: /^fr:([\w-]+)$/,
   Cancel: /^fc:([\w-]+)$/,
   Refresh: /^fu:([\w-]+)$/,
 } as const;
@@ -56,11 +55,7 @@ function payoutLines(payout: FinancePayoutView): string[] {
   return [`• ${parts.map(escapeHtml).join(' · ')}`, ...warningLines(payout.warnings)];
 }
 
-function body(
-  view: FinanceRequestView,
-  pendingRate: string | null,
-  managerName?: string,
-): string[] {
+function body(view: FinanceRequestView, managerName?: string): string[] {
   const kind = view.kind ? KIND_LABEL[view.kind] : 'Запит';
   const lines = [`<b>${kind}</b> #${escapeHtml(view.number)}`];
   if (managerName) lines.push(`Менеджер: ${escapeHtml(managerName)}`);
@@ -72,8 +67,7 @@ function body(
     lines.push(`№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amount)}${own}`);
   }
   lines.push(`${view.orders.length > 1 ? 'Разом' : 'Сума'}: <b>${money(view.sum)}</b>`);
-  if (pendingRate && view.status === 'pending') lines.push(`Курс: ${rate(pendingRate)} (нова)`);
-  else if (view.exchangeRate) lines.push(`Курс: ${rate(view.exchangeRate)}`);
+  if (view.exchangeRate) lines.push(`Курс: ${rate(view.exchangeRate)}`);
   if (view.clientLabel) lines.push(`Клієнт: ${escapeHtml(view.clientLabel)}`);
   if (view.sheetUrl) lines.push(`Таблиця: ${escapeHtml(view.sheetUrl)}`);
   if (view.officialDocs !== null) {
@@ -103,10 +97,9 @@ const fits = (fop: FinanceFop, sum: string, fops: FinanceFops): boolean =>
 export function groupCard(
   view: FinanceRequestView,
   fops: FinanceFops | null,
-  pendingRate: string | null,
   managerName?: string,
 ): BotReply {
-  const lines = body(view, pendingRate, managerName);
+  const lines = body(view, managerName);
   if (fops?.limitsStatus === 'unavailable') lines.push('', '⚠️ Залишки ФОП зараз недоступні');
   if (view.status !== 'pending') return { html: lines.join('\n') };
 
@@ -123,10 +116,7 @@ export function groupCard(
       : [];
   return {
     html: lines.join('\n'),
-    buttons: [
-      ...fopRows,
-      [button('✏️ Інший курс', `fr:${view.id}`), button('🔄 Оновити', `fu:${view.id}`)],
-    ],
+    buttons: [...fopRows, [button('🔄 Оновити', `fu:${view.id}`)]],
   };
 }
 
@@ -152,7 +142,7 @@ const completedLine = (orderNumbers: string[]): string => {
 
 export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions = {}): BotReply {
   const { miniAppUrl, completed } = opts;
-  const lines = body(view, null);
+  const lines = body(view);
   if (completed) return { html: [...lines, '', completedLine(completed.orderNumbers)].join('\n') };
   const html = lines.join('\n');
   if (view.status === 'pending') {

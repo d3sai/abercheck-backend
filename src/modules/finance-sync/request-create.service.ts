@@ -146,7 +146,7 @@ export class RequestCreateService {
       return made(created, `Запит #${created.number} створено, картка з'явиться згодом.`);
     }
 
-    const group = groupCard(view, fops, null, manager.name);
+    const group = groupCard(view, fops, manager.name);
     await this.sender.editMessage(groupChatId, groupMessageId, group.html, group.buttons);
 
     const card = managerCard(view, { miniAppUrl: this.sender.miniAppUrl });

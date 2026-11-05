@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import type { FinanceRequestCard } from '../../generated/prisma/client';
-import { isRecordNotFound } from '../../common/prisma/prisma-errors';
 import { ManagersService } from '../managers/managers.service';
 import { OrdersService } from '../orders/orders.service';
 import { escapeHtml } from '../telegram/core/format';
@@ -32,24 +31,10 @@ export class RequestSyncService {
     const card = await this.cards.byRequestId(event.requestId);
     if (!card) return;
     const { request: view } = await this.finance.get(card.requestId);
-    await this.renderGroup(await this.clearPendingRate(card, view), view);
+    await this.renderGroup(card, view);
     await this.renderManager(card, view);
     await this.notifyManager(view);
     if (event.type === 'message' && event.message) await this.relayMessage(card, event.message);
-  }
-
-  /** A rate chosen before the accept is spent once the request leaves «pending». */
-  private async clearPendingRate(
-    card: FinanceRequestCard,
-    view: FinanceRequestView,
-  ): Promise<FinanceRequestCard> {
-    if (view.status === 'pending' || card.pendingRate === null) return card;
-    try {
-      return await this.cards.setPendingRate(card.requestId, null);
-    } catch (error) {
-      if (isRecordNotFound(error)) return { ...card, pendingRate: null };
-      throw error;
-    }
   }
 
   async renderManager(card: FinanceRequestCard, view: FinanceRequestView): Promise<void> {
@@ -71,7 +56,7 @@ export class RequestSyncService {
         : null,
       this.managers.findById(card.managerId),
     ]);
-    const { html, buttons } = groupCard(view, fops, card.pendingRate, manager?.name);
+    const { html, buttons } = groupCard(view, fops, manager?.name);
     await this.sender.editMessage(card.groupChatId, card.groupMessageId, html, buttons);
   }
 

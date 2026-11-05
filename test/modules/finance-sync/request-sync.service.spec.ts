@@ -1,4 +1,4 @@
-import { Prisma, type FinanceRequestCard } from '../../../src/generated/prisma/client';
+import type { FinanceRequestCard } from '../../../src/generated/prisma/client';
 import type { FinanceClient } from '../../../src/modules/finance-sync/finance.client';
 import {
   FinanceApiError,
@@ -19,7 +19,6 @@ const card = {
   managerMessageId: 31,
   groupChatId: -1002n,
   groupMessageId: 700,
-  pendingRate: null,
 } as FinanceRequestCard;
 
 const view = (patch: Partial<FinanceRequestView> = {}) =>
@@ -53,7 +52,6 @@ describe('RequestSyncService', () => {
     markSeen: jest.fn(),
     unmarkSeen: jest.fn(),
     rememberChatMessage: jest.fn(),
-    setPendingRate: jest.fn(),
   };
   const managers = { findById: jest.fn() };
   const service = new RequestSyncService(
@@ -68,9 +66,6 @@ describe('RequestSyncService', () => {
     cards.byRequestId.mockResolvedValue(card);
     cards.markNotified.mockResolvedValue(true);
     cards.markSeen.mockResolvedValue(true);
-    cards.setPendingRate.mockImplementation((_id: string, pendingRate: string | null) =>
-      Promise.resolve({ ...card, pendingRate }),
-    );
     sender.send.mockResolvedValue(77);
     sender.sendDocument.mockResolvedValue(78);
     managers.findById.mockResolvedValue({ name: 'Уляна' });
@@ -291,43 +286,6 @@ describe('RequestSyncService', () => {
         false,
         { replyTo: 31 },
       );
-    });
-
-    it('should clear a leftover pending rate once the request is no longer pending', async () => {
-      cards.byRequestId.mockResolvedValue({ ...card, pendingRate: '43' });
-
-      await service.handle(event());
-
-      expect(cards.setPendingRate).toHaveBeenCalledWith('req1', null);
-      expect(sender.editMessage).toHaveBeenCalledWith(
-        -1002n,
-        700,
-        expect.not.stringContaining('(нова)'),
-        undefined,
-      );
-    });
-
-    it('should keep the pending rate while the request is pending, and not touch a card without one', async () => {
-      finance.get.mockResolvedValue({ request: view() });
-      finance.fops.mockResolvedValue({ limitsStatus: 'ok', fops: [] });
-      cards.byRequestId.mockResolvedValue({ ...card, pendingRate: '43' });
-      await service.handle(event());
-      cards.byRequestId.mockResolvedValue(card);
-      finance.get.mockResolvedValue({ request: view({ status: 'accepted' }) });
-      await service.handle(event());
-
-      expect(cards.setPendingRate).not.toHaveBeenCalled();
-    });
-
-    it('should still redraw when the row vanished while clearing the pending rate', async () => {
-      cards.byRequestId.mockResolvedValue({ ...card, pendingRate: '43' });
-      cards.setPendingRate.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('gone', { code: 'P2025', clientVersion: 'x' }),
-      );
-
-      await service.handle(event());
-
-      expect(sender.editMessage).toHaveBeenCalledTimes(2);
     });
 
     it('should keep the cancel button on the manager card while the request is pending', async () => {
