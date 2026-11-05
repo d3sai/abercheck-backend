@@ -14,7 +14,7 @@ import { HttpStatus } from '@nestjs/common';
 import { ApiError } from '../../common/api-error';
 import { kyivDateTime, kyivParts } from '../../common/kyiv-time';
 import { MONEY_PATTERN } from '../../common/money';
-import type { CashKind, EditRequestBody, RequestKind } from '../finance-sync/finance.types';
+import type { EditRequestBody, RequestKind } from '../finance-sync/finance.types';
 import type { CreateRequestInput } from '../finance-sync/request-create.service';
 import { EXCHANGE_RATE_PATTERN } from '../orders/dto/create-order.dto';
 import { parseOrderNumber } from '../telegram/order-draft/order-draft.parsers';
@@ -22,8 +22,7 @@ import { parseOrderNumber } from '../telegram/order-draft/order-draft.parsers';
 // Mirror finance-backend internal-requests.dto.ts
 const MAX_ORDERS = 20;
 const MAX_RATE = 1000;
-const KINDS: readonly RequestKind[] = ['our_fop', 'foreign_fop', 'card', 'minus', 'cash_kit'];
-const CASH_KINDS: readonly CashKind[] = ['cash', 'kit'];
+const KINDS: readonly RequestKind[] = ['our_fop', 'foreign_fop', 'card', 'minus'];
 const MAX_PAYMENTS = 10;
 const ORDER_KINDS: readonly RequestKind[] = ['our_fop', 'foreign_fop', 'card'];
 
@@ -58,15 +57,6 @@ export class CreateMiniappRequestDto {
   @IsString()
   @MaxLength(32)
   sum?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(32)
-  sumUsd?: string;
-
-  @IsOptional()
-  @IsIn(CASH_KINDS)
-  cashKind?: CashKind;
 
   @IsOptional()
   @IsString()
@@ -115,15 +105,6 @@ export class EditMiniappRequestDto {
   @IsString()
   @MaxLength(32)
   sum?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(32)
-  sumUsd?: string;
-
-  @IsOptional()
-  @IsIn(CASH_KINDS)
-  cashKind?: CashKind;
 }
 
 export class PaymentRowDto {
@@ -229,18 +210,16 @@ export function toCreateInput(dto: CreateMiniappRequestDto): CreateRequestInput 
 
   const clientLabel = text(dto.clientLabel);
   if (!clientLabel) throw invalid('Вкажіть клієнта.');
-  if (dto.kind === 'cash_kit' && !dto.cashKind) throw invalid('Вкажіть: готівка чи кит.');
   return {
     ...common,
     sum: money(dto.sum),
-    ...(dto.kind === 'cash_kit' && { sumUsd: money(dto.sumUsd), cashKind: dto.cashKind }),
     clientLabel,
     sheetUrl: text(dto.sheetUrl),
     withPercent: dto.kind === 'minus' ? (dto.withPercent ?? null) : null,
   };
 }
 
-/** Only the fields the manager sent; finance enforces «pending only» and «sum only for minus/cash_kit». */
+/** Only the fields the manager sent; finance enforces «pending only» and «sum only for minus». */
 export function toEditBody(
   dto: EditMiniappRequestDto,
   requesterTelegramId: number,
@@ -249,8 +228,6 @@ export function toEditBody(
   return {
     requesterTelegramId,
     ...(dto.sum != null && { sum: Number(money(dto.sum)) }),
-    ...(dto.sumUsd != null && { sumUsd: Number(money(dto.sumUsd)) }),
-    ...(dto.cashKind != null && { cashKind: dto.cashKind }),
     ...(dto.exchangeRate != null && { exchangeRate: Number(rate(dto.exchangeRate)) }),
     ...(dto.comment != null && { comment: text(dto.comment) }),
     ...(dto.officialDocs != null && { officialDocs: dto.officialDocs }),

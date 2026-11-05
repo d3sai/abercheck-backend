@@ -5,7 +5,6 @@ import { escapeHtml } from '../telegram/core/format';
 import { TelegramSender } from '../telegram/core/telegram-sender';
 import { FinanceClient } from './finance.client';
 import {
-  type CashKind,
   type CreateRequestBody,
   type FinanceFops,
   FinanceApiError,
@@ -19,11 +18,8 @@ export interface CreateRequestInput {
   kind: RequestKind;
   /** our_fop, foreign_fop, card */
   orders?: { orderNumber: string; amount: string; exchangeRate: string | null }[];
-  /** minus, cash_kit */
+  /** minus */
   sum?: string;
-  /** cash_kit */
-  sumUsd?: string;
-  cashKind?: CashKind;
   clientLabel?: string;
   sheetUrl?: string | null;
   withPercent?: boolean | null;
@@ -205,10 +201,6 @@ function financeBody(
     }),
     ...(input.sum !== undefined && {
       sum: Number(input.sum),
-      ...(input.kind === 'cash_kit' && {
-        sumUsd: Number(input.sumUsd),
-        cashKind: input.cashKind,
-      }),
       clientLabel: input.clientLabel,
       sheetUrl: input.sheetUrl,
       withPercent: input.withPercent,

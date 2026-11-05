@@ -204,32 +204,6 @@ describe('RequestCreateService', () => {
           officialDocs: false,
         },
       ],
-      [
-        'cash_kit',
-        {
-          kind: 'cash_kit',
-          sum: '45000',
-          sumUsd: '1000.50',
-          cashKind: 'kit',
-          clientLabel: 'Петро',
-          sheetUrl: null,
-          withPercent: null,
-          exchangeRate: '45',
-          comment: null,
-          officialDocs: true,
-        },
-        {
-          kind: 'cash_kit',
-          sum: 45000,
-          sumUsd: 1000.5,
-          cashKind: 'kit',
-          exchangeRate: 45,
-          clientLabel: 'Петро',
-          sheetUrl: null,
-          withPercent: null,
-          officialDocs: true,
-        },
-      ],
     ])('should map %s to the finance body', async (_, kindInput, expected) => {
       await service.create(manager, kindInput);
 
@@ -280,29 +254,29 @@ describe('RequestCreateService', () => {
       expect(sender.send).not.toHaveBeenCalled();
     });
 
-    it.each([
-      ['minus', 'minus'],
-      ['cash_kit', 'cash_kit'],
-    ])('should warn that a retry can duplicate a %s request', async (_, kind) => {
-      finance.create.mockRejectedValue(new FinanceApiError(0, 'timeout'));
+    it.each([['minus', 'minus']])(
+      'should warn that a retry can duplicate a %s request',
+      async (_, kind) => {
+        finance.create.mockRejectedValue(new FinanceApiError(0, 'timeout'));
 
-      const answer = await service.create(manager, {
-        kind,
-        sum: '100',
-        clientLabel: 'A',
-        exchangeRate: null,
-        comment: null,
-        officialDocs: true,
-      } as CreateRequestInput);
+        const answer = await service.create(manager, {
+          kind,
+          sum: '100',
+          clientLabel: 'A',
+          exchangeRate: null,
+          comment: null,
+          officialDocs: true,
+        } as CreateRequestInput);
 
-      expect(answer).toEqual({
-        ok: false,
-        outcome: 'unknown',
-        code: 'finance-no-answer',
-        message:
-          'Фінанси не відповіли, тож невідомо, чи створено запит. Перш ніж повторювати, перевірте групу «Запити» або кабінет — повтор може створити дубль.',
-      });
-    });
+        expect(answer).toEqual({
+          ok: false,
+          outcome: 'unknown',
+          code: 'finance-no-answer',
+          message:
+            'Фінанси не відповіли, тож невідомо, чи створено запит. Перш ніж повторювати, перевірте групу «Запити» або кабінет — повтор може створити дубль.',
+        });
+      },
+    );
 
     it.each([
       ['timeout', new FinanceApiError(0, 'timeout')],

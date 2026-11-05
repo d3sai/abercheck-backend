@@ -18,8 +18,6 @@ const view = (patch: Partial<FinanceRequestView> = {}): FinanceRequestView => ({
   status: 'pending',
   kind: 'our_fop',
   sum: '5500',
-  sumUsd: null,
-  cashKind: null,
   orderNumber: null,
   orders: [
     { orderNumber: '0000-1', amount: '3000', exchangeRate: null },
@@ -116,28 +114,6 @@ describe('groupCard', () => {
     expect(minus.html).toContain('https://x.y/?a=1&amp;b=2');
     expect(flat(minus)).toHaveLength(4);
   });
-
-  it('cash_kit gets FOP buttons too', () => {
-    expect(flat(groupCard(view({ kind: 'cash_kit', orders: [] }), fops(), null))).toHaveLength(4);
-  });
-
-  it.each([
-    ['kit', 'Кит'],
-    ['cash', 'Готівка'],
-    [null, 'Готівка / Кит'],
-  ] as const)(
-    'cash_kit %s header says «%s» and the sum line shows UAH and USD',
-    (cashKind, label) => {
-      const html = groupCard(
-        view({ kind: 'cash_kit', orders: [], sum: '45000', sumUsd: '1000', cashKind }),
-        null,
-        null,
-      ).html;
-
-      expect(html).toContain(`<b>${label}</b> #42`);
-      expect(html).toContain('Сума: <b>45 000 грн</b> · 1 000 $');
-    },
-  );
 
   it('kind labels', () => {
     expect(groupCard(view({ kind: 'foreign_fop' }), null, null).html).toContain('Чужий ФОП');

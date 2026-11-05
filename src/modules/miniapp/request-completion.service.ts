@@ -118,10 +118,7 @@ export class RequestCompletionService {
     // a refusal never leaves the card looking completed, and a receipt sent meanwhile is not lost.
     const view = await this.acceptedView(requestId);
     const payments = toPayments(view.kind!, body.payments);
-    const live =
-      view.kind === 'minus' || view.kind === 'cash_kit'
-        ? null
-        : await this.liveItems(view, body.addPart === true);
+    const live = view.kind === 'minus' ? null : await this.liveItems(view, body.addPart === true);
 
     // atomic: of two parallel completions only one may create orders
     if (!(await this.cards.claimCompletion(requestId, new Date()))) {
@@ -303,7 +300,6 @@ export class RequestCompletionService {
     payment: Payment,
     progress: Progress,
   ): Promise<Made> {
-    const cashKit = view.kind === 'cash_kit';
     const client = view.clientLabel ?? '';
     const percent =
       view.withPercent === null ? null : `з урахуванням %: ${view.withPercent ? 'так' : 'ні'}`;
@@ -311,11 +307,11 @@ export class RequestCompletionService {
       { orders: this.orders, requisites: this.requisites },
       manager,
       {
-        clientName: cashKit ? `${view.cashKind === 'kit' ? 'Кит' : 'Готівка'} · ${client}` : client,
+        clientName: client,
         period: null,
         paidAt: payment.paidAt,
-        currency: cashKit ? Currency.USD : Currency.UAH,
-        total: new Prisma.Decimal(cashKit ? view.sumUsd! : view.sum),
+        currency: Currency.UAH,
+        total: new Prisma.Decimal(view.sum),
         ourFop: view.fopLabel,
         requisiteLines: [],
         comment: [view.comment, percent].filter(Boolean).join(' · ') || null,

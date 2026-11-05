@@ -147,38 +147,6 @@ describe('MiniappController', () => {
       );
     });
 
-    it('should pass a cash_kit request with both sums and drop withPercent', async () => {
-      await create({
-        kind: 'cash_kit',
-        sum: '45000',
-        sumUsd: '1000.50',
-        cashKind: 'kit',
-        clientLabel: ' Петро ',
-        withPercent: true,
-      });
-
-      expect(requests.create).toHaveBeenCalledWith(manager, {
-        kind: 'cash_kit',
-        sum: '45000',
-        sumUsd: '1000.50',
-        cashKind: 'kit',
-        clientLabel: 'Петро',
-        sheetUrl: null,
-        withPercent: null,
-        exchangeRate: '45',
-        comment: null,
-        officialDocs: true,
-      });
-    });
-
-    it('should not carry the USD fields on a minus request', async () => {
-      await create({ kind: 'minus', sum: '100', clientLabel: 'A', sumUsd: '5', cashKind: 'cash' });
-
-      const [, input] = requests.create.mock.calls[0] as [unknown, Record<string, unknown>];
-      expect(input).not.toHaveProperty('sumUsd');
-      expect(input).not.toHaveProperty('cashKind');
-    });
-
     it('should not require a rate for minus', async () => {
       await create({ kind: 'minus', sum: '100', clientLabel: 'A', exchangeRate: undefined });
 
@@ -192,7 +160,6 @@ describe('MiniappController', () => {
       ['our_fop', { orders: [order] }],
       ['foreign_fop', { orders: [order] }],
       ['card', { orders: [order] }],
-      ['cash_kit', { sum: '1', sumUsd: '1', cashKind: 'cash', clientLabel: 'A' }],
     ] as [RequestKind, Partial<CreateMiniappRequestDto>][])(
       'should answer 400 «Вкажіть курс.» for %s without a rate',
       async (kind, rest) => {
@@ -212,23 +179,6 @@ describe('MiniappController', () => {
     it.each([
       ['minus without clientLabel', { kind: 'minus', sum: '100' }],
       ['minus with a blank clientLabel', { kind: 'minus', sum: '100', clientLabel: '  ' }],
-      [
-        'cash_kit without sum',
-        { kind: 'cash_kit', sumUsd: '1', cashKind: 'kit', clientLabel: 'A' },
-      ],
-      [
-        'cash_kit without sumUsd',
-        { kind: 'cash_kit', sum: '1', cashKind: 'kit', clientLabel: 'A' },
-      ],
-      [
-        'cash_kit with a bad sumUsd',
-        { kind: 'cash_kit', sum: '1', sumUsd: '0', cashKind: 'kit', clientLabel: 'A' },
-      ],
-      ['cash_kit without cashKind', { kind: 'cash_kit', sum: '1', sumUsd: '1', clientLabel: 'A' }],
-      [
-        'cash_kit without clientLabel',
-        { kind: 'cash_kit', sum: '1', sumUsd: '1', cashKind: 'kit' },
-      ],
       ['minus with a bad sum', { kind: 'minus', sum: '10,5', clientLabel: 'A' }],
       ['our_fop without orders', { kind: 'our_fop' }],
       ['our_fop with 21 orders', { kind: 'our_fop', orders: Array(21).fill(order) }],
@@ -365,16 +315,6 @@ describe('MiniappController', () => {
       expect(sync.renderManager).toHaveBeenCalledWith(card, view);
       expect(sync.renderGroup).toHaveBeenCalledWith(card, view);
       expect(answer).toEqual({ request: view, managerName: 'Уляна', completed: false });
-    });
-
-    it('should send cash_kit fields as numbers', async () => {
-      await edit({ sumUsd: '1000.50', cashKind: 'cash' });
-
-      expect(finance.edit).toHaveBeenCalledWith('req1', {
-        requesterTelegramId: 555,
-        sumUsd: 1000.5,
-        cashKind: 'cash',
-      });
     });
 
     it('should refuse a blank rate: it cannot be cleared', async () => {

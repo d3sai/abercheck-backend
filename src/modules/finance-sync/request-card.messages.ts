@@ -23,10 +23,7 @@ const KIND_LABEL: Record<RequestKind, string> = {
   foreign_fop: 'Чужий ФОП',
   card: 'На картку',
   minus: 'Закриття мінусу',
-  cash_kit: 'Готівка / Кит',
 };
-
-const CASH_KIND_LABEL = { cash: 'Готівка', kit: 'Кит' } as const;
 
 // `multi_order` is informational, so it has no line.
 const WARNING_TEXT: Partial<Record<RequestWarning, string>> = {
@@ -46,7 +43,6 @@ const plural = (count: number): string =>
       : 'замовлень';
 
 const money = (value: string): string => formatMoneyIn(new Prisma.Decimal(value), 'UAH');
-const usd = (value: string): string => formatMoneyIn(new Prisma.Decimal(value), 'USD');
 const rate = (value: string): string => formatRate(new Prisma.Decimal(value));
 
 function payoutLines(payout: FinancePayoutView): string[] {
@@ -65,12 +61,7 @@ function body(
   pendingRate: string | null,
   managerName?: string,
 ): string[] {
-  const kind =
-    view.kind === 'cash_kit' && view.cashKind
-      ? CASH_KIND_LABEL[view.cashKind]
-      : view.kind
-        ? KIND_LABEL[view.kind]
-        : 'Запит';
+  const kind = view.kind ? KIND_LABEL[view.kind] : 'Запит';
   const lines = [`<b>${kind}</b> #${escapeHtml(view.number)}`];
   if (managerName) lines.push(`Менеджер: ${escapeHtml(managerName)}`);
   for (const order of view.orders) {
@@ -80,9 +71,7 @@ function body(
         : '';
     lines.push(`№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amount)}${own}`);
   }
-  lines.push(
-    `${view.orders.length > 1 ? 'Разом' : 'Сума'}: <b>${money(view.sum)}</b>${view.sumUsd ? ` · ${usd(view.sumUsd)}` : ''}`,
-  );
+  lines.push(`${view.orders.length > 1 ? 'Разом' : 'Сума'}: <b>${money(view.sum)}</b>`);
   if (pendingRate && view.status === 'pending') lines.push(`Курс: ${rate(pendingRate)} (нова)`);
   else if (view.exchangeRate) lines.push(`Курс: ${rate(view.exchangeRate)}`);
   if (view.clientLabel) lines.push(`Клієнт: ${escapeHtml(view.clientLabel)}`);
@@ -122,7 +111,7 @@ export function groupCard(
   if (view.status !== 'pending') return { html: lines.join('\n') };
 
   const fopRows =
-    fops && (view.kind === 'our_fop' || view.kind === 'minus' || view.kind === 'cash_kit')
+    fops && (view.kind === 'our_fop' || view.kind === 'minus')
       ? fops.fops
           .filter((fop) => fits(fop, view.sum, fops))
           .map((fop) => [
