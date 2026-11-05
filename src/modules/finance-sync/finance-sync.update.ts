@@ -1,6 +1,7 @@
-import { Action, Ctx, Next, On, Update } from 'nestjs-telegraf';
+import { Action, Command, Ctx, Next, On, Update } from 'nestjs-telegraf';
 import type { Context } from 'telegraf';
-import type { MatchContext } from '../telegram/core/telegram-context';
+import { MENU_LABEL } from '../telegram/core/menu';
+import { isPrivate, type MatchContext } from '../telegram/core/telegram-context';
 import { FinancierActionsService } from './financier-actions.service';
 import { ManagerActionsService } from './manager-actions.service';
 import { FinanceAction } from './request-card.messages';
@@ -34,9 +35,16 @@ export class FinanceSyncUpdate {
     return this.managerActions.cancel(ctx);
   }
 
+  @Command('requests')
+  requests(@Ctx() ctx: Context): Promise<void> {
+    return this.managerActions.myRequests(ctx);
+  }
+
   // Each handler claims only replies to its own cards and calls `next` otherwise, ending in BotUpdate.text.
   @On('text')
   text(@Ctx() ctx: Context, @Next() next: () => Promise<void>): Promise<void> {
+    if (isPrivate(ctx) && ctx.text === MENU_LABEL.MyRequests)
+      return this.managerActions.myRequests(ctx);
     return this.actions.onText(ctx, () => this.managerActions.onText(ctx, next));
   }
 

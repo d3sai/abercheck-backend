@@ -46,6 +46,7 @@ export class BotUpdate implements OnApplicationBootstrap {
         { command: 'kit', description: 'Оплата на Кит' },
         { command: 'cash', description: 'Оплата готівкою' },
         { command: 'foreign', description: 'Оплата закордонного замовлення' },
+        { command: 'requests', description: 'Мої запити до фінансистів' },
         { command: 'list', description: 'Мої відкриті замовлення' },
         { command: 'cancel', description: 'Скасувати' },
         { command: 'help', description: 'Що вміє бот' },

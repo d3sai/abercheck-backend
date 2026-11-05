@@ -290,12 +290,12 @@ describe('BotUpdate', () => {
 
   describe('the main menu', () => {
     it.each(['/start', '/help', 'привіт'])(
-      'should show the eight buttons in reply to %s',
+      'should show the nine buttons in reply to %s',
       async (text) => {
         const replies = await say(text);
 
         expect(replies).toHaveLength(1);
-        expect(menuOf(replies[0]!)).toHaveLength(8);
+        expect(menuOf(replies[0]!)).toHaveLength(9);
         expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
       },
     );

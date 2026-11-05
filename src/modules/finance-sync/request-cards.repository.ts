@@ -18,6 +18,15 @@ export class RequestCardsRepository {
     return this.prisma.financeRequestCard.findUnique({ where: { requestId } });
   }
 
+  /** «Мої запити»: the manager's latest cards, newest first. */
+  latestOfManager(managerChatId: bigint, take: number): Promise<FinanceRequestCard[]> {
+    return this.prisma.financeRequestCard.findMany({
+      where: { managerChatId },
+      orderBy: { createdAt: 'desc' },
+      take,
+    });
+  }
+
   byGroupMessage(groupChatId: bigint, groupMessageId: number): Promise<FinanceRequestCard | null> {
     return this.prisma.financeRequestCard.findUnique({
       where: { groupChatId_groupMessageId: { groupChatId, groupMessageId } },

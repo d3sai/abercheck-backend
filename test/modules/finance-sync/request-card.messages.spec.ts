@@ -7,6 +7,7 @@ import {
   acceptRefusal,
   groupCard,
   managerCard,
+  myRequestsReply,
 } from '../../../src/modules/finance-sync/request-card.messages';
 
 const ID = 'cmabcdefghij0123456789xyz';
@@ -59,7 +60,7 @@ const rows = (r: { buttons?: unknown[][] }) =>
 const flat = (r: { buttons?: unknown[][] }) => rows(r).flat();
 
 describe('groupCard', () => {
-  it('pending our_fop: both rows, total, 3 FOP buttons + rate + refresh', () => {
+  it('pending our_fop: both rows, total, FOP buttons that fit the sum + rate + refresh', () => {
     const reply = groupCard(view(), fops(), null, 'Іван');
     expect(reply.html).toContain('Наш ФОП');
     expect(reply.html).toContain('#42');
@@ -73,13 +74,22 @@ describe('groupCard', () => {
     expect(buttons.map((b) => b.text)).toEqual([
       'ФОП А · 120 000 грн',
       'ФОП Б · —',
-      'ФОП В · 900,50 грн',
       '✏️ Інший курс',
       '🔄 Оновити',
     ]);
     expect(buttons[0]!.callback_data).toBe(`ff:${ID}:1`);
-    expect(buttons[3]!.callback_data).toBe(`fr:${ID}`);
-    expect(buttons[4]!.callback_data).toBe(`fu:${ID}`);
+    expect(buttons[2]!.callback_data).toBe(`fr:${ID}`);
+    expect(buttons[3]!.callback_data).toBe(`fu:${ID}`);
+  });
+
+  it('keeps every FOP when the limits are unavailable', () => {
+    const reply = groupCard(view(), fops({ limitsStatus: 'unavailable' }), null);
+    expect(flat(reply).map((b) => b.text)).toContain('ФОП В · 900,50 грн');
+  });
+
+  it('keeps a FOP whose limit equals the sum', () => {
+    const exact = fops({ fops: [{ fopId: 4, label: 'ФОП Г', leftMonthWithReserve: '5500.00' }] });
+    expect(flat(groupCard(view(), exact, null))).toHaveLength(3);
   });
 
   it('marks pending rate as new', () => {
@@ -102,11 +112,11 @@ describe('groupCard', () => {
     expect(minus.html).toContain('Закриття мінусу');
     expect(minus.html).toContain('Клієнт');
     expect(minus.html).toContain('https://x.y/?a=1&amp;b=2');
-    expect(flat(minus)).toHaveLength(5);
+    expect(flat(minus)).toHaveLength(4);
   });
 
   it('dropship gets FOP buttons too', () => {
-    expect(flat(groupCard(view({ kind: 'dropship', orders: [] }), fops(), null))).toHaveLength(5);
+    expect(flat(groupCard(view({ kind: 'dropship', orders: [] }), fops(), null))).toHaveLength(4);
   });
 
   it('kind labels', () => {
@@ -309,7 +319,7 @@ describe('callback data', () => {
     const all = [...flat(groupCard(view(), fops(), null)), ...flat(managerCard(view()))].map(
       (b) => b.callback_data,
     );
-    expect(all).toHaveLength(6);
+    expect(all).toHaveLength(5);
     for (const data of all) {
       expect(Buffer.byteLength(data, 'utf8')).toBeLessThanOrEqual(64);
     }
@@ -364,5 +374,51 @@ describe('acceptRefusal', () => {
     expect(
       acceptRefusal('fop-foreign-project', { project: 'я'.repeat(500) }).length,
     ).toBeLessThanOrEqual(200);
+  });
+});
+
+describe('myRequestsReply', () => {
+  const at = new Date('2026-11-05T10:00:00.000Z');
+  const listed = (
+    number: string,
+    notifiedStatus: string | null,
+    completedAt: Date | null = null,
+  ) => ({
+    requestId: `id${number}`,
+    number,
+    notifiedStatus,
+    completedAt,
+    createdAt: at,
+  });
+  const URL = 'https://check.example/tg/request';
+
+  it('puts the accepted, not completed requests first, each with a completion button', () => {
+    const reply = myRequestsReply(
+      [
+        listed('5', null),
+        listed('4', 'accepted'),
+        listed('3', 'cancelled'),
+        listed('2', 'paid', at),
+        listed('1', 'paid'),
+      ],
+      URL,
+    );
+
+    expect(reply.html.split('\n')).toEqual([
+      '<b>Мої запити</b>',
+      '#4 · 05.11.2026 · 📎 прийнято, додайте дату',
+      '#1 · 05.11.2026 · 📎 прийнято, додайте дату',
+      '#5 · 05.11.2026 · 🕓 чекає фінансиста',
+      '#3 · 05.11.2026 · ❌ скасовано',
+      '#2 · 05.11.2026 · ✅ оформлено',
+    ]);
+    const buttons = (reply.buttons ?? []).flat() as { text: string; web_app: { url: string } }[];
+    expect(buttons.map((b) => b.text)).toEqual(['📎 Додати дату · #4', '📎 Додати дату · #1']);
+    expect(buttons[0]!.web_app.url).toBe(`${URL}?mode=complete&id=id4`);
+  });
+
+  it('has no buttons without the Mini App and a hint when there are no requests', () => {
+    expect(myRequestsReply([listed('4', 'accepted')]).buttons).toBeUndefined();
+    expect(myRequestsReply([]).html).toContain('📝 Новий запит');
   });
 });
