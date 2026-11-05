@@ -290,13 +290,17 @@ describe('BotUpdate', () => {
 
   describe('the main menu', () => {
     it.each(['/start', '/help', 'привіт'])(
-      'should show the nine buttons in reply to %s',
+      'should show the seven buttons in reply to %s',
       async (text) => {
         const replies = await say(text);
 
         expect(replies).toHaveLength(1);
-        expect(menuOf(replies[0]!)).toHaveLength(9);
-        expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
+        expect(menuOf(replies[0]!)).toHaveLength(7);
+        expect(menuOf(replies[0]!)).toEqual(
+          Object.values(MENU_LABEL).filter(
+            (label) => label !== MENU_LABEL.Kit && label !== MENU_LABEL.Cash,
+          ),
+        );
       },
     );
   });

@@ -21,7 +21,8 @@ export const mainMenuKeyboard: ReplyKeyboardMarkup = {
     [{ text: MENU_LABEL.MyRequests }],
     [{ text: MENU_LABEL.NewOrder }, { text: MENU_LABEL.NewMinus }],
     [{ text: MENU_LABEL.Requisites }],
-    [{ text: MENU_LABEL.Kit }, { text: MENU_LABEL.Cash }],
+    // Hidden while cash and Kit go through the request form; the labels stay so old keyboards still work.
+    // [{ text: MENU_LABEL.Kit }, { text: MENU_LABEL.Cash }],
     [{ text: MENU_LABEL.Foreign }],
     [{ text: MENU_LABEL.List }, { text: MENU_LABEL.Cancel }],
   ],
