@@ -85,6 +85,27 @@ describe('FinancierActionsService', () => {
       expect(sync.notifyManager).toHaveBeenCalledWith(acceptedView);
     });
 
+    it('should still answer the button when the redraw fails after accepting', async () => {
+      finance.accept.mockResolvedValue(acceptedView);
+      sync.renderGroup.mockRejectedValue(new Error('telegram down'));
+      const c = fopPress();
+
+      await expect(service.pressFop(c as never)).rejects.toThrow('telegram down');
+
+      expect(c.answerCbQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('should answer the button with a generic alert when finance fails unexpectedly', async () => {
+      finance.accept.mockRejectedValue(new Error('boom'));
+      const c = fopPress();
+
+      await expect(service.pressFop(c as never)).rejects.toThrow('boom');
+
+      expect(c.answerCbQuery).toHaveBeenCalledWith('Не вдалося, спробуйте ще раз', {
+        show_alert: true,
+      });
+    });
+
     it('should alert the limit refusal, refresh the card and not notify on 422', async () => {
       finance.accept.mockRejectedValue(new FinanceApiError(422, 'fop-limit-exceeded'));
       const c = fopPress();
@@ -165,7 +186,7 @@ describe('FinancierActionsService', () => {
     beforeEach(() => cards.byGroupMessage.mockResolvedValue(card));
 
     it.each(['45,7', '41', '200', '45%', '1234', '5', '0'])(
-      'should pass on a lone number %s replied to a card and accept nothing',
+      'should accept nothing for a lone number %s replied to a card and point to the cabinet chat',
       async (text) => {
         const c = textCtx(text, toCard);
         const next = jest.fn();
@@ -173,10 +194,14 @@ describe('FinancierActionsService', () => {
         await service.onText(c as never, next);
 
         expect(cards.byGroupMessage).toHaveBeenCalledWith(BigInt(ADMIN_CHAT), 700);
-        expect(next).toHaveBeenCalledTimes(1);
         expect(finance.accept).not.toHaveBeenCalled();
         expect(sync.renderGroup).not.toHaveBeenCalled();
-        expect(c.reply).not.toHaveBeenCalled();
+        expect(next).not.toHaveBeenCalled();
+        expect(c.reply).toHaveBeenCalledTimes(1);
+        expect(c.reply).toHaveBeenCalledWith('Писати менеджеру — у чаті запиту в кабінеті.', {
+          parse_mode: 'HTML',
+          reply_parameters: { message_id: 800, allow_sending_without_reply: true },
+        });
       },
     );
 
@@ -221,15 +246,40 @@ describe('FinancierActionsService', () => {
       expect(sync.notifyManager).toHaveBeenCalledWith(acceptedView);
     });
 
-    it('should pass on a long sentence that only starts with «ФОП»', async () => {
-      const next = jest.fn();
-      const text =
-        'фоп сьогодні не працює, бо банк заблокував рахунок до кінця тижня, напишу пізніше';
+    it.each([
+      'фоп сьогодні не працює, бо банк заблокував рахунок до кінця тижня, напишу пізніше',
+      'ФОП Гук закритий, дайте інший',
+      'ФОП Гук закритий. Інший',
+      'ФОП Гук? Точно',
+      'ФОП №5',
+      'ФОП Гук і ще один ФОП',
+    ])('should not take «%s» for a FOP name', async (text) => {
+      const c = textCtx(text, toCard);
 
-      await service.onText(textCtx(text, toCard) as never, next);
+      await service.onText(c as never, jest.fn());
 
       expect(finance.accept).not.toHaveBeenCalled();
-      expect(next).toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith(
+        'Писати менеджеру — у чаті запиту в кабінеті.',
+        expect.anything(),
+      );
+    });
+
+    it.each([
+      ['ФОП Гук', 'ФОП Гук'],
+      ['фоп Гук-Мельник', 'фоп Гук-Мельник'],
+      ['ТОВ Ромашка Плюс', 'ТОВ Ромашка Плюс'],
+      ["FOP O'Brien", "FOP O'Brien"],
+      ['ФОП: Іваненко Іван Іванович', 'ФОП: Іваненко Іван Іванович'],
+    ])('should take the short name «%s»', async (text, name) => {
+      finance.accept.mockResolvedValue(acceptedView);
+
+      await service.onText(textCtx(text, toCard) as never, jest.fn());
+
+      expect(finance.accept).toHaveBeenCalledWith('req1', {
+        responderTelegramId: FINANCIER_ID,
+        fopName: name,
+      });
     });
 
     it('should reply with the refusal when accepting payouts fails', async () => {
@@ -242,22 +292,24 @@ describe('FinancierActionsService', () => {
       expect(sync.notifyManager).not.toHaveBeenCalled();
     });
 
-    it('should ignore plain chat replying to a card and pass it on', async () => {
-      const next = jest.fn();
+    it('should answer plain chat replying to a card once and accept nothing', async () => {
+      const c = textCtx('дякую, гляну', toCard);
 
-      await service.onText(textCtx('дякую, гляну', toCard) as never, next);
+      await service.onText(c as never, jest.fn());
 
       expect(finance.accept).not.toHaveBeenCalled();
-      expect(next).toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledTimes(1);
     });
 
-    it('should pass on a reply to a message that is not a card', async () => {
+    it('should pass on a reply to a message that is not a card, without answering', async () => {
       cards.byGroupMessage.mockResolvedValue(null);
       const next = jest.fn();
+      const c = textCtx('45,7', { message_id: 5 });
 
-      await service.onText(textCtx('45,7', { message_id: 5 }) as never, next);
+      await service.onText(c as never, next);
 
       expect(next).toHaveBeenCalled();
+      expect(c.reply).not.toHaveBeenCalled();
     });
 
     it('should pass on text that is not a reply, a command, or outside the admin chat', async () => {

@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { Context } from 'telegraf';
 import type { FinanceRequestCard } from '../../generated/prisma/client';
+import { NOT_A_MANAGER } from '../telegram/access/access.messages';
 import { fullName, isPrivate, type MatchContext, reply } from '../telegram/core/telegram-context';
+import { ManagersService } from '../managers/managers.service';
 import { TelegramSender } from '../telegram/core/telegram-sender';
 import { FinanceClient } from './finance.client';
 import { FinanceApiError } from './finance.types';
@@ -22,6 +24,7 @@ export class ManagerActionsService {
     private readonly cards: RequestCardsRepository,
     private readonly sync: RequestSyncService,
     private readonly sender: TelegramSender,
+    private readonly managers: ManagersService,
   ) {}
 
   async myRequests(ctx: Context): Promise<void> {
@@ -32,6 +35,10 @@ export class ManagerActionsService {
 
   async cancel(ctx: MatchContext): Promise<void> {
     if (!isPrivate(ctx) || !ctx.from) return;
+    if (!(await this.managers.findActiveByTelegramId(BigInt(ctx.from.id)))) {
+      await ctx.answerCbQuery(NOT_A_MANAGER, { show_alert: true });
+      return;
+    }
     const card = await this.cards.byRequestId(ctx.match[1]!);
     if (card?.managerChatId !== BigInt(ctx.chat!.id)) {
       await ctx.answerCbQuery('Запит не знайдено', { show_alert: true });
@@ -67,6 +74,10 @@ export class ManagerActionsService {
       (await this.cards.requestOfChatMessage(chatId, target.message_id));
     if (!requestId) return next();
 
+    if (!(await this.managers.findActiveByTelegramId(BigInt(ctx.from.id)))) {
+      await reply(ctx, { html: NOT_A_MANAGER }, message!.message_id);
+      return;
+    }
     try {
       await this.finance.postMessage(requestId, {
         authorTelegramId: ctx.from.id,

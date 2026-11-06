@@ -41,10 +41,6 @@ export class TelegramSender {
     };
   }
 
-  topicId(topic: TelegramTopic): number | undefined {
-    return this.topics[topic];
-  }
-
   async send(
     chatId: number | bigint,
     html: string,

@@ -119,7 +119,6 @@ describe('RequestCreateService', () => {
           { orderNumber: '0000-070217', amount: 4972, exchangeRate: null },
           { orderNumber: '0000-072611', amount: 11124.5, exchangeRate: null },
         ],
-        exchangeRate: 45.7,
         comment: 'Терміново',
         officialDocs: true,
         groupChatId: ADMIN_CHAT,
@@ -189,7 +188,6 @@ describe('RequestCreateService', () => {
           clientLabel: 'Іван',
           sheetUrl: 'https://s/1',
           withPercent: true,
-          exchangeRate: null,
           comment: null,
           officialDocs: false,
         },
@@ -199,7 +197,6 @@ describe('RequestCreateService', () => {
           clientLabel: 'Іван',
           sheetUrl: 'https://s/1',
           withPercent: true,
-          exchangeRate: null,
           comment: null,
           officialDocs: false,
         },
@@ -219,12 +216,12 @@ describe('RequestCreateService', () => {
       expect('sum' in body).toBe(kindInput.sum !== undefined);
     });
 
-    it('should send nulls, not undefined, for a missing rate and comment', async () => {
-      await service.create(manager, { ...input, exchangeRate: null, comment: null });
+    it('should send a null comment, and no request-level rate even if the input still carries one', async () => {
+      await service.create(manager, { ...input, comment: null });
 
-      expect(finance.create).toHaveBeenCalledWith(
-        expect.objectContaining({ exchangeRate: null, comment: null }),
-      );
+      const [body] = finance.create.mock.calls[0] as [Record<string, unknown>];
+      expect(body).toMatchObject({ comment: null });
+      expect('exchangeRate' in body).toBe(false);
     });
 
     it.each([

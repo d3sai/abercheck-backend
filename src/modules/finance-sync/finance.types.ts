@@ -66,7 +66,6 @@ export interface CreateRequestBody {
   kind: RequestKind;
   orders?: { orderNumber: string; amount: number; exchangeRate?: number | null }[];
   sum?: number;
-  exchangeRate?: number | null;
   comment?: string | null;
   officialDocs: boolean;
   clientLabel?: string | null;
@@ -76,11 +75,10 @@ export interface CreateRequestBody {
   groupMessageId: number;
 }
 
-// Finance cannot clear the rate, and `orders` are locked once the request exists.
+// `orders` (with their rates) are locked once the request exists.
 export interface EditRequestBody {
   requesterTelegramId: number;
   sum?: number;
-  exchangeRate?: number;
   comment?: string | null;
   officialDocs?: boolean;
 }

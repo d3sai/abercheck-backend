@@ -13,6 +13,7 @@ import type {
 } from '../../../src/modules/attachments/attachments.service';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import { RequestReceiptsService } from '../../../src/modules/finance-sync/request-receipts.service';
+import { NOT_A_MANAGER } from '../../../src/modules/telegram/access/access.messages';
 import type { ManagersService } from '../../../src/modules/managers/managers.service';
 
 const manager = { id: 4, telegramId: 555n, name: 'Уляна' } as Manager;
@@ -104,17 +105,43 @@ describe('RequestReceiptsService', () => {
       expect(answer.html).toBe('📎 Квитанцію додано до № 0000-070217');
     });
 
-    it('should say honestly that no order was found when completion left no order ids', async () => {
+    it('should hold the receipt while completion runs: completedAt set, no order ids yet', async () => {
       cards.byRequestId.mockResolvedValue({ ...done, orderIds: [] });
 
       const answer = await service.receive(manager, 'req1', photo);
 
-      expect(answer.html).toBe(
-        'Запит оформлено, але бот не знайшов замовлення — додайте квитанцію в кабінеті',
-      );
-      expect(cards.holdFile).not.toHaveBeenCalled();
+      expect(cards.holdFile).toHaveBeenCalledWith('req1', photo);
       expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
-      expect(logError).toHaveBeenCalled();
+      expect(answer.html).toBe('📎 Квитанцію збережено — додамо до замовлення після оформлення');
+    });
+
+    it('should attach a file held in the window once the ids appear right after the hold', async () => {
+      // first read: completion claimed, no ids; second read (after the hold): ids stored
+      cards.byRequestId
+        .mockResolvedValueOnce({ ...done, orderIds: [] })
+        .mockResolvedValueOnce(done);
+      const held = {
+        id: 7,
+        requestId: 'req1',
+        fileId: 'f1',
+        filename: 'photo.jpg',
+        mimeType: 'image/jpeg',
+        size: 1000,
+        kind: 'photo',
+      };
+      cards.heldFiles.mockResolvedValueOnce([]).mockResolvedValueOnce([held]);
+
+      const answer = await service.receive(manager, 'req1', photo);
+
+      expect(cards.holdFile).toHaveBeenCalledWith('req1', photo);
+      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
+        order,
+        [photo],
+        { telegramId: 555n, name: 'Уляна' },
+        true,
+      );
+      expect(cards.deleteHeldFiles).toHaveBeenCalledWith([7]);
+      expect(answer.html).toBe('📎 Квитанцію додано до № 0000-070217');
     });
 
     it('should give the same answer when the created order no longer exists', async () => {
@@ -125,6 +152,7 @@ describe('RequestReceiptsService', () => {
 
       expect(answer.html).toContain('бот не знайшов замовлення');
       expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
+      expect(logError).toHaveBeenCalled();
     });
 
     it('should refuse an unsupported file type with the existing text', async () => {
@@ -287,13 +315,16 @@ describe('RequestReceiptsService', () => {
       expect(cards.holdFile).not.toHaveBeenCalled();
     });
 
-    it('should call next when the sender is not an active manager', async () => {
+    it('should answer NOT_A_MANAGER and hold nothing when the sender is not an active manager', async () => {
       managers.findActiveByTelegramId.mockResolvedValue(null);
+      const c = ctx();
       const next = jest.fn();
 
-      await service.onFile(ctx() as never, photo, next);
+      await service.onFile(c as never, photo, next);
 
-      expect(next).toHaveBeenCalledTimes(1);
+      expect(next).not.toHaveBeenCalled();
+      expect(cards.holdFile).not.toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith(NOT_A_MANAGER, expect.anything());
     });
   });
 });

@@ -23,7 +23,8 @@ export interface CreateRequestInput {
   clientLabel?: string;
   sheetUrl?: string | null;
   withPercent?: boolean | null;
-  exchangeRate: string | null;
+  /** Ignored: rates are per order. Kept optional until the Mini App DTO stops passing it. */
+  exchangeRate?: string | null;
   comment: string | null;
   officialDocs: boolean;
 }
@@ -187,7 +188,6 @@ function financeBody(
     requesterTelegramId: Number(manager.telegramId),
     requesterName: manager.name,
     kind: input.kind,
-    exchangeRate: rateOf(input.exchangeRate),
     comment: input.comment,
     officialDocs: input.officialDocs,
     groupChatId,

@@ -15,7 +15,10 @@ import { RequestSyncService } from './request-sync.service';
 type Next = () => Promise<void>;
 
 /** Group-chat actions of a financier: pick a FOP, send payouts, refresh. */
-const FOP_NAME = /^\s*(?:ФОП|ТОВ|FOP)[\s.:,-]+\S.{0,60}$/iu;
+// a short name only (up to 4 words, optional closing «)»): «ФОП Гук закритий, дайте інший» is a sentence
+const FOP_NAME = /^\s*(?:ФОП|ТОВ|FOP)[\s:-]+(?:[\p{L}'’-]+\s+){0,3}[\p{L}'’-]+\)?\s*$/iu;
+
+const WRITE_TO_CHAT = 'Писати менеджеру — у чаті запиту в кабінеті.';
 
 @Injectable()
 export class FinancierActionsService {
@@ -29,23 +32,38 @@ export class FinancierActionsService {
   async pressFop(ctx: MatchContext): Promise<void> {
     const card = await this.cardOfPress(ctx);
     if (!card || !ctx.from) return;
-    let view: FinanceRequestView;
+    let answered = false;
     try {
-      view = await this.finance.accept(card.requestId, {
-        responderTelegramId: ctx.from.id,
-        fopId: Number(ctx.match[2]),
-      });
-    } catch (error) {
-      if (!(error instanceof FinanceApiError)) throw error;
-      await ctx.answerCbQuery(acceptRefusal(error.code, error.details, error.status), {
-        show_alert: true,
-      });
-      await this.redraw(card);
-      return;
+      let view: FinanceRequestView;
+      try {
+        view = await this.finance.accept(card.requestId, {
+          responderTelegramId: ctx.from.id,
+          fopId: Number(ctx.match[2]),
+        });
+      } catch (error) {
+        if (!(error instanceof FinanceApiError)) throw error;
+        answered = true;
+        await ctx.answerCbQuery(acceptRefusal(error.code, error.details, error.status), {
+          show_alert: true,
+        });
+        await this.redraw(card);
+        return;
+      }
+      // answered first: a slow or failing redraw must not leave the button spinning
+      answered = true;
+      await ctx.answerCbQuery('✅ Прийнято');
+      await this.sync.renderGroup(card, view);
+      await this.sync.notifyManager(view);
+    } finally {
+      // the button must never hang, whatever failed above
+      if (!answered) {
+        try {
+          await ctx.answerCbQuery('Не вдалося, спробуйте ще раз', { show_alert: true });
+        } catch {
+          // the original error matters more
+        }
+      }
     }
-    await this.sync.renderGroup(card, view);
-    await ctx.answerCbQuery('✅ Прийнято');
-    await this.sync.notifyManager(view);
   }
 
   async refresh(ctx: MatchContext): Promise<void> {
@@ -78,7 +96,8 @@ export class FinancierActionsService {
       return this.acceptReply(ctx, card, { payoutsText: text });
     // the most common answer in the old finance bot: just a FOP name («Фоп Гук)»)
     if (FOP_NAME.test(text)) return this.acceptReply(ctx, card, { fopName: text.trim() });
-    return next();
+    // the financier may think this reaches the manager: say where it does
+    await this.say(ctx, WRITE_TO_CHAT);
   }
 
   private async acceptReply(
