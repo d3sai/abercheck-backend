@@ -14,6 +14,7 @@ import { ManagersService } from '../../../src/modules/managers/managers.service'
 import { OrdersModule } from '../../../src/modules/orders/orders.module';
 import { OrdersService } from '../../../src/modules/orders/orders.service';
 import { TelegramSender } from '../../../src/modules/telegram/core/telegram-sender';
+import { OrderDraftService } from '../../../src/modules/telegram/order-draft/order-draft.service';
 import { TelegramModule } from '../../../src/modules/telegram/telegram.module';
 
 @Global()
@@ -33,8 +34,11 @@ class GlobalStubs {}
 class ManagersStub {}
 
 @Module({
-  providers: [{ provide: TelegramSender, useValue: { financeEnabled: true } }],
-  exports: [TelegramSender],
+  providers: [
+    { provide: TelegramSender, useValue: { financeEnabled: true } },
+    { provide: OrderDraftService, useValue: { isArmed: () => false } },
+  ],
+  exports: [TelegramSender, OrderDraftService],
 })
 class TelegramStub {}
 

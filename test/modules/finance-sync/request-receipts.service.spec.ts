@@ -51,11 +51,13 @@ describe('RequestReceiptsService', () => {
   const prisma = { order: { findUnique: jest.fn() } };
   const attachments = { saveFromTelegram: jest.fn() };
   const managers = { findActiveByTelegramId: jest.fn() };
+  const drafts = { isArmed: jest.fn().mockReturnValue(false) };
   const service = new RequestReceiptsService(
     cards as unknown as RequestCardsRepository,
     prisma as unknown as PrismaService,
     attachments as unknown as AttachmentsService,
     managers as unknown as ManagersService,
+    drafts as never,
   );
   let logError: jest.SpyInstance;
 

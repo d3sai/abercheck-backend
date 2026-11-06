@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import type { Context } from 'telegraf';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Manager, Order } from '../../generated/prisma/client';
@@ -12,10 +12,21 @@ import { AttachmentsService, type TelegramFileRef } from '../attachments/attachm
 import { ManagersService } from '../managers/managers.service';
 import { NOT_A_MANAGER } from '../telegram/access/access.messages';
 import type { BotReply } from '../telegram/core/bot-reply';
-import { isPrivate, reply } from '../telegram/core/telegram-context';
+import { button } from '../telegram/core/bot-reply';
+import { type MatchContext, isPrivate, reply } from '../telegram/core/telegram-context';
+import { OrderDraftService } from '../telegram/order-draft/order-draft.service';
 import { RequestCardsRepository } from './request-cards.repository';
 
 type Next = () => Promise<void>;
+
+const OPEN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const CHOICE_TTL_MS = 10 * 60 * 1000;
+
+/** Files sent loose while the manager has several open requests, waiting for «До якого запиту?». */
+interface Choice {
+  files: TelegramFileRef[];
+  expiresAt: number;
+}
 
 const NO_ORDER = 'Запит оформлено, але бот не знайшов замовлення — додайте квитанцію в кабінеті';
 
@@ -32,13 +43,21 @@ export class RequestReceiptsService {
     private readonly prisma: PrismaService,
     private readonly attachments: AttachmentsService,
     private readonly managers: ManagersService,
+    @Inject(forwardRef(() => OrderDraftService)) private readonly drafts: OrderDraftService,
   ) {}
+
+  private readonly choices = new Map<bigint, Choice>();
 
   /** Handles only files replied to a card or a relayed message of the sender's own request. */
   async onFile(ctx: Context, file: TelegramFileRef, next: Next): Promise<void> {
     const message = ctx.message;
     const target = message && 'reply_to_message' in message ? message.reply_to_message : undefined;
-    if (!target || !ctx.from || !isPrivate(ctx)) return next();
+    if (!ctx.from || !isPrivate(ctx)) return next();
+    if (!target) {
+      // a Kit, cash or foreign text mode takes its own files
+      if (this.drafts.isArmed(BigInt(ctx.from.id))) return next();
+      return this.onLooseFile(ctx, file);
+    }
 
     const chatId = BigInt(ctx.chat!.id);
     const requestId =
@@ -52,13 +71,82 @@ export class RequestReceiptsService {
       return;
     }
     if ((await this.cards.byRequestId(requestId))?.managerId !== manager.id) return next();
-    const answer = await this.receive(manager, requestId, file);
-    // a stored receipt gets a 👍 on the file instead of one more message
+    await this.answer(ctx, await this.receive(manager, requestId, file));
+  }
+
+  /** A stored receipt gets a 👍 on the file instead of one more message. */
+  private async answer(ctx: Context, answer: ReceiptAnswer): Promise<void> {
+    const messageId = ctx.message?.message_id;
     if (answer.stored) {
-      await ctx.react('👍').catch(() => reply(ctx, answer, message!.message_id));
+      await ctx.react('👍').catch(() => reply(ctx, answer, messageId));
       return;
     }
-    await reply(ctx, answer, message!.message_id);
+    await reply(ctx, answer, messageId);
+  }
+
+  /**
+   * A file sent straight into the chat: with one open request it goes there; with several the bot asks
+   * once which one (files sent meanwhile, e.g. an album, join the same question).
+   */
+  private async onLooseFile(ctx: Context, file: TelegramFileRef): Promise<void> {
+    const userId = BigInt(ctx.from!.id);
+    const manager = await this.managers.findActiveByTelegramId(userId);
+    if (!manager) {
+      await reply(ctx, { html: NOT_A_MANAGER }, ctx.message?.message_id);
+      return;
+    }
+    const pending = this.choices.get(userId);
+    if (pending && pending.expiresAt > Date.now()) {
+      pending.files.push(file);
+      return;
+    }
+    const open = await this.cards.openOfManager(manager.id, new Date(Date.now() - OPEN_WINDOW_MS));
+    if (open.length === 0) {
+      await reply(
+        ctx,
+        { html: 'Немає відкритого запиту, до якого можна додати файл.' },
+        ctx.message?.message_id,
+      );
+      return;
+    }
+    if (open.length === 1) {
+      await this.answer(ctx, await this.receive(manager, open[0]!.requestId, file));
+      return;
+    }
+    this.choices.set(userId, { files: [file], expiresAt: Date.now() + CHOICE_TTL_MS });
+    await reply(
+      ctx,
+      {
+        html: '📎 До якого запиту додати файл?',
+        buttons: open.map((card) => [button(`Запит #${card.number}`, `mr:${card.requestId}`)]),
+      },
+      ctx.message?.message_id,
+    );
+  }
+
+  /** «Запит #N» under the question: the waiting files go to that request. */
+  async onChoice(ctx: MatchContext): Promise<void> {
+    if (!ctx.from || !isPrivate(ctx)) return;
+    const userId = BigInt(ctx.from.id);
+    const pending = this.choices.get(userId);
+    this.choices.delete(userId);
+    const manager = await this.managers.findActiveByTelegramId(userId);
+    const card = await this.cards.byRequestId(ctx.match[1]!);
+    if (!pending || pending.expiresAt < Date.now() || !manager || card?.managerId !== manager.id) {
+      await ctx.answerCbQuery('Надішліть файл ще раз', { show_alert: true });
+      await ctx.deleteMessage().catch(() => undefined);
+      return;
+    }
+    const answers = [];
+    for (const file of pending.files)
+      answers.push(await this.receive(manager, card.requestId, file));
+    const failed = answers.find((answer) => !answer.stored);
+    await ctx.answerCbQuery(failed ? '' : '👍');
+    await ctx
+      .editMessageText(
+        failed ? failed.html : `📎 Додано до запиту #${card.number}: ${answers.length}`,
+      )
+      .catch(() => undefined);
   }
 
   async receive(

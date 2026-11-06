@@ -24,6 +24,11 @@ export class FinanceSyncUpdate {
     return this.actions.refresh(ctx);
   }
 
+  @Action(FinanceAction.Route)
+  route(@Ctx() ctx: MatchContext): Promise<void> {
+    return this.receipts.onChoice(ctx);
+  }
+
   @Action(FinanceAction.Attach)
   attach(@Ctx() ctx: MatchContext): Promise<void> {
     return this.managerActions.askFiles(ctx);

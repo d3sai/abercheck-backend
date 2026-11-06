@@ -201,6 +201,11 @@ export class OrderDraftService implements OnApplicationShutdown {
     return { html: 'Скасовано.' };
   }
 
+  /** A Kit, cash or foreign text mode waits for this manager's text and files. */
+  isArmed(userId: bigint): boolean {
+    return this.modes.some((mode) => mode.isArmed(userId));
+  }
+
   private get modes() {
     return [this.requisitesFlow, this.minusFlow, this.kitFlow, this.cashFlow, this.foreignFlow];
   }

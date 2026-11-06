@@ -22,11 +22,12 @@ export const FinanceAction = {
   Accept: /^mo:([\w-]+)$/,
   /** «📎 Прикріпити файли»: the bot asks for the files as a reply; they go straight to Telegram. */
   Attach: /^ma:([\w-]+)$/,
+  /** «Запит #N» under «До якого запиту додати файл?» for a file sent straight into the chat. */
+  Route: /^mr:([\w-]+)$/,
 } as const;
 
 const attachButton = (id: string) => button('📎 Прикріпити файли', `ma:${id}`);
-const ATTACH_HINT =
-  '📎 Квитанція: натисніть «Прикріпити файли» або надішліть фото чи файл відповіддю на цю картку.';
+const ATTACH_HINT = '📎 Квитанція: просто надішліть фото чи файл у цей чат.';
 
 const KIND_LABEL: Record<RequestKind, string> = {
   our_fop: 'Наш ФОП',

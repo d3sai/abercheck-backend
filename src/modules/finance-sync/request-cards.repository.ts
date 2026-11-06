@@ -24,6 +24,20 @@ export class RequestCardsRepository {
     });
   }
 
+  /** A manager's requests a loose file can still go to: not closed, not cancelled, recent. */
+  openOfManager(managerId: number, since: Date): Promise<FinanceRequestCard[]> {
+    return this.prisma.financeRequestCard.findMany({
+      where: {
+        managerId,
+        closedAt: null,
+        createdAt: { gte: since },
+        OR: [{ notifiedStatus: null }, { notifiedStatus: { not: 'cancelled' } }],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+    });
+  }
+
   byManagerMessage(
     managerChatId: bigint,
     managerMessageId: number,
