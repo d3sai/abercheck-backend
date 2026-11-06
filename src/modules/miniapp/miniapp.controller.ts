@@ -27,7 +27,7 @@ import { type FinanceRequestView, paysAfterConfirm } from '../finance-sync/finan
 import { RequestCardsRepository } from '../finance-sync/request-cards.repository';
 import { RequestCreateService } from '../finance-sync/request-create.service';
 import { RequestSyncService } from '../finance-sync/request-sync.service';
-import { type StoredPayment, storedPayments } from '../finance-sync/stored-payments';
+import { storedPayments } from '../finance-sync/stored-payments';
 import { type DirectOrdersResult, DirectOrdersService } from './direct-orders.service';
 import { MiniappManager, MiniappAuthGuard } from './miniapp-auth.guard';
 import {
@@ -38,7 +38,6 @@ import {
   PaidMiniappRequestDto,
   toCreateInput,
   toEditBody,
-  toEditPayments,
   toOrderPlan,
 } from './miniapp.dto';
 import { financeError, notFound } from './miniapp.errors';
@@ -126,27 +125,13 @@ export class MiniappController {
     @Param('id') id: string,
     @Body() dto: EditMiniappRequestDto,
   ): Promise<RequestResponse> {
-    let card = await this.ownCard(manager, id);
+    const card = await this.ownCard(manager, id);
     const body = toEditBody(dto, Number(manager.telegramId));
     let view: FinanceRequestView;
-    let payments: StoredPayment[] | undefined;
     try {
-      // the kind and the current sum decide which payments are valid
-      if (dto.payments != null) {
-        const current = (await this.finance.get(id)).request;
-        payments = toEditPayments(current.kind, current.sum, dto);
-      }
       view = await this.finance.edit(id, body);
     } catch (error) {
       throw financeError(error);
-    }
-    // finance accepted the edit, so a failed save must not turn it into an error
-    if (payments) {
-      try {
-        card = await this.cards.setPayments(id, payments);
-      } catch (error) {
-        this.logger.error(`Request ${id} was edited but its payments were not saved`, error);
-      }
     }
     // the edit is confirmed by now, so a failed redraw must not turn it into an error
     try {

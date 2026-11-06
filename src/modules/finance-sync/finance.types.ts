@@ -79,16 +79,12 @@ export interface CreateRequestBody {
   groupMessageId: number;
 }
 
-// Only while pending; `orders` replace the current list, the rest is for minus.
+// `orders` (with their rates) are locked once the request exists.
 export interface EditRequestBody {
   requesterTelegramId: number;
-  orders?: { orderNumber: string; amount: number; exchangeRate: number }[];
   sum?: number;
   comment?: string | null;
   officialDocs?: boolean;
-  clientLabel?: string;
-  sheetUrl?: string | null;
-  withPercent?: boolean | null;
 }
 
 export interface FinanceEvent {
