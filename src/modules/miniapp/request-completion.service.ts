@@ -1,3 +1,4 @@
+import { adminOrderCreatedMessage } from '../telegram/notifications/order-templates';
 import { TELEGRAM_CAPTION_LIMIT } from '../attachments/attachments.constants';
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ApiError } from '../../common/api-error';
@@ -71,6 +72,8 @@ interface Progress {
   skipped: string[];
   /** The admin notice without payer rows, for when the requisites write fails. */
   fallbackNotice: ((orders: Order[]) => string) | null;
+  /** Receipts wait for the orders: the order notice then goes as their caption, not on its own. */
+  heldReceipts: boolean;
 }
 
 const ORDER_KINDS = ['our_fop', 'foreign_fop', 'card'];
@@ -277,7 +280,12 @@ export class RequestCompletionService {
       throw apiError(HttpStatus.CONFLICT, 'already-completed', 'Запит уже оформлено');
     }
 
-    const progress: Progress = { created: [], skipped: [], fallbackNotice: null };
+    const progress: Progress = {
+      created: [],
+      skipped: [],
+      fallbackNotice: null,
+      heldReceipts: (await this.cards.heldFiles(requestId)).length > 0,
+    };
     let made: Made = { orders: [], skipped: [], notice: null };
     let note: string | undefined;
     try {
@@ -412,7 +420,7 @@ export class RequestCompletionService {
                 orderNumber: items[0]!.number,
                 amountDue: items[0]!.amount.toFixed(2),
               },
-              { notify: true, addPart: part },
+              { notify: !progress.heldReceipts, addPart: part },
             ),
           ]
         : await this.orders.createGroup(
@@ -423,10 +431,13 @@ export class RequestCompletionService {
               exchangeRate: item.rate ?? undefined,
             })),
             common,
-            { notify: true },
+            { notify: !progress.heldReceipts },
           );
     progress.created.push(...orders);
-    return { orders, skipped, notice: null };
+    const notice = progress.heldReceipts
+      ? orders.map((order) => adminOrderCreatedMessage(order, manager)).join('\n\n')
+      : null;
+    return { orders, skipped, notice };
   }
 
   private async createRequisites(

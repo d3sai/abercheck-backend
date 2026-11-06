@@ -9,9 +9,13 @@ import type { Order, OrderAttachment } from '../../generated/prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Initiator } from '../refunds/refund.events';
 import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
+import { formatRate } from '../telegram/notifications/order-templates';
 import { AttachmentNotFoundError, AttachmentStorageError } from './attachments.errors';
 
-type CaptionOrder = Pick<Order, 'orderNumber' | 'clientName' | 'amountDue' | 'currency'>;
+type CaptionOrder = Pick<
+  Order,
+  'orderNumber' | 'clientName' | 'amountDue' | 'currency' | 'exchangeRate' | 'comment'
+>;
 
 export interface TelegramFileRef {
   fileId: string;
@@ -27,12 +31,15 @@ function fileIdOf(sent: SentMedia): string {
   return 'document' in sent ? sent.document.file_id : sent.photo[sent.photo.length - 1]!.file_id;
 }
 
+// the whole order, so the file in «Оплати» reads on its own
 function caption(order: CaptionOrder, uploader: Initiator): string {
   return [
-    `📎 <b>${escapeHtml(order.clientName)}</b>`,
-    `Замовлення № ${escapeHtml(order.orderNumber)}`,
-    `Сума до оплати: ${formatMoneyIn(order.amountDue, order.currency)}`,
-    `Додав: ${escapeHtml(uploader.name)}`,
+    `📎 <b>Квитанція</b> · ${escapeHtml(uploader.name)}`,
+    `<b>${escapeHtml(order.clientName)}</b>`,
+    `№ ${escapeHtml(order.orderNumber)}`,
+    `Сума: ${formatMoneyIn(order.amountDue, order.currency)}`,
+    ...(order.exchangeRate ? [`Курс: ${formatRate(order.exchangeRate)}`] : []),
+    ...(order.comment ? [`Коментар: ${escapeHtml(order.comment.slice(0, 300))}`] : []),
   ].join('\n');
 }
 

@@ -28,6 +28,8 @@ describe('AttachmentsService.saveFromTelegram', () => {
     clientName: 'Test',
     amountDue: new Prisma.Decimal('1'),
     currency: Currency.UAH,
+    exchangeRate: null,
+    comment: null,
   };
   const uploader: Initiator = { telegramId: 5000000000n, name: 'Христина' };
 
@@ -96,7 +98,7 @@ describe('AttachmentsService.saveFromTelegram', () => {
     const [, media] = bot.telegram.sendMediaGroup.mock.calls[0] as [number, MediaGroupItem[]];
     expect(media[0]!.caption).toBeUndefined();
     expect(media[1]!.caption).toContain('📎 <b>');
-    expect(media[1]!.caption).toContain('Замовлення № 0000-066717');
+    expect(media[1]!.caption).toContain('№ 0000-066717');
   });
 
   it('should send a single photo via sendPhoto, not sendDocument', async () => {
