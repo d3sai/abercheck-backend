@@ -103,6 +103,11 @@ describe('groupCard', () => {
     expect(flat(minus)).toHaveLength(3);
   });
 
+  it('shows official documents only on «Наш ФОП» cards', () => {
+    expect(groupCard(view(), null).html).toContain('Офіційні документи: так');
+    expect(groupCard(view({ kind: 'card' }), null).html).not.toContain('Офіційні документи');
+  });
+
   it('kind labels', () => {
     expect(groupCard(view({ kind: 'foreign_fop' }), null).html).toContain('Чужий ФОП');
     expect(groupCard(view({ kind: 'minus', orders: [] }), null).html).toContain('Закриття мінусу');

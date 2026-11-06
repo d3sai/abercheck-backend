@@ -174,7 +174,8 @@ export function toCreateInput(dto: CreateMiniappRequestDto): CreateRequestInput 
   const common = {
     kind: dto.kind,
     comment: text(dto.comment),
-    officialDocs: dto.officialDocs,
+    // official documents are a choice only for «Наш ФОП»; the other kinds go without them
+    officialDocs: dto.kind === 'our_fop' ? dto.officialDocs : false,
   };
 
   if (ORDER_KINDS.includes(dto.kind)) {

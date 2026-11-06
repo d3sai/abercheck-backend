@@ -136,7 +136,7 @@ describe('MiniappController', () => {
         sheetUrl: 'https://s/1',
         withPercent: true,
         comment: null,
-        officialDocs: true,
+        officialDocs: false,
       });
     });
 
@@ -152,6 +152,18 @@ describe('MiniappController', () => {
         expect.objectContaining({ comment: null }),
       );
     });
+
+    it.each(['foreign_fop', 'card'] as RequestKind[])(
+      'should send %s without official documents whatever the form says',
+      async (kind) => {
+        await create({ kind, orders: [order], officialDocs: true });
+
+        expect(requests.create).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({ kind, officialDocs: false }),
+        );
+      },
+    );
 
     it('should not require a rate for minus', async () => {
       await create({ kind: 'minus', sum: '100', clientLabel: 'A' });

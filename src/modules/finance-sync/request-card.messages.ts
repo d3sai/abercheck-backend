@@ -87,7 +87,7 @@ function body(view: FinanceRequestView, managerName?: string): string[] {
   if (view.exchangeRate) lines.push(`Курс: ${rate(view.exchangeRate)}`);
   if (view.clientLabel) lines.push(`Клієнт: ${escapeHtml(view.clientLabel)}`);
   if (view.sheetUrl) lines.push(`Таблиця: ${escapeHtml(view.sheetUrl)}`);
-  if (view.officialDocs !== null) {
+  if (view.kind === 'our_fop' && view.officialDocs !== null) {
     lines.push(`Офіційні документи: ${view.officialDocs ? 'так' : 'ні'}`);
   }
   if (view.comment) {
