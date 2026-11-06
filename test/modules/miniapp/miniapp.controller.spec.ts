@@ -82,7 +82,7 @@ describe('MiniappController', () => {
       amount: '4972.00',
       paidAt: '2026-11-04T08:15:00.000Z',
     };
-    // a payment row goes with every kind but our_fop
+    // a payment row goes with card and minus; our_fop and foreign_fop pay after confirming
     const base = { officialDocs: true, payments: [paid] };
     const create = (dto: Partial<CreateMiniappRequestDto>) =>
       controller.create(manager, { ...base, ...dto } as CreateMiniappRequestDto);
@@ -107,6 +107,7 @@ describe('MiniappController', () => {
     it('should keep two foreign_fop orders with a rate per row', async () => {
       await create({
         kind: 'foreign_fop',
+        payments: undefined,
         orders: [
           { ...order, exchangeRate: '44.5' },
           { orderNumber: '0000-072611', amount: '11124.50', exchangeRate: '45.1' },
@@ -174,7 +175,12 @@ describe('MiniappController', () => {
     it.each(['foreign_fop', 'card'] as RequestKind[])(
       'should send %s without official documents whatever the form says',
       async (kind) => {
-        await create({ kind, orders: [order], officialDocs: true });
+        await create({
+          kind,
+          orders: [order],
+          officialDocs: true,
+          payments: kind === 'card' ? [paid] : undefined,
+        });
 
         expect(requests.create).toHaveBeenCalledWith(
           manager,
@@ -235,42 +241,42 @@ describe('MiniappController', () => {
       },
     );
 
-    it.each(['foreign_fop', 'card'] as RequestKind[])(
-      'should pass the normalised payments of a %s request',
-      async (kind) => {
-        await create({
-          kind,
-          orders: [order],
+    it('should pass the normalised payments of a card request', async () => {
+      await create({
+        kind: 'card',
+        orders: [order],
+        payments: [
+          { ...paid, account: ' 4441111069645962 ' },
+          { ...paid, amount: '1.5' },
+        ],
+      });
+
+      expect(requests.create).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
           payments: [
-            { ...paid, account: ' 4441111069645962 ' },
-            { ...paid, amount: '1.5' },
+            { ...stored, account: '4441111069645962' },
+            { ...stored, amount: '1.50' },
           ],
-        });
+        }),
+      );
+    });
+
+    it.each(['our_fop', 'foreign_fop'] as RequestKind[])(
+      'should send a %s request without payments',
+      async (kind) => {
+        await create({ kind, orders: [order], payments: [] });
 
         expect(requests.create).toHaveBeenCalledWith(
           manager,
-          expect.objectContaining({
-            payments: [
-              { ...stored, account: '4441111069645962' },
-              { ...stored, amount: '1.50' },
-            ],
-          }),
+          expect.not.objectContaining({ payments: expect.anything() as unknown }),
         );
       },
     );
 
-    it('should send an our_fop request without payments', async () => {
-      await create({ kind: 'our_fop', orders: [order], payments: [] });
-
-      expect(requests.create).toHaveBeenCalledWith(
-        manager,
-        expect.not.objectContaining({ payments: expect.anything() as unknown }),
-      );
-    });
-
     it.each([
       ['our_fop with a payment', { kind: 'our_fop', orders: [order] }],
-      ['foreign_fop without payments', { kind: 'foreign_fop', orders: [order], payments: [] }],
+      ['foreign_fop with a payment', { kind: 'foreign_fop', orders: [order] }],
       ['card without payments', { kind: 'card', orders: [order], payments: undefined }],
       [
         'card without a payer name',

@@ -342,7 +342,14 @@ describe('BotUpdate', () => {
       expect(replies.map(({ text }) => text)).toEqual(['Нема чого скасовувати.']);
     });
 
+    it('should answer a hint to a file sent outside a text mode', async () => {
+      const replies = await sendPdf();
+
+      expect(replies[0]!.text).toContain('«📎 Прикріпити файли»');
+    });
+
     it('should forget the attached files', async () => {
+      await say('/requisites');
       const attached = await sendPdf();
       const cancelled = await say('/cancel');
 

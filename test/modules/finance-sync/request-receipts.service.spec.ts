@@ -47,6 +47,7 @@ describe('RequestReceiptsService', () => {
     holdFile: jest.fn(),
     heldFiles: jest.fn(),
     deleteHeldFiles: jest.fn(),
+    openOfManager: jest.fn(),
   };
   const prisma = { order: { findUnique: jest.fn() } };
   const attachments = { saveFromTelegram: jest.fn() };
@@ -102,6 +103,7 @@ describe('RequestReceiptsService', () => {
         [photo],
         { telegramId: 555n, name: 'Уляна' },
         true,
+        undefined,
       );
       expect(cards.holdFile).not.toHaveBeenCalled();
       expect(answer.html).toBe('📎 Квитанцію додано до № 0000-070217');
@@ -141,6 +143,7 @@ describe('RequestReceiptsService', () => {
         [photo],
         { telegramId: 555n, name: 'Уляна' },
         true,
+        undefined,
       );
       expect(cards.deleteHeldFiles).toHaveBeenCalledWith([7]);
       expect(answer.html).toBe('📎 Квитанцію додано до № 0000-070217');
@@ -219,6 +222,7 @@ describe('RequestReceiptsService', () => {
         ],
         { telegramId: 555n, name: 'Уляна' },
         true,
+        undefined,
       );
       expect(cards.deleteHeldFiles).toHaveBeenCalledWith([1, 2]);
     });
@@ -307,16 +311,88 @@ describe('RequestReceiptsService', () => {
       expect(cards.holdFile).toHaveBeenCalledWith('req1', photo);
     });
 
-    it.each([
-      ['not a reply', { message: { message_id: 90 } }],
-      ['a group chat', { chat: { id: -100, type: 'supergroup' } }],
-    ])('should call next for %s', async (_name, patch) => {
+    it('should call next for a group chat', async () => {
       const next = jest.fn();
 
-      await service.onFile(ctx(patch) as never, photo, next);
+      await service.onFile(ctx({ chat: { id: -100, type: 'supergroup' } }) as never, photo, next);
 
       expect(next).toHaveBeenCalledTimes(1);
       expect(cards.holdFile).not.toHaveBeenCalled();
+    });
+
+    describe('a file sent loose, not as a reply', () => {
+      const loose = (patch: Record<string, unknown> = {}) =>
+        ctx({ message: { message_id: 90 }, ...patch });
+      const card = (requestId: string, number: string) => ({ requestId, number });
+
+      beforeEach(() => {
+        drafts.isArmed.mockReturnValue(false);
+      });
+
+      it('should call next while a Kit, cash or foreign text mode is armed', async () => {
+        drafts.isArmed.mockReturnValue(true);
+        const next = jest.fn();
+
+        await service.onFile(loose() as never, photo, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(cards.openOfManager).not.toHaveBeenCalled();
+        expect(cards.holdFile).not.toHaveBeenCalled();
+      });
+
+      it('should keep it on the only open request and answer with a 👍', async () => {
+        cards.openOfManager.mockResolvedValue([card('req1', '42')]);
+        const c = loose();
+        const next = jest.fn();
+
+        await service.onFile(c as never, photo, next);
+
+        expect(cards.holdFile).toHaveBeenCalledWith('req1', photo);
+        expect(c.react).toHaveBeenCalledWith('👍');
+        expect(next).not.toHaveBeenCalled();
+      });
+
+      it('should say there is no open request', async () => {
+        cards.openOfManager.mockResolvedValue([]);
+        const c = loose();
+
+        await service.onFile(c as never, photo, jest.fn());
+
+        expect(c.reply).toHaveBeenCalledWith(
+          'Немає відкритого запиту, до якого можна додати файл.',
+          expect.anything(),
+        );
+        expect(cards.holdFile).not.toHaveBeenCalled();
+      });
+
+      it('should ask which request with «mr:» buttons, then attach the waiting files to the chosen one', async () => {
+        cards.openOfManager.mockResolvedValue([card('req1', '42'), card('req2', '43')]);
+        const c = loose();
+
+        await service.onFile(c as never, photo, jest.fn());
+        // an album: the second file joins the same question
+        await service.onFile(loose() as never, { ...photo, fileId: 'f2' }, jest.fn());
+
+        expect(c.reply).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(c.reply.mock.calls[0])).toContain('До якого запиту');
+        expect(JSON.stringify(c.reply.mock.calls[0])).toContain('mr:req2');
+        expect(cards.holdFile).not.toHaveBeenCalled();
+
+        cards.byRequestId.mockResolvedValue({ ...open, requestId: 'req2', number: '43' });
+        const cb = {
+          from: { id: 555 },
+          chat: { id: 555, type: 'private' },
+          match: ['mr:req2', 'req2'],
+          answerCbQuery: jest.fn(),
+          editMessageText: jest.fn().mockResolvedValue(true),
+          deleteMessage: jest.fn(),
+        };
+        await service.onChoice(cb as never);
+
+        expect(cards.holdFile).toHaveBeenCalledTimes(2);
+        expect(cards.holdFile).toHaveBeenCalledWith('req2', photo);
+        expect(cb.editMessageText).toHaveBeenCalledWith('📎 Додано до запиту #43: 2');
+      });
     });
 
     it('should call next for a reply to a message that belongs to no request', async () => {

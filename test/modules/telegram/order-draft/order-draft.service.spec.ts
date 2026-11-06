@@ -346,26 +346,6 @@ describe('OrderDraftService', () => {
       expect(reply.html).toContain('0000-066717(1)');
     });
 
-    it('should keep the attached files for the part', async () => {
-      orders.create.mockResolvedValue(partOfNumber());
-      await service.addFile(MANAGER, file());
-      await service.handleText(MANAGER, template());
-
-      await service.addPart(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(MANAGER.id, expect.anything(), {
-        notify: false,
-        addPart: true,
-      });
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ orderNumber: '0000-066717(1)' }),
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нова частина замовлення'),
-      );
-    });
-
     it('should add a part only once, however many times the button is pressed', async () => {
       orders.create.mockResolvedValue(partOfNumber());
       await service.handleText(MANAGER, template());
@@ -529,33 +509,27 @@ describe('OrderDraftService', () => {
     });
   });
 
-  it('should report a number taken between the check and the creation, keeping files buffered', async () => {
+  it('should report a number taken between the check and the creation, and allow a retry', async () => {
     orders.create.mockRejectedValue(new OrderNumberTakenError('0000-066717'));
 
-    await service.addFile(MANAGER, file());
     const reply = await service.handleText(MANAGER, template());
 
     expect(reply?.html).toContain('вже є в системі');
 
     orders.create.mockResolvedValue(createdOrder());
     const retry = await service.handleText(MANAGER, template());
-    expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-      expect.anything(),
-      [file()],
-      { telegramId: MANAGER.telegramId, name: MANAGER.name },
-      true,
-      expect.any(String),
-    );
     expect(retry?.html).toContain('створено');
   });
 
   it('should drop buffered files on cancel', async () => {
+    service.startRequisites(USER);
     await service.addFile(MANAGER, file());
 
     expect(service.cancel(USER).html).toContain('Скасовано');
 
-    orders.create.mockResolvedValue(createdOrder());
-    await service.handleText(MANAGER, template());
+    service.startRequisites(USER);
+    await service.handleText(MANAGER, '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%');
+    expect((await service.confirmRequisites(MANAGER)).html).toBeDefined();
     expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
   });
 
@@ -564,35 +538,33 @@ describe('OrderDraftService', () => {
   });
 
   describe('attaching a file', () => {
+    it('should answer a hint and keep nothing for a file outside a text mode', async () => {
+      const reply = await service.addFile(MANAGER, file(), template());
+
+      expect(reply.html).toContain('«📎 Прикріпити файли»');
+      expect(orders.create).not.toHaveBeenCalled();
+      expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
+      await service.onApplicationShutdown();
+      expect(sender.send).not.toHaveBeenCalled();
+    });
+
     it('should just acknowledge a standalone file with no caption', async () => {
+      service.startRequisites(USER);
       const reply = await service.addFile(MANAGER, file());
 
       expect(reply.html).toContain('Додано');
       expect(reply.html).toContain('1/10');
     });
 
-    it('should create the order from a caption sent together with the file', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-
-      const reply = await service.addFile(MANAGER, file(), template());
-
-      expect(reply.html).toContain('створено');
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.anything(),
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нове замовлення'),
-      );
-    });
-
     it('should reject an unsupported file type', async () => {
+      service.startRequisites(USER);
       const reply = await service.addFile(MANAGER, { ...file(), mimeType: 'application/zip' });
 
       expect(reply.html).toContain('не підтримується');
     });
 
     it('should cap the number of buffered files', async () => {
+      service.startRequisites(USER);
       for (let i = 0; i < 10; i += 1) {
         await service.addFile(MANAGER, file(`f${i}.png`));
       }
@@ -600,75 +572,6 @@ describe('OrderDraftService', () => {
       const reply = await service.addFile(MANAGER, file('overflow.png'));
 
       expect(reply.html).toContain('Максимум 10');
-    });
-
-    it('should nudge instead of the generic fallback when files are waiting for details', async () => {
-      await service.addFile(MANAGER, file());
-
-      const reply = await service.handleText(MANAGER, 'ще не знаю що писати');
-
-      expect(reply?.html).toContain('без даних замовлення');
-    });
-
-    it('should notify admins with a single message merging the order and the file', async () => {
-      const order = createdOrder();
-      orders.create.mockResolvedValue(order);
-
-      await service.addFile(MANAGER, file(), template());
-
-      expect(orders.create).toHaveBeenCalledWith(MANAGER.id, expect.anything(), {
-        notify: false,
-        addPart: false,
-      });
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        order,
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нове замовлення'),
-      );
-      expect(sender.sendToAdmins).not.toHaveBeenCalled();
-    });
-
-    it('should fall back to a separate admin message when the merged caption would be too long', async () => {
-      const longComment = 'Дуже '.repeat(200).trim();
-      const order = createdOrder({ comment: longComment });
-      orders.create.mockResolvedValue(order);
-
-      await service.addFile(MANAGER, file(), template({ Коментар: longComment }));
-
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        order,
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        undefined,
-      );
-      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('Нове замовлення'));
-    });
-
-    it('should treat a file sent after a created order as the start of the next order', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-      await service.handleText(MANAGER, template());
-
-      const reply = await service.addFile(MANAGER, file('after.png'));
-
-      expect(reply.html).toContain('Додано');
-      expect(reply.html).toContain('1/10');
-      expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
-
-      orders.create.mockResolvedValue(
-        createdOrder({ id: 2, orderNumber: '0000-066718', baseNumber: '0000-066718' }),
-      );
-      await service.handleText(MANAGER, template({ Номер: '0000-066718' }));
-
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ orderNumber: '0000-066718' }),
-        [file('after.png')],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.any(String),
-      );
     });
   });
 
@@ -1016,8 +919,9 @@ UA549358710000067320000088286"`;
 
     it('should attach the files to the first order and merge the notice into their caption', async () => {
       orders.createGroup.mockResolvedValue(groupOrders());
+      service.startRequisites(USER);
       await service.addFile(MANAGER, file());
-      await begin(GROUP);
+      await service.handleText(MANAGER, GROUP);
 
       await service.confirmRequisites(MANAGER);
 
@@ -1498,8 +1402,10 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(orders.create).not.toHaveBeenCalled();
       expect(orders.createGroup).not.toHaveBeenCalled();
 
+      // a file with the template outside the mode gets the receipt hint and creates nothing
       const withFile = await service.addFile(MANAGER, file(), TEMPLATE);
-      expect(withFile.html).toContain(NEW_REQUEST_LABEL);
+      expect(withFile.html).toContain('«📎 Прикріпити файли»');
+      expect(orders.createGroup).not.toHaveBeenCalled();
     });
 
     it('should create the order in the currency the template names', async () => {
@@ -1527,6 +1433,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
   describe('onApplicationShutdown', () => {
     it('should warn a manager with buffered files', async () => {
+      service.startRequisites(USER);
       await service.addFile(MANAGER, file());
 
       await service.onApplicationShutdown();
@@ -1593,6 +1500,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
     });
 
     it('should warn each affected manager only once, and leave others alone', async () => {
+      service.startRequisites(USER);
       await service.addFile(MANAGER, file());
       const other = { ...MANAGER, id: 8, telegramId: 6000000000n };
 

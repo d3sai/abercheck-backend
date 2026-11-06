@@ -164,11 +164,15 @@ describe('RequestSyncService', () => {
       );
 
       const [, , html, buttons] = edit();
-      expect(buttons!.flat().map((b) => b.text)).toEqual(['✅ Прийняти', '✏️ Змінити']);
+      expect(buttons!.flat().map((b) => b.text)).toEqual([
+        '✅ Прийняти',
+        '✏️ Змінити',
+        '📎 Прикріпити файли',
+      ]);
       expect(html).toContain('• Іван · 700 грн · 04.11.2026 10:15');
     });
 
-    it('should keep the «Оформлено» line and drop the buttons for a completed card of a closed kind', async () => {
+    it('should keep the «Оформлено» line and keep only «Прикріпити файли» on a completed card of a closed kind', async () => {
       sender.miniAppUrl = URL_;
       orders.numbersByIds.mockResolvedValue(['0000-1', '0000-2']);
 
@@ -180,7 +184,7 @@ describe('RequestSyncService', () => {
       expect(orders.numbersByIds).toHaveBeenCalledWith([10, 11]);
       const [, , html, buttons] = edit();
       expect(html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
-      expect(buttons).toBeUndefined();
+      expect(buttons).toEqual([[{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }]]);
       expect(orders.latestPaidAt).not.toHaveBeenCalled();
     });
 
@@ -197,7 +201,7 @@ describe('RequestSyncService', () => {
         edit()[3]!
           .flat()
           .map((b) => b.text),
-      ).toEqual(['💰 Оплачено']);
+      ).toEqual(['💰 Оплачено', '📎 Прикріпити файли']);
     });
 
     it('should show when a closed our_fop was paid', async () => {
@@ -211,7 +215,7 @@ describe('RequestSyncService', () => {
 
       expect(orders.latestPaidAt).toHaveBeenCalledWith([10]);
       expect(edit()[2]).toContain('✅ Оплачено 04.11.2026 14:30 · закрито');
-      expect(edit()[3]).toBeUndefined();
+      expect(edit()[3]).toEqual([[{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }]]);
     });
 
     it('should draw a completed card with no orders without a number', async () => {
@@ -222,7 +226,7 @@ describe('RequestSyncService', () => {
         view({ status: 'accepted' }),
       );
 
-      expect(edit()[2]).toMatch(/✅ Оформлено$/);
+      expect(edit()[2]).toMatch(/✅ Оформлено\n📎 Квитанція/);
     });
 
     it('should show the line again on a webhook redraw', async () => {
@@ -310,11 +314,15 @@ describe('RequestSyncService', () => {
         555n,
         31,
         expect.stringContaining('Прийняв'),
-        [[{ text: '✅ Прийняти', callback_data: 'mo:req1' }]],
+        [
+          [{ text: '✅ Прийняти', callback_data: 'mo:req1' }],
+          [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
+        ],
       );
       // the card then moves down: one new message instead of a notice
       expect(sender.send).toHaveBeenCalledWith(555n, expect.stringContaining('Прийняв'), [
         [{ text: '✅ Прийняти', callback_data: 'mo:req1' }],
+        [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
       ]);
       expect(sender.deleteMessage).toHaveBeenCalledWith(555n, 31);
     });
