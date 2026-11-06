@@ -14,6 +14,7 @@ import { OrdersService } from '../../../src/modules/orders/orders.service';
 import { RequisitesModule } from '../../../src/modules/requisites/requisites.module';
 import { RequisitesService } from '../../../src/modules/requisites/requisites.service';
 import { DirectOrdersService } from '../../../src/modules/miniapp/direct-orders.service';
+import { MiniappUpdate } from '../../../src/modules/miniapp/miniapp.update';
 import { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
 import { CashDraftService } from '../../../src/modules/telegram/order-draft/cash-draft.service';
 import { ForeignDraftService } from '../../../src/modules/telegram/order-draft/foreign-draft.service';
@@ -86,5 +87,6 @@ describe('MiniappModule', () => {
     expect(moduleRef.get(MiniappController)).toBeInstanceOf(MiniappController);
     expect(moduleRef.get(RequestCompletionService)).toBeInstanceOf(RequestCompletionService);
     expect(moduleRef.get(DirectOrdersService)).toBeInstanceOf(DirectOrdersService);
+    expect(moduleRef.get(MiniappUpdate)).toBeInstanceOf(MiniappUpdate);
   });
 });

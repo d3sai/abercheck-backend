@@ -43,7 +43,7 @@ describe('RequestSyncService', () => {
     editMessage: jest.fn(),
     sendDocument: jest.fn(),
   };
-  const orders = { numbersByIds: jest.fn() };
+  const orders = { numbersByIds: jest.fn(), latestPaidAt: jest.fn() };
   const finance = { fops: jest.fn(), get: jest.fn(), file: jest.fn() };
   const cards = {
     byRequestId: jest.fn(),
@@ -157,28 +157,66 @@ describe('RequestSyncService', () => {
       expect(orders.numbersByIds).not.toHaveBeenCalled();
     });
 
-    it('should offer «Додати дату» on an accepted card that is not completed', async () => {
+    it('should show the stored payments and offer «Прийняти» on an accepted card that is not completed', async () => {
       sender.miniAppUrl = URL_;
+      const payments = [
+        { payerName: 'Іван', account: null, amount: '700', paidAt: '2026-11-04T08:15:00.000Z' },
+      ];
 
-      await service.renderManager(card, view({ status: 'accepted' }));
+      await service.renderManager(
+        { ...card, payments },
+        view({ status: 'accepted', kind: 'card' }),
+      );
 
-      const buttons = edit()[3]!;
-      expect(buttons.flat().map((b) => b.text)).toEqual(['📎 Додати дату']);
+      const [, , html, buttons] = edit();
+      expect(buttons!.flat().map((b) => b.text)).toEqual(['✅ Прийняти', '✏️ Змінити']);
+      expect(html).toContain('• Іван · 700 грн · 04.11.2026 10:15');
     });
 
-    it('should keep the «Оформлено» line and drop the buttons for a completed card', async () => {
+    it('should keep the «Оформлено» line and drop the buttons for a completed card of a closed kind', async () => {
       sender.miniAppUrl = URL_;
       orders.numbersByIds.mockResolvedValue(['0000-1', '0000-2']);
 
       await service.renderManager(
-        { ...card, completedAt: new Date(), orderIds: [10, 11] },
-        view({ status: 'accepted' }),
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10, 11] },
+        view({ status: 'accepted', kind: 'card' }),
       );
 
       expect(orders.numbersByIds).toHaveBeenCalledWith([10, 11]);
       const [, , html, buttons] = edit();
       expect(html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
       expect(buttons).toBeUndefined();
+      expect(orders.latestPaidAt).not.toHaveBeenCalled();
+    });
+
+    it('should offer «Оплачено» on a completed our_fop that is still open', async () => {
+      sender.miniAppUrl = URL_;
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: null, orderIds: [10] },
+        view({ status: 'accepted', kind: 'our_fop' }),
+      );
+
+      expect(
+        edit()[3]!
+          .flat()
+          .map((b) => b.text),
+      ).toEqual(['💰 Оплачено']);
+    });
+
+    it('should show when a closed our_fop was paid', async () => {
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      orders.latestPaidAt.mockResolvedValue(new Date('2026-11-04T12:30:00.000Z'));
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10] },
+        view({ status: 'accepted', kind: 'our_fop' }),
+      );
+
+      expect(orders.latestPaidAt).toHaveBeenCalledWith([10]);
+      expect(edit()[2]).toContain('✅ Оплачено 04.11.2026 14:30 · закрито');
+      expect(edit()[3]).toBeUndefined();
     });
 
     it('should draw a completed card with no orders without a number', async () => {
@@ -277,7 +315,7 @@ describe('RequestSyncService', () => {
         555n,
         31,
         expect.stringContaining('Прийняв'),
-        undefined,
+        [[{ text: '✅ Прийняти', callback_data: 'mo:req1' }]],
       );
       expect(sender.send).toHaveBeenCalledWith(
         555n,

@@ -38,11 +38,14 @@ export class RequestCardsRepository {
     });
   }
 
-  /** True only for the one caller that completes the request; everyone else must not create orders. */
-  async claimCompletion(requestId: string, now: Date): Promise<boolean> {
+  /**
+   * True only for the one caller that completes the request; everyone else must not create orders.
+   * `close` finishes the task in the same step (every kind but our_fop, which waits for its payment).
+   */
+  async claimCompletion(requestId: string, now: Date, close: boolean): Promise<boolean> {
     const { count } = await this.prisma.financeRequestCard.updateMany({
       where: { requestId, completedAt: null },
-      data: { completedAt: now },
+      data: { completedAt: now, ...(close && { closedAt: now }) },
     });
     return count > 0;
   }
@@ -51,7 +54,23 @@ export class RequestCardsRepository {
   async releaseCompletion(requestId: string): Promise<void> {
     await this.prisma.financeRequestCard.updateMany({
       where: { requestId },
-      data: { completedAt: null },
+      data: { completedAt: null, closedAt: null },
+    });
+  }
+
+  /** True only for the one caller that closes a completed, still open card. */
+  async claimClosing(requestId: string, now: Date): Promise<boolean> {
+    const { count } = await this.prisma.financeRequestCard.updateMany({
+      where: { requestId, completedAt: { not: null }, closedAt: null },
+      data: { closedAt: now },
+    });
+    return count > 0;
+  }
+
+  async releaseClosing(requestId: string): Promise<void> {
+    await this.prisma.financeRequestCard.updateMany({
+      where: { requestId },
+      data: { closedAt: null },
     });
   }
 

@@ -48,7 +48,7 @@ describe('MiniappController', () => {
   const finance = { get: jest.fn(), edit: jest.fn() };
   const cards = { byRequestId: jest.fn() };
   const sync = { renderManager: jest.fn(), renderGroup: jest.fn() };
-  const completion = { complete: jest.fn() };
+  const completion = { complete: jest.fn(), markPaid: jest.fn() };
   const directOrders = { create: jest.fn() };
   const controller = new MiniappController(
     requests as unknown as RequestCreateService,
@@ -70,7 +70,20 @@ describe('MiniappController', () => {
 
   describe('create', () => {
     const order = { orderNumber: '0000-070217', amount: '4972', exchangeRate: '45' };
-    const base = { officialDocs: true };
+    const paid = {
+      payerName: ' Петренко Іван ',
+      amount: '4972',
+      date: '2026-11-04',
+      time: '10:15',
+    };
+    const stored = {
+      payerName: 'Петренко Іван',
+      account: null,
+      amount: '4972.00',
+      paidAt: '2026-11-04T08:15:00.000Z',
+    };
+    // a payment row goes with every kind but our_fop
+    const base = { officialDocs: true, payments: [paid] };
     const create = (dto: Partial<CreateMiniappRequestDto>) =>
       controller.create(manager, { ...base, ...dto } as CreateMiniappRequestDto);
 
@@ -79,6 +92,7 @@ describe('MiniappController', () => {
         kind: 'our_fop',
         orders: [{ ...order, orderNumber: ' 0000-070217 ', exchangeRate: '45.7' }],
         comment: ' Терміново ',
+        payments: undefined,
       });
 
       expect(answer).toEqual({ requestId: 'req1', number: '42' });
@@ -127,6 +141,7 @@ describe('MiniappController', () => {
         clientLabel: ' Іван ',
         sheetUrl: 'https://s/1',
         withPercent: true,
+        payments: [{ amount: '1500.5', date: '2026-11-04', time: '09:05' }],
       });
 
       expect(requests.create).toHaveBeenCalledWith(manager, {
@@ -137,6 +152,9 @@ describe('MiniappController', () => {
         withPercent: true,
         comment: null,
         officialDocs: false,
+        payments: [
+          { payerName: null, account: null, amount: '1500.50', paidAt: '2026-11-04T07:05:00.000Z' },
+        ],
       });
     });
 
@@ -166,7 +184,12 @@ describe('MiniappController', () => {
     );
 
     it('should not require a rate for minus', async () => {
-      await create({ kind: 'minus', sum: '100', clientLabel: 'A' });
+      await create({
+        kind: 'minus',
+        sum: '100',
+        clientLabel: 'A',
+        payments: [{ amount: '100', date: '2026-11-04', time: '09:05' }],
+      });
 
       expect(requests.create).toHaveBeenCalledWith(
         manager,
@@ -212,6 +235,101 @@ describe('MiniappController', () => {
       },
     );
 
+    it.each(['foreign_fop', 'card'] as RequestKind[])(
+      'should pass the normalised payments of a %s request',
+      async (kind) => {
+        await create({
+          kind,
+          orders: [order],
+          payments: [
+            { ...paid, account: ' 4441111069645962 ' },
+            { ...paid, amount: '1.5' },
+          ],
+        });
+
+        expect(requests.create).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({
+            payments: [
+              { ...stored, account: '4441111069645962' },
+              { ...stored, amount: '1.50' },
+            ],
+          }),
+        );
+      },
+    );
+
+    it('should send an our_fop request without payments', async () => {
+      await create({ kind: 'our_fop', orders: [order], payments: [] });
+
+      expect(requests.create).toHaveBeenCalledWith(
+        manager,
+        expect.not.objectContaining({ payments: expect.anything() as unknown }),
+      );
+    });
+
+    it.each([
+      ['our_fop with a payment', { kind: 'our_fop', orders: [order] }],
+      ['foreign_fop without payments', { kind: 'foreign_fop', orders: [order], payments: [] }],
+      ['card without payments', { kind: 'card', orders: [order], payments: undefined }],
+      [
+        'card without a payer name',
+        { kind: 'card', orders: [order], payments: [{ ...paid, payerName: ' ' }] },
+      ],
+      [
+        'card without a time',
+        { kind: 'card', orders: [order], payments: [{ ...paid, time: undefined }] },
+      ],
+      [
+        'card with eleven payments',
+        { kind: 'card', orders: [order], payments: Array(11).fill(paid) },
+      ],
+      [
+        'card with a payment in the future',
+        { kind: 'card', orders: [order], payments: [{ ...paid, date: '2999-01-01' }] },
+      ],
+      [
+        'card with a bad amount',
+        { kind: 'card', orders: [order], payments: [{ ...paid, amount: '1,5' }] },
+      ],
+      ['minus without a payment', { kind: 'minus', sum: '100', clientLabel: 'A', payments: [] }],
+      [
+        'minus with two payments',
+        {
+          kind: 'minus',
+          sum: '100',
+          clientLabel: 'A',
+          payments: Array(2).fill({ amount: '50', date: '2026-11-04', time: '09:05' }),
+        },
+      ],
+      [
+        'minus without a time',
+        {
+          kind: 'minus',
+          sum: '100',
+          clientLabel: 'A',
+          payments: [{ amount: '100', date: '2026-11-04' }],
+        },
+      ],
+      [
+        'minus whose payment is not the sum',
+        {
+          kind: 'minus',
+          sum: '100',
+          clientLabel: 'A',
+          payments: [{ amount: '99', date: '2026-11-04', time: '09:05' }],
+        },
+      ],
+    ] as [string, Partial<CreateMiniappRequestDto>][])(
+      'should answer 400 and not create for %s',
+      async (_, dto) => {
+        const error = await failure(create(dto));
+
+        expect(error).toMatchObject({ status: 400, code: 'invalid-request' });
+        expect(requests.create).not.toHaveBeenCalled();
+      },
+    );
+
     it('should name the repeated number', async () => {
       const error = await failure(create({ kind: 'card', orders: [order, order] }));
 
@@ -246,13 +364,73 @@ describe('MiniappController', () => {
   });
 
   describe('get', () => {
-    it('should return the view, the manager name and completed', async () => {
+    it('should return the view, the manager name, completed, closed and no payments', async () => {
       await expect(controller.get(manager, 'req1')).resolves.toEqual({
         request: view,
         managerName: 'Уляна',
         completed: false,
+        closed: false,
+        payments: [],
       });
       expect(finance.get).toHaveBeenCalledWith('req1');
+    });
+
+    it('should return the stored payments as Kyiv date and time', async () => {
+      cards.byRequestId.mockResolvedValue({
+        ...card,
+        payments: [
+          {
+            payerName: 'Петренко Іван',
+            account: '4441111069645962',
+            amount: '700.00',
+            paidAt: '2026-11-04T08:15:00.000Z',
+          },
+          { payerName: null, account: null, amount: '5.50', paidAt: '2026-07-01T21:30:00.000Z' },
+        ],
+      });
+
+      const answer = await controller.get(manager, 'req1');
+
+      expect(answer.payments).toEqual([
+        {
+          payerName: 'Петренко Іван',
+          account: '4441111069645962',
+          amount: '700.00',
+          date: '2026-11-04',
+          time: '10:15',
+        },
+        { payerName: null, account: null, amount: '5.50', date: '2026-07-02', time: '00:30' },
+      ]);
+    });
+
+    it('should report closed for a closed card', async () => {
+      cards.byRequestId.mockResolvedValue({
+        ...card,
+        completedAt: new Date(),
+        closedAt: new Date(),
+      });
+
+      await expect(controller.get(manager, 'req1')).resolves.toMatchObject({
+        completed: true,
+        closed: true,
+      });
+    });
+
+    it('should keep a completed our_fop open until it is paid', async () => {
+      finance.get.mockResolvedValue({ request: { ...view, kind: 'our_fop' } });
+      cards.byRequestId.mockResolvedValue({ ...card, completedAt: new Date(), closedAt: null });
+
+      await expect(controller.get(manager, 'req1')).resolves.toMatchObject({
+        completed: true,
+        closed: false,
+      });
+    });
+
+    it('should count a completed card of another kind closed even without closedAt', async () => {
+      finance.get.mockResolvedValue({ request: { ...view, kind: 'card' } });
+      cards.byRequestId.mockResolvedValue({ ...card, completedAt: new Date(), closedAt: null });
+
+      await expect(controller.get(manager, 'req1')).resolves.toMatchObject({ closed: true });
     });
 
     it.each([
@@ -530,6 +708,18 @@ describe('MiniappController', () => {
     });
   });
 
+  describe('paid', () => {
+    it('should pass the manager, the id and the body to the completion service', async () => {
+      const dto = { date: '2026-11-04', time: '14:30' };
+      completion.markPaid.mockResolvedValue({ paidAt: '2026-11-04T12:30:00.000Z' });
+
+      await expect(controller.paid(manager, 'req1', dto)).resolves.toEqual({
+        paidAt: '2026-11-04T12:30:00.000Z',
+      });
+      expect(completion.markPaid).toHaveBeenCalledWith(manager, 'req1', dto);
+    });
+  });
+
   describe('completed flag', () => {
     it('should report completed once the card has a completedAt', async () => {
       cards.byRequestId.mockResolvedValue({ ...card, completedAt: new Date() });
@@ -551,7 +741,13 @@ describe('MiniappController', () => {
       });
       expect(sync.renderManager).toHaveBeenCalledWith(card, view);
       expect(sync.renderGroup).toHaveBeenCalledWith(card, view);
-      expect(answer).toEqual({ request: view, managerName: 'Уляна', completed: false });
+      expect(answer).toEqual({
+        request: view,
+        managerName: 'Уляна',
+        completed: false,
+        closed: false,
+        payments: [],
+      });
     });
 
     it('should send a sum as a number', async () => {

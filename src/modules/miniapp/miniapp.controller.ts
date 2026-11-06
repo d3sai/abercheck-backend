@@ -12,11 +12,13 @@ import {
 } from '@nestjs/common';
 import type { FinanceRequestCard, Manager } from '../../generated/prisma/client';
 import { ApiError } from '../../common/api-error';
+import { kyivDate, kyivParts } from '../../common/kyiv-time';
 import { FinanceClient } from '../finance-sync/finance.client';
 import type { FinanceRequestView } from '../finance-sync/finance.types';
 import { RequestCardsRepository } from '../finance-sync/request-cards.repository';
 import { RequestCreateService } from '../finance-sync/request-create.service';
 import { RequestSyncService } from '../finance-sync/request-sync.service';
+import { storedPayments } from '../finance-sync/stored-payments';
 import { type DirectOrdersResult, DirectOrdersService } from './direct-orders.service';
 import { MiniappManager, MiniappAuthGuard } from './miniapp-auth.guard';
 import {
@@ -24,6 +26,7 @@ import {
   CreateMiniappOrderDto,
   CreateMiniappRequestDto,
   EditMiniappRequestDto,
+  PaidMiniappRequestDto,
   toCreateInput,
   toEditBody,
   toOrderPlan,
@@ -35,6 +38,16 @@ interface RequestResponse {
   request: FinanceRequestView;
   managerName: string;
   completed: boolean;
+  /** Nothing is left to do: set with the completion, or by «💰 Оплачено» for our_fop. */
+  closed: boolean;
+  /** The payments given at creation; Kyiv date and time. */
+  payments: {
+    payerName: string | null;
+    account: string | null;
+    amount: string;
+    date: string;
+    time: string;
+  }[];
 }
 
 const CREATE_STATUS = {
@@ -131,6 +144,16 @@ export class MiniappController {
     return this.completion.complete(manager, id, dto);
   }
 
+  @Post('requests/:id/paid')
+  @HttpCode(HttpStatus.OK)
+  paid(
+    @MiniappManager() manager: Manager,
+    @Param('id') id: string,
+    @Body() dto: PaidMiniappRequestDto,
+  ): Promise<{ paidAt: string }> {
+    return this.completion.markPaid(manager, id, dto);
+  }
+
   /** Another manager's request looks exactly like a missing one. */
   private async ownCard(manager: Manager, id: string): Promise<FinanceRequestCard> {
     const card = await this.cards.byRequestId(id);
@@ -143,6 +166,23 @@ export class MiniappController {
     card: FinanceRequestCard,
     request: FinanceRequestView,
   ): RequestResponse {
-    return { request, managerName: manager.name, completed: card.completedAt != null };
+    return {
+      request,
+      managerName: manager.name,
+      completed: card.completedAt != null,
+      // a card completed before closing was tracked has no closedAt: only our_fop stays open
+      closed: card.closedAt != null || (card.completedAt != null && request.kind !== 'our_fop'),
+      payments: storedPayments(card.payments).map((payment) => {
+        const paidAt = new Date(payment.paidAt);
+        const { hour, minute } = kyivParts(paidAt);
+        return {
+          payerName: payment.payerName,
+          account: payment.account,
+          amount: payment.amount,
+          date: kyivDate(paidAt),
+          time: `${hour}:${minute}`,
+        };
+      }),
+    };
   }
 }

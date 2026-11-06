@@ -233,6 +233,12 @@ model FinanceRequestCard {
   // Set atomically when the manager completes the request; orderIds are the orders it created.
   completedAt      DateTime? @map("completed_at") @db.Timestamptz(3)
   orderIds         Int[]     @default([]) @map("order_ids")
+  // The payments the manager gave when creating the request (foreign_fop, card, minus):
+  // { payerName, account, amount, paidAt (ISO) }[]. Null for our_fop and for older cards.
+  payments         Json?
+  // The task is done: set with completedAt for foreign_fop, card and minus; for our_fop when the
+  // manager marks it paid.
+  closedAt         DateTime? @map("closed_at") @db.Timestamptz(3)
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 

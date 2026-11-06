@@ -2,16 +2,18 @@ import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ApiError } from '../../common/api-error';
 import {
   Currency,
+  type FinanceRequestCard,
   type Manager,
   type Order,
   OrderType,
   Prisma,
 } from '../../generated/prisma/client';
 import { FinanceClient } from '../finance-sync/finance.client';
-import type { FinanceRequestView } from '../finance-sync/finance.types';
+import type { FinanceRequestView, RequestKind } from '../finance-sync/finance.types';
 import { managerCard } from '../finance-sync/request-card.messages';
 import { RequestCardsRepository } from '../finance-sync/request-cards.repository';
 import { RequestReceiptsService } from '../finance-sync/request-receipts.service';
+import { storedPayments } from '../finance-sync/stored-payments';
 import { OrderNumberTakenError } from '../orders/orders.errors';
 import { type OrderWithManager, type OrderWithPaid, OrdersService } from '../orders/orders.service';
 import { RequisitesService } from '../requisites/requisites.service';
@@ -25,7 +27,15 @@ import {
 import { adminMinusMessage } from '../telegram/order-draft/minus-closing.messages';
 import { adminRequisitesMessage } from '../telegram/order-draft/requisites.messages';
 import type { PlanItem, RequisitesPlan } from '../telegram/order-draft/requisites.parser';
-import { type CompleteMiniappRequestDto, type Payment, toPayments } from './miniapp.dto';
+import {
+  type CompleteMiniappRequestDto,
+  fromStored,
+  type PaidMiniappRequestDto,
+  type Payment,
+  toOrderOverrides,
+  toPaidAt,
+  toPayments,
+} from './miniapp.dto';
 import { financeError, notFound } from './miniapp.errors';
 
 export interface CompletionResult {
@@ -57,6 +67,14 @@ interface Progress {
 }
 
 const ORDER_KINDS = ['our_fop', 'foreign_fop', 'card'];
+
+/** What `finish` needs, whichever way the manager got here: the form or «✅ Прийняти». */
+interface Completion {
+  payments: (kind: RequestKind, card: FinanceRequestCard) => Payment[];
+  orders?: CompleteMiniappRequestDto['orders'];
+  comment?: string | null;
+  addPart: boolean;
+}
 
 const PARTIAL_NOTE =
   'Замовлення створено, але реквізити платежів не збережено — перевірте їх у кабінеті.';
@@ -90,6 +108,20 @@ const partOffer = ({ order, amountPaid }: OrderWithPaid<OrderWithManager>): ApiE
     },
   );
 
+/** The request as the orders will have it: the form's amounts and rates, the form's comment. */
+function withOverrides(view: FinanceRequestView, input: Completion): FinanceRequestView {
+  const overrides = toOrderOverrides(
+    input.orders,
+    view.orders.map((order) => order.orderNumber),
+  );
+  const comment = input.comment == null ? view.comment : input.comment.trim() || null;
+  return {
+    ...view,
+    comment,
+    orders: view.orders.map((order) => ({ ...order, ...overrides.get(order.orderNumber) })),
+  };
+}
+
 @Injectable()
 export class RequestCompletionService {
   private readonly logger = new Logger(RequestCompletionService.name);
@@ -103,10 +135,91 @@ export class RequestCompletionService {
     private readonly receipts: RequestReceiptsService,
   ) {}
 
-  async complete(
+  /** «✏️ Змінити»: the payments, and optionally the amounts, rates and comment, come from the form. */
+  complete(
     manager: Manager,
     requestId: string,
     body: CompleteMiniappRequestDto,
+  ): Promise<CompletionResult> {
+    return this.finish(manager, requestId, {
+      payments: (kind) => toPayments(kind, body.payments),
+      orders: body.orders,
+      comment: body.comment,
+      addPart: body.addPart === true,
+    });
+  }
+
+  /** «✅ Прийняти»: the orders as the card showed them, with the payments stored at creation. */
+  accept(manager: Manager, requestId: string): Promise<CompletionResult> {
+    return this.finish(manager, requestId, {
+      payments: (kind, card) => {
+        const stored = storedPayments(card.payments);
+        if (kind !== 'our_fop' && stored.length === 0) {
+          throw apiError(
+            HttpStatus.BAD_REQUEST,
+            'invalid-request',
+            'Платежів немає — відкрийте «✏️ Змінити» й додайте дату.',
+          );
+        }
+        return fromStored(stored);
+      },
+      addPart: false,
+    });
+  }
+
+  /** «💰 Оплачено» of our_fop: the client paid, the date goes to the orders and the task closes. */
+  async markPaid(
+    manager: Manager,
+    requestId: string,
+    body: PaidMiniappRequestDto,
+  ): Promise<{ paidAt: string }> {
+    const card = await this.cards.byRequestId(requestId);
+    if (card?.managerId !== manager.id) throw notFound();
+    if (!card.completedAt) {
+      throw apiError(HttpStatus.CONFLICT, 'not-completed', 'Запит ще не оформлено');
+    }
+    if (card.closedAt) {
+      throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
+    }
+    const paidAt = toPaidAt(body);
+    let view: FinanceRequestView;
+    try {
+      view = (await this.finance.get(requestId)).request;
+    } catch (error) {
+      throw financeError(error);
+    }
+    if (view.kind !== 'our_fop') {
+      throw apiError(HttpStatus.CONFLICT, 'not-our-fop', 'Оплату відмічають лише для «Наш ФОП»');
+    }
+    // atomic: two parallel presses close it once
+    if (!(await this.cards.claimClosing(requestId, new Date()))) {
+      throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
+    }
+    try {
+      await this.orders.setPaidAt(card.orderIds, paidAt);
+    } catch (error) {
+      await this.safely(requestId, 'closing release', () => this.cards.releaseClosing(requestId));
+      throw error;
+    }
+    await this.safely(requestId, 'manager card', async () => {
+      if (card.managerMessageId === null) return;
+      const { html, buttons } = managerCard(view, {
+        miniAppUrl: this.sender.miniAppUrl,
+        completed: {
+          orderNumbers: await this.orders.numbersByIds(card.orderIds),
+          closed: true,
+          paidAt,
+        },
+      });
+      await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
+    });
+    return { paidAt: paidAt.toISOString() };
+  }
+
+  private async finish(
+    manager: Manager,
+    requestId: string,
+    input: Completion,
   ): Promise<CompletionResult> {
     const card = await this.cards.byRequestId(requestId);
     if (card?.managerId !== manager.id) throw notFound();
@@ -116,12 +229,14 @@ export class RequestCompletionService {
     }
     // Every check that can refuse runs before the claim, so the claim only spans creating orders:
     // a refusal never leaves the card looking completed, and a receipt sent meanwhile is not lost.
-    const view = await this.acceptedView(requestId);
-    const payments = toPayments(view.kind!, body.payments);
-    const live = view.kind === 'minus' ? null : await this.liveItems(view, body.addPart === true);
+    const requested = await this.acceptedView(requestId);
+    const payments = input.payments(requested.kind!, card);
+    // finance keeps its own numbers; only the orders take the overrides
+    const view = withOverrides(requested, input);
+    const live = view.kind === 'minus' ? null : await this.liveItems(view, input.addPart);
 
     // atomic: of two parallel completions only one may create orders
-    if (!(await this.cards.claimCompletion(requestId, new Date()))) {
+    if (!(await this.cards.claimCompletion(requestId, new Date(), view.kind !== 'our_fop'))) {
       throw apiError(HttpStatus.CONFLICT, 'already-completed', 'Запит уже оформлено');
     }
 
@@ -169,7 +284,7 @@ export class RequestCompletionService {
     });
     if (!receiptsAttached) note = [note, RECEIPTS_NOTE].filter(Boolean).join(' ');
     await this.safely(requestId, 'manager card', () =>
-      this.markCompleted(card, view, orderNumbers),
+      this.markCompleted(card, requested, orderNumbers),
     );
     return { orderNumbers, skipped: made.skipped, ...(note && { note }) };
   }
@@ -206,14 +321,14 @@ export class RequestCompletionService {
   ): Promise<Made> {
     if (live === null) return this.createMinus(manager, view, payments[0]!, progress);
     return view.kind === 'our_fop'
-      ? this.createOurFop(manager, view, payments[0]!, live, progress)
+      ? this.createOurFop(manager, view, payments[0], live, progress)
       : this.createRequisites(manager, view, payments, live, progress);
   }
 
   private async createOurFop(
     manager: Manager,
     view: FinanceRequestView,
-    payment: Payment,
+    payment: Payment | undefined,
     { items, skipped, addPart: part }: LiveItems,
     progress: Progress,
   ): Promise<Made> {
@@ -223,7 +338,8 @@ export class RequestCompletionService {
       currency: Currency.UAH,
       exchangeRate: view.exchangeRate ?? undefined,
       comment: view.comment ?? undefined,
-      paidAt: payment.paidAt,
+      // the client may not have paid yet: no date until «💰 Оплачено»
+      paidAt: payment?.paidAt,
     };
     const orders =
       items.length === 1
@@ -355,7 +471,7 @@ export class RequestCompletionService {
     if (card.managerMessageId === null) return;
     const { html, buttons } = managerCard(view, {
       miniAppUrl: this.sender.miniAppUrl,
-      completed: { orderNumbers },
+      completed: { orderNumbers, closed: view.kind !== 'our_fop' },
     });
     await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
   }

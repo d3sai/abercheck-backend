@@ -1,7 +1,6 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
-  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -17,6 +16,7 @@ import { MONEY_PATTERN } from '../../common/money';
 import { Currency, Prisma } from '../../generated/prisma/client';
 import type { EditRequestBody, RequestKind } from '../finance-sync/finance.types';
 import type { CreateRequestInput } from '../finance-sync/request-create.service';
+import type { StoredPayment } from '../finance-sync/stored-payments';
 import { EXCHANGE_RATE_PATTERN } from '../orders/dto/create-order.dto';
 import type { CashPlan } from '../telegram/order-draft/cash.parser';
 import type { ForeignPlan } from '../telegram/order-draft/foreign.parser';
@@ -83,6 +83,14 @@ export class CreateMiniappRequestDto {
 
   @IsBoolean()
   officialDocs!: boolean;
+
+  /** foreign_fop, card and minus: what the client already paid; our_fop sends none. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_PAYMENTS)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentRowDto)
+  payments?: PaymentRowDto[];
 }
 
 export class EditMiniappRequestDto {
@@ -126,19 +134,59 @@ export class PaymentRowDto {
   time?: string;
 }
 
-/** Shape only; the per-kind rules live in `toPayments`. */
+/** The request's own number with the amount and the rate the orders get instead of finance's. */
+export class CompleteOrderDto {
+  @IsString()
+  @MaxLength(32)
+  orderNumber!: string;
+
+  @IsString()
+  @MaxLength(32)
+  amount!: string;
+
+  @IsString()
+  @MaxLength(16)
+  exchangeRate!: string;
+}
+
+/** Shape only; the per-kind rules live in `toPayments` and `toOrderOverrides`. */
 export class CompleteMiniappRequestDto {
+  /** May be empty for our_fop: the client has not paid yet. */
   @IsArray()
-  @ArrayMinSize(1)
   @ArrayMaxSize(MAX_PAYMENTS)
   @ValidateNested({ each: true })
   @Type(() => PaymentRowDto)
   payments!: PaymentRowDto[];
 
+  /** Amounts and rates of the request's own numbers; all of them or none. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_ORDERS)
+  @ValidateNested({ each: true })
+  @Type(() => CompleteOrderDto)
+  orders?: CompleteOrderDto[];
+
+  /** Replaces the order comment; blank clears it. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  comment?: string;
+
   /** The manager agreed to add the request's number as one more part of an existing order. */
   @IsOptional()
   @IsBoolean()
   addPart?: boolean;
+}
+
+export class PaidMiniappRequestDto {
+  @IsString()
+  @MaxLength(10)
+  date!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5)
+  time?: string;
 }
 
 const invalid = (message: string): ApiError =>
@@ -170,7 +218,7 @@ const text = (value: string | undefined | null): string | null => {
   return trimmed === undefined || trimmed === '' ? null : trimmed;
 };
 
-export function toCreateInput(dto: CreateMiniappRequestDto): CreateRequestInput {
+export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): CreateRequestInput {
   const common = {
     kind: dto.kind,
     comment: text(dto.comment),
@@ -195,17 +243,29 @@ export function toCreateInput(dto: CreateMiniappRequestDto): CreateRequestInput 
         exchangeRate: requiredRate(row.exchangeRate, number.value),
       };
     });
-    return { ...common, orders };
+    if (dto.kind === 'our_fop') {
+      if ((dto.payments ?? []).length > 0) {
+        throw invalid('Для «Наш ФОП» платіж ще не вказують: клієнт не оплатив.');
+      }
+      return { ...common, orders };
+    }
+    return { ...common, orders, payments: storable(toPayments(dto.kind, dto.payments ?? [], now)) };
   }
 
   const clientLabel = text(dto.clientLabel);
   if (!clientLabel) throw invalid('Вкажіть клієнта.');
+  const sum = money(dto.sum);
+  const payments = toPayments('minus', dto.payments ?? [], now);
+  if (!new Prisma.Decimal(payments[0]!.amount).equals(sum)) {
+    throw invalid('Сума платежу має дорівнювати сумі мінусу.');
+  }
   return {
     ...common,
-    sum: money(dto.sum),
+    sum,
     clientLabel,
     sheetUrl: text(dto.sheetUrl),
     withPercent: dto.kind === 'minus' ? (dto.withPercent ?? null) : null,
+    payments: storable(payments),
   };
 }
 
@@ -257,10 +317,20 @@ function paidAt(date: string, time: string | null): Date {
   return result;
 }
 
-/** Date and time are required for every kind except our_fop; several rows only for foreign_fop and card. */
-export function toPayments(kind: RequestKind, rows: PaymentRowDto[]): Payment[] {
+const notInFuture = (paid: Date, now: Date): Date => {
+  if (paid.getTime() > now.getTime()) {
+    throw invalid('Дата й час оплати не можуть бути в майбутньому.');
+  }
+  return paid;
+};
+
+/**
+ * Date and time are required for every kind except our_fop, which may have no payment at all (the
+ * client has not paid yet); several rows only for foreign_fop and card. Never in the future.
+ */
+export function toPayments(kind: RequestKind, rows: PaymentRowDto[], now = new Date()): Payment[] {
   const withPayers = kind === 'foreign_fop' || kind === 'card';
-  if (rows.length < 1 || rows.length > MAX_PAYMENTS) {
+  if (rows.length < (kind === 'our_fop' ? 0 : 1) || rows.length > MAX_PAYMENTS) {
     throw invalid(`Додайте від 1 до ${MAX_PAYMENTS} платежів.`);
   }
   if (!withPayers && rows.length > 1) throw invalid('Для цього запиту потрібна одна дата оплати.');
@@ -273,9 +343,51 @@ export function toPayments(kind: RequestKind, rows: PaymentRowDto[]): Payment[] 
       payerName,
       account: text(row.account),
       amount: money(row.amount),
-      paidAt: paidAt(row.date, time),
+      paidAt: notInFuture(paidAt(row.date, time), now),
     };
   });
+}
+
+const storable = (payments: Payment[]): StoredPayment[] =>
+  payments.map((payment) => ({
+    payerName: payment.payerName,
+    account: payment.account,
+    amount: new Prisma.Decimal(payment.amount).toFixed(2),
+    paidAt: payment.paidAt.toISOString(),
+  }));
+
+/** The card keeps payments validated at creation, so they come back without another look. */
+export const fromStored = (payments: StoredPayment[]): Payment[] =>
+  payments.map((payment) => ({ ...payment, paidAt: new Date(payment.paidAt) }));
+
+/** The orders' own amounts and rates by number; the numbers must be exactly the request's. */
+export function toOrderOverrides(
+  rows: CompleteOrderDto[] | null | undefined,
+  requestNumbers: string[],
+): Map<string, { amount: string; exchangeRate: string }> {
+  const overrides = new Map<string, { amount: string; exchangeRate: string }>();
+  if (rows == null) return overrides;
+  for (const row of rows) {
+    const number = parseOrderNumber(row.orderNumber);
+    if (!number.ok) throw invalid(number.error);
+    if (!requestNumbers.includes(number.value)) {
+      throw invalid(`Номер ${number.value} не належить цьому запиту.`);
+    }
+    if (overrides.has(number.value)) throw invalid(`Номер ${number.value} повторюється.`);
+    overrides.set(number.value, {
+      amount: money(row.amount),
+      exchangeRate: requiredRate(row.exchangeRate, number.value),
+    });
+  }
+  const missing = requestNumbers.find((number) => !overrides.has(number));
+  if (missing !== undefined)
+    throw invalid(`Бракує № ${missing}: вкажіть суму й курс усіх номерів.`);
+  return overrides;
+}
+
+/** The day and time the client paid, Kyiv time; the time is optional. */
+export function toPaidAt(dto: PaidMiniappRequestDto, now = new Date()): Date {
+  return notInFuture(paidAt(dto.date, text(dto.time)), now);
 }
 
 export class MiniappKitItemDto {
@@ -401,9 +513,7 @@ function currencyOf(value: Currency | undefined, allowed: readonly Currency[]): 
 export function toOrderPlan(dto: CreateMiniappOrderDto, now = new Date()): OrderPlan {
   const time = text(dto.time);
   if (dto.kind !== 'foreign' && time === null) throw invalid('Вкажіть дату й час оплати.');
-  const paid = paidAt(dto.date, time);
-  if (paid.getTime() > now.getTime())
-    throw invalid('Дата й час оплати не можуть бути в майбутньому.');
+  const paid = notInFuture(paidAt(dto.date, time), now);
   const comment = text(dto.comment);
 
   if (dto.kind === 'kit') {

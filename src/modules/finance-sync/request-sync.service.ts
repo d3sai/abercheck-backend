@@ -8,6 +8,7 @@ import { FinanceClient } from './finance.client';
 import type { FinanceEvent, FinanceFops, FinanceRequestView } from './finance.types';
 import { groupCard, managerCard } from './request-card.messages';
 import { RequestCardsRepository } from './request-cards.repository';
+import { storedPayments } from './stored-payments';
 
 const NOTICE = {
   accepted: (view: FinanceRequestView) =>
@@ -41,8 +42,17 @@ export class RequestSyncService {
     if (card.managerMessageId === null) return;
     const { html, buttons } = managerCard(view, {
       miniAppUrl: this.sender.miniAppUrl,
+      payments: storedPayments(card.payments),
       completed: card.completedAt
-        ? { orderNumbers: await this.orders.numbersByIds(card.orderIds) }
+        ? {
+            orderNumbers: await this.orders.numbersByIds(card.orderIds),
+            closed: card.closedAt != null,
+            // a closed our_fop card shows when the client paid
+            paidAt:
+              card.closedAt && view.kind === 'our_fop'
+                ? await this.orders.latestPaidAt(card.orderIds)
+                : null,
+          }
         : false,
     });
     await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);

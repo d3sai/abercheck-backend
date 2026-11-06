@@ -1,3 +1,4 @@
+import { kyivParts } from '../../common/kyiv-time';
 import { Prisma } from '../../generated/prisma/client';
 import { type BotReply, button } from '../telegram/core/bot-reply';
 import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
@@ -10,11 +11,14 @@ import type {
   RequestKind,
   RequestWarning,
 } from './finance.types';
+import type { StoredPayment } from './stored-payments';
 
 export const FinanceAction = {
   Fop: /^ff:([\w-]+):(\d+)$/,
   Cancel: /^fc:([\w-]+)$/,
   Refresh: /^fu:([\w-]+)$/,
+  /** «✅ Прийняти» on the manager card: create the orders from the stored payments. */
+  Accept: /^mo:([\w-]+)$/,
 } as const;
 
 const KIND_LABEL: Record<RequestKind, string> = {
@@ -72,13 +76,24 @@ function fitPayouts(payouts: string[][], budget: number): string[] {
   return shown;
 }
 
-function body(view: FinanceRequestView, managerName?: string): string[] {
+interface BodyOptions {
+  managerName?: string;
+  /** Lines shown after the request's status and before the warnings; they count against the budget. */
+  extra?: string[];
+  /** Every order shows its own rate, not only those that differ from the request's. */
+  allRates?: boolean;
+}
+
+function body(
+  view: FinanceRequestView,
+  { managerName, extra = [], allRates }: BodyOptions = {},
+): string[] {
   const kind = view.kind ? KIND_LABEL[view.kind] : 'Запит';
   const lines = [`<b>${kind}</b> #${escapeHtml(view.number)}`];
   if (managerName) lines.push(`Менеджер: ${escapeHtml(managerName)}`);
   for (const order of view.orders) {
     const own =
-      order.exchangeRate && order.exchangeRate !== view.exchangeRate
+      order.exchangeRate && (allRates || order.exchangeRate !== view.exchangeRate)
         ? ` · курс ${rate(order.exchangeRate)}`
         : '';
     lines.push(`№ <b>${escapeHtml(order.orderNumber)}</b> — ${money(order.amount)}${own}`);
@@ -108,7 +123,12 @@ function body(view: FinanceRequestView, managerName?: string): string[] {
       );
     }
     if (view.isPaid) status.push('💰 Оплачено');
-    return [...lines, ...(status.length > 0 ? ['', ...status] : []), ...warnings];
+    return [
+      ...lines,
+      ...(status.length > 0 ? ['', ...status] : []),
+      ...(extra.length > 0 ? ['', ...extra] : []),
+      ...warnings,
+    ];
   };
   const fixed = assemble([]).join('\n').length;
   return assemble(fitPayouts(view.payouts.map(payoutLines), MAX_BODY - fixed));
@@ -125,7 +145,7 @@ export function groupCard(
   fops: FinanceFops | null,
   managerName?: string,
 ): BotReply {
-  const lines = body(view, managerName);
+  const lines = body(view, { managerName });
   const picksFop = view.status === 'pending' && (view.kind === 'our_fop' || view.kind === 'minus');
   const fopRows =
     fops && picksFop
@@ -155,8 +175,10 @@ export function groupCard(
 export interface ManagerCardOptions {
   /** Set when the Mini App is configured; its buttons are private-chat-only, so never on the group card. */
   miniAppUrl?: string;
+  /** The payments stored at creation: part of the ready text the manager accepts. */
+  payments?: StoredPayment[];
   /** The card's real state: set once the manager completed the request. */
-  completed?: { orderNumbers: string[] } | false;
+  completed?: { orderNumbers: string[]; closed?: boolean; paidAt?: Date | null } | false;
 }
 
 const webApp = (text: string, miniAppUrl: string, mode: string, id: string) => {
@@ -172,23 +194,86 @@ const completedLine = (orderNumbers: string[]): string => {
   return `✅ Оформлено: № ${escapeHtml(orderNumbers.join(', '))}${count > 1 ? ` (${count} ${plural(count)})` : ''}`;
 };
 
+/** dd.mm.yyyy hh:mm, Kyiv time */
+const dateTime = (date: Date): string => {
+  const p = kyivParts(date);
+  return `${p.day}.${p.month}.${p.year} ${p.hour}:${p.minute}`;
+};
+
+// the 4096 minus MAX_BODY leaves room for the lines the body does not count
+const PAYMENTS_BUDGET = 500;
+const MAX_PAYMENT_PART = 100;
+
+const clip = (text: string): string => {
+  const chars = [...text];
+  return chars.length > MAX_PAYMENT_PART ? `${chars.slice(0, MAX_PAYMENT_PART).join('')}…` : text;
+};
+
+function paymentLine(payment: StoredPayment): string {
+  const parts = [
+    payment.payerName && clip(payment.payerName),
+    payment.account && clip(payment.account),
+    money(payment.amount),
+    dateTime(new Date(payment.paidAt)),
+  ].filter((part): part is string => Boolean(part));
+  return `• ${parts.map(escapeHtml).join(' · ')}`;
+}
+
+/** The payments the orders will get; whole lines within the budget, «…» for the rest. */
+function paymentLines(kind: RequestKind | null, payments: StoredPayment[]): string[] {
+  if (payments.length === 0) return kind === 'our_fop' ? ['Платіж: клієнт ще не оплатив'] : [];
+  const lines = ['<b>Платежі:</b>'];
+  let used = lines[0]!.length;
+  for (const payment of payments) {
+    const line = paymentLine(payment);
+    if (used + line.length + 1 > PAYMENTS_BUDGET - 2) return [...lines, '…'];
+    lines.push(line);
+    used += line.length + 1;
+  }
+  return lines;
+}
+
 export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions = {}): BotReply {
-  const { miniAppUrl, completed } = opts;
-  const lines = body(view);
-  if (completed) return { html: [...lines, '', completedLine(completed.orderNumbers)].join('\n') };
-  const html = lines.join('\n');
+  const { miniAppUrl, completed, payments = [] } = opts;
+  if (completed) {
+    const lines = [...body(view), '', completedLine(completed.orderNumbers)];
+    const ourFop = view.kind === 'our_fop';
+    if (ourFop && completed.closed) {
+      lines.push(
+        completed.paidAt ? `✅ Оплачено ${dateTime(completed.paidAt)} · закрито` : '✅ Закрито',
+      );
+    }
+    return {
+      html: lines.join('\n'),
+      ...(ourFop &&
+        !completed.closed &&
+        miniAppUrl && {
+          buttons: [[webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)]],
+        }),
+    };
+  }
   if (view.status === 'pending') {
     const cancel = button('✖ Скасувати запит', `fc:${view.id}`);
     return {
-      html,
+      html: body(view).join('\n'),
       buttons: [
         miniAppUrl ? [webApp('✏️ Змінити', miniAppUrl, 'edit', view.id), cancel] : [cancel],
       ],
     };
   }
-  return view.status === 'accepted' && miniAppUrl
-    ? { html, buttons: [[webApp('📎 Додати дату', miniAppUrl, 'complete', view.id)]] }
-    : { html };
+  if (view.status !== 'accepted') return { html: body(view).join('\n') };
+
+  // accepted: the ready text. A request without stored payments (older cards) cannot be accepted
+  // as it stands, except our_fop, whose client has not paid yet.
+  const ready = view.kind === 'our_fop' || payments.length > 0;
+  const html = body(view, { extra: paymentLines(view.kind, payments), allRates: true }).join('\n');
+  const row = [
+    ...(ready ? [button('✅ Прийняти', `mo:${view.id}`)] : []),
+    ...(miniAppUrl
+      ? [webApp(ready ? '✏️ Змінити' : '📎 Додати дату', miniAppUrl, 'complete', view.id)]
+      : []),
+  ];
+  return row.length > 0 ? { html, buttons: [row] } : { html };
 }
 
 /** Alert text for a failed accept; `status` is only needed for 403. Telegram caps alerts at 200 chars. */

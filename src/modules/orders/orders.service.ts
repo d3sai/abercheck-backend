@@ -279,6 +279,23 @@ export class OrdersService {
     return ids.flatMap((id) => byId.get(id) ?? []);
   }
 
+  /** The client paid: stamps the date on every order of `ids`. */
+  async setPaidAt(ids: number[], paidAt: Date): Promise<void> {
+    await this.prisma.order.updateMany({ where: { id: { in: ids } }, data: { paidAt } });
+  }
+
+  /** The latest payment date among the orders, or null when none has one. */
+  async latestPaidAt(ids: number[]): Promise<Date | null> {
+    if (ids.length === 0) {
+      return null;
+    }
+    const { _max } = await this.prisma.order.aggregate({
+      where: { id: { in: ids } },
+      _max: { paidAt: true },
+    });
+    return _max.paidAt;
+  }
+
   async list(
     { managerId, statuses }: OrderFilter,
     limit: number,

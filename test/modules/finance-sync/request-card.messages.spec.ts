@@ -285,9 +285,9 @@ describe('managerCard', () => {
     expect(flat(reply)).toEqual([{ text: '✖ Скасувати запит', callback_data: `fc:${ID}` }]);
   });
 
-  it('accepted: no buttons', () => {
+  it('accepted: «Прийняти» without the Mini App, responder and fop', () => {
     const reply = managerCard(view({ status: 'accepted', responderName: 'Фін', fopLabel: 'А' }));
-    expect(reply.buttons ?? []).toEqual([]);
+    expect(flat(reply)).toEqual([{ text: '✅ Прийняти', callback_data: `mo:${ID}` }]);
     expect(reply.html).toContain('✅ Прийняв(ла): Фін · ФОП: А');
   });
 });
@@ -308,11 +308,14 @@ describe('managerCard with the Mini App', () => {
     ]);
   });
 
-  it('accepted and not completed: «Додати дату» opens the completion form', () => {
+  it('accepted and not completed: «Прийняти» next to «Змінити», which opens the completion form', () => {
     const reply = managerCard(accepted(), { miniAppUrl, completed: false });
 
     expect(all(reply)).toEqual([
-      [{ text: '📎 Додати дату', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } }],
+      [
+        { text: '✅ Прийняти', callback_data: `mo:${ID}` },
+        { text: '✏️ Змінити', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } },
+      ],
     ]);
   });
 
@@ -325,14 +328,52 @@ describe('managerCard with the Mini App', () => {
     expect(new URL(url).searchParams.get('mode')).toBe('edit');
   });
 
-  it('completed: the «Оформлено» line and none of the three buttons', () => {
-    const reply = managerCard(accepted(), {
+  it('completed: the «Оформлено» line and no button for a kind that closes with the completion', () => {
+    const reply = managerCard(view({ ...accepted(), kind: 'card' }), {
       miniAppUrl,
-      completed: { orderNumbers: ['0000-1', '0000-2'] },
+      completed: { orderNumbers: ['0000-1', '0000-2'], closed: true },
     });
 
     expect(reply.buttons ?? []).toEqual([]);
     expect(reply.html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
+  });
+
+  it('completed our_fop: «Оплачено» opens the paid form', () => {
+    const reply = managerCard(accepted(), {
+      miniAppUrl,
+      completed: { orderNumbers: ['0000-1'], closed: false },
+    });
+
+    expect(all(reply)).toEqual([
+      [{ text: '💰 Оплачено', web_app: { url: `${miniAppUrl}?mode=paid&id=${ID}` } }],
+    ]);
+    expect(reply.html).not.toContain('закрито');
+  });
+
+  it('completed our_fop without the URL: no button', () => {
+    const reply = managerCard(accepted(), { completed: { orderNumbers: ['0000-1'] } });
+
+    expect(reply.buttons ?? []).toEqual([]);
+  });
+
+  it('closed our_fop: the payment time in Kyiv time and no button', () => {
+    const reply = managerCard(accepted(), {
+      miniAppUrl,
+      completed: {
+        orderNumbers: ['0000-1'],
+        closed: true,
+        paidAt: new Date('2026-11-04T12:30:00.000Z'),
+      },
+    });
+
+    expect(reply.buttons ?? []).toEqual([]);
+    expect(reply.html.split('\n').at(-1)).toBe('✅ Оплачено 04.11.2026 14:30 · закрито');
+  });
+
+  it('closed our_fop without a payment time: just closed', () => {
+    const reply = managerCard(accepted(), { completed: { orderNumbers: [], closed: true } });
+
+    expect(reply.html.split('\n').at(-1)).toBe('✅ Закрито');
   });
 
   it('completed: one order has no count; no orders has no number', () => {
@@ -345,7 +386,10 @@ describe('managerCard with the Mini App', () => {
   });
 
   it('completed never shows edit or cancel, even for a pending view', () => {
-    const reply = managerCard(view(), { miniAppUrl, completed: { orderNumbers: [] } });
+    const reply = managerCard(view({ kind: 'card' }), {
+      miniAppUrl,
+      completed: { orderNumbers: [] },
+    });
 
     expect(reply.buttons ?? []).toEqual([]);
   });
@@ -354,11 +398,108 @@ describe('managerCard with the Mini App', () => {
     expect(managerCard(view({ status: 'cancelled' }), { miniAppUrl }).buttons ?? []).toEqual([]);
   });
 
-  it('without the URL: the cancel button only and no «Додати дату»', () => {
+  it('without the URL: the cancel button only, and «Прийняти» without «Змінити»', () => {
     expect(flat(managerCard(view(), {}))).toEqual([
       { text: '✖ Скасувати запит', callback_data: `fc:${ID}` },
     ]);
-    expect(managerCard(accepted(), { completed: false }).buttons ?? []).toEqual([]);
+    expect(flat(managerCard(accepted(), { completed: false }))).toEqual([
+      { text: '✅ Прийняти', callback_data: `mo:${ID}` },
+    ]);
+  });
+
+  describe('the ready text of an accepted card', () => {
+    const payment = (patch: Record<string, unknown> = {}) => ({
+      payerName: 'Петренко Іван',
+      account: '4441111069645962',
+      amount: '700',
+      paidAt: '2026-11-04T08:15:00.000Z',
+      ...patch,
+    });
+    const card = () => ({ ...accepted(), kind: 'card' as const });
+    const ready = (payments: ReturnType<typeof payment>[], patch = {}) =>
+      managerCard(view({ ...card(), ...patch }), { miniAppUrl, payments });
+
+    it('shows every order with its own rate, even one equal to the request rate', () => {
+      const reply = ready([payment()], {
+        orders: [
+          { orderNumber: '0000-1', amount: '3000', exchangeRate: '41.5' },
+          { orderNumber: '0000-2', amount: '2500', exchangeRate: '45' },
+        ],
+      });
+
+      expect(reply.html).toContain('№ <b>0000-1</b> — 3 000 грн · курс 41,5');
+      expect(reply.html).toContain('№ <b>0000-2</b> — 2 500 грн · курс 45');
+    });
+
+    it('lists the stored payments with the Kyiv date and time, after the FOP line', () => {
+      const lines = ready([
+        payment(),
+        payment({ payerName: 'Петренко Ірина', account: null, amount: '300.5' }),
+      ]).html.split('\n');
+
+      const fop = lines.findIndex((l) => l.includes('ФОП: А'));
+      expect(lines[fop + 2]).toBe('<b>Платежі:</b>');
+      expect(lines[fop + 3]).toBe(
+        '• Петренко Іван · 4441111069645962 · 700 грн · 04.11.2026 10:15',
+      );
+      expect(lines[fop + 4]).toBe('• Петренко Ірина · 300,50 грн · 04.11.2026 10:15');
+    });
+
+    it('shows a minus payment without a payer', () => {
+      const reply = ready([payment({ payerName: null, account: null })], { kind: 'minus' });
+
+      expect(reply.html).toContain('• 700 грн · 04.11.2026 10:15');
+    });
+
+    it('shows the comment of the request', () => {
+      expect(ready([payment()], { comment: 'терміново' }).html).toContain('Коментар: терміново');
+    });
+
+    it('escapes what the manager typed', () => {
+      const html = ready([payment({ payerName: '<b>&Co', account: 'a<b' })]).html;
+
+      expect(html).toContain('• &lt;b&gt;&amp;Co · a&lt;b · 700 грн');
+      expect(html).not.toContain('<b>&Co');
+    });
+
+    it('says our_fop has no payment yet, and offers «Прийняти» without any', () => {
+      const reply = managerCard(accepted(), { miniAppUrl, payments: [] });
+
+      expect(reply.html).toContain('Платіж: клієнт ще не оплатив');
+      expect(flat(reply).map((b) => b.text)).toEqual(['✅ Прийняти', '✏️ Змінити']);
+    });
+
+    it('offers only «Додати дату» for a card without stored payments', () => {
+      const reply = managerCard(card(), { miniAppUrl, payments: [] });
+
+      expect(reply.html).not.toContain('Платіж');
+      expect(all(reply)).toEqual([
+        [{ text: '📎 Додати дату', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } }],
+      ]);
+    });
+
+    it('cuts a long list at a whole line with «…» and stays under 4096 with many payouts', () => {
+      const many = Array.from({ length: 10 }, (_, i) =>
+        payment({ payerName: 'Ю'.repeat(255), account: `${i}`.repeat(64) }),
+      );
+      const payout = (n: number) => ({
+        method: 'iban' as const,
+        recipientName: 'Р'.repeat(200),
+        iban: `UA${n}`.padEnd(29, '0'),
+        taxId: '1234567890',
+        purpose: 'П'.repeat(300),
+        amount: '100',
+        warnings: [],
+      });
+      const reply = ready(many, {
+        comment: 'ы'.repeat(1000),
+        payouts: Array.from({ length: 30 }, (_, i) => payout(i)),
+      });
+
+      expect(reply.html.length).toBeLessThan(4096);
+      expect(reply.html).toContain('…');
+      expect(reply.html.split('\n').filter((l) => l.startsWith('• Ю')).length).toBeLessThan(10);
+    });
   });
 
   it('groupCard never carries a web_app button', () => {
@@ -369,10 +510,13 @@ describe('managerCard with the Mini App', () => {
 
 describe('callback data', () => {
   it('every callback fits 64 bytes and matches its pattern', () => {
-    const all = [...flat(groupCard(view(), fops())), ...flat(managerCard(view()))].map(
-      (b) => b.callback_data,
-    );
-    expect(all).toHaveLength(4);
+    const accepted = view({ status: 'accepted' });
+    const all = [
+      ...flat(groupCard(view(), fops())),
+      ...flat(managerCard(view())),
+      ...flat(managerCard(accepted)),
+    ].map((b) => b.callback_data);
+    expect(all).toHaveLength(5);
     for (const data of all) {
       expect(Buffer.byteLength(data, 'utf8')).toBeLessThanOrEqual(64);
     }
@@ -380,6 +524,8 @@ describe('callback data', () => {
     expect(FinanceAction.Fop.exec(`ff:${ID}:12`)?.slice(1)).toEqual([ID, '12']);
     expect(FinanceAction.Cancel.exec(`fc:${ID}`)?.[1]).toBe(ID);
     expect(FinanceAction.Refresh.exec(`fu:${ID}`)?.[1]).toBe(ID);
+    expect(FinanceAction.Accept.exec(`mo:${ID}`)?.[1]).toBe(ID);
+    expect(all).toContain(`mo:${ID}`);
   });
 });
 

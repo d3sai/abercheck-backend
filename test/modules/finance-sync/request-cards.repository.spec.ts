@@ -147,17 +147,51 @@ describe('RequestCardsRepository', () => {
   });
 
   describe('completion', () => {
+    const now = new Date('2026-11-04T10:00:00Z');
+
     it('should claim a completion only while completedAt is null', async () => {
-      const now = new Date('2026-11-04T10:00:00Z');
       financeRequestCard.updateMany.mockResolvedValueOnce({ count: 1 });
       financeRequestCard.updateMany.mockResolvedValueOnce({ count: 0 });
 
-      await expect(repository.claimCompletion('r1', now)).resolves.toBe(true);
-      await expect(repository.claimCompletion('r1', now)).resolves.toBe(false);
+      await expect(repository.claimCompletion('r1', now, false)).resolves.toBe(true);
+      await expect(repository.claimCompletion('r1', now, false)).resolves.toBe(false);
 
       expect(financeRequestCard.updateMany).toHaveBeenCalledWith({
         where: { requestId: 'r1', completedAt: null },
         data: { completedAt: now },
+      });
+    });
+
+    it('should close the task in the same step when asked to', async () => {
+      financeRequestCard.updateMany.mockResolvedValueOnce({ count: 1 });
+      await repository.claimCompletion('r1', now, true);
+
+      expect(financeRequestCard.updateMany).toHaveBeenCalledWith({
+        where: { requestId: 'r1', completedAt: null },
+        data: { completedAt: now, closedAt: now },
+      });
+    });
+
+    it('should close only a completed card that is still open, once', async () => {
+      financeRequestCard.updateMany.mockResolvedValueOnce({ count: 1 });
+      financeRequestCard.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(repository.claimClosing('r1', now)).resolves.toBe(true);
+      await expect(repository.claimClosing('r1', now)).resolves.toBe(false);
+
+      expect(financeRequestCard.updateMany).toHaveBeenCalledWith({
+        where: { requestId: 'r1', completedAt: { not: null }, closedAt: null },
+        data: { closedAt: now },
+      });
+    });
+
+    it('should reopen a closing that failed', async () => {
+      financeRequestCard.updateMany.mockResolvedValueOnce({ count: 1 });
+      await repository.releaseClosing('r1');
+
+      expect(financeRequestCard.updateMany).toHaveBeenCalledWith({
+        where: { requestId: 'r1' },
+        data: { closedAt: null },
       });
     });
 
@@ -167,7 +201,7 @@ describe('RequestCardsRepository', () => {
 
       expect(financeRequestCard.updateMany).toHaveBeenCalledWith({
         where: { requestId: 'r1' },
-        data: { completedAt: null },
+        data: { completedAt: null, closedAt: null },
       });
       expect(financeRequestCard.update).toHaveBeenCalledWith({
         where: { requestId: 'r1' },

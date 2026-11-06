@@ -40,6 +40,8 @@ describe('OrdersService', () => {
     groupBy: jest.fn(),
     count: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
+    aggregate: jest.fn(),
   };
   const payment = { groupBy: jest.fn(), findMany: jest.fn() };
   const refund = { groupBy: jest.fn(), findMany: jest.fn() };
@@ -568,6 +570,38 @@ describe('OrdersService', () => {
       order.findMany.mockClear();
       await expect(service.numbersByIds([])).resolves.toEqual([]);
       expect(order.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setPaidAt', () => {
+    it('should stamp the date on every order of the ids', async () => {
+      const paidAt = new Date('2026-11-04T12:30:00.000Z');
+      order.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.setPaidAt([3, 4], paidAt);
+
+      expect(order.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [3, 4] } },
+        data: { paidAt },
+      });
+    });
+  });
+
+  describe('latestPaidAt', () => {
+    it('should return the latest payment date of the orders', async () => {
+      const paidAt = new Date('2026-11-04T12:30:00.000Z');
+      order.aggregate.mockResolvedValue({ _max: { paidAt } });
+
+      await expect(service.latestPaidAt([3, 4])).resolves.toBe(paidAt);
+      expect(order.aggregate).toHaveBeenCalledWith({
+        where: { id: { in: [3, 4] } },
+        _max: { paidAt: true },
+      });
+    });
+
+    it('should return null, without a query, for no ids', async () => {
+      await expect(service.latestPaidAt([])).resolves.toBeNull();
+      expect(order.aggregate).not.toHaveBeenCalled();
     });
   });
 

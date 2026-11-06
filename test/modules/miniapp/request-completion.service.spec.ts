@@ -108,8 +108,16 @@ describe('RequestCompletionService', () => {
     claimCompletion: jest.fn(),
     releaseCompletion: jest.fn(),
     setOrderIds: jest.fn(),
+    claimClosing: jest.fn(),
+    releaseClosing: jest.fn(),
   };
-  const orders = { findWithBalance: jest.fn(), create: jest.fn(), createGroup: jest.fn() };
+  const orders = {
+    findWithBalance: jest.fn(),
+    create: jest.fn(),
+    createGroup: jest.fn(),
+    setPaidAt: jest.fn(),
+    numbersByIds: jest.fn(),
+  };
   const requisites = { addMany: jest.fn() };
   const sender = {
     miniAppUrl: undefined as string | undefined,
@@ -178,7 +186,7 @@ describe('RequestCompletionService', () => {
         { notify: true, addPart: false },
       );
       expect(result).toEqual({ orderNumbers: ['0000-070217'], skipped: [] });
-      expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date));
+      expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date), false);
       expect(cards.setOrderIds).toHaveBeenCalledWith('req1', [10]);
       expect(cards.releaseCompletion).not.toHaveBeenCalled();
     });
@@ -241,7 +249,7 @@ describe('RequestCompletionService', () => {
       expect(html).toContain('✅ Оформлено: № 0000-070217, 0000-070218 (2 замовлення)');
     });
 
-    it('should draw the completed card with no Mini App button even when the URL is set', async () => {
+    it('should offer «💰 Оплачено» on the completed card when the Mini App is set', async () => {
       sender.miniAppUrl = 'https://cab.example.ua/tg/request';
       view('our_fop', one);
       orders.create.mockResolvedValue(order(10, '0000-070217'));
@@ -250,7 +258,35 @@ describe('RequestCompletionService', () => {
 
       const [, , html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
       expect(html).toContain('✅ Оформлено: № 0000-070217');
-      expect(buttons).toBeUndefined();
+      expect(buttons).toEqual([
+        [
+          {
+            text: '💰 Оплачено',
+            web_app: { url: 'https://cab.example.ua/tg/request?mode=paid&id=req1' },
+          },
+        ],
+      ]);
+    });
+
+    it('should create the order without paidAt when the client has not paid yet', async () => {
+      view('our_fop', one);
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.complete(manager, 'req1', body([]));
+
+      expect(callArg(orders.create, 1)).toMatchObject({ paidAt: undefined });
+      expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date), false);
+    });
+
+    it('should create a group without paidAt when the client has not paid yet', async () => {
+      view('our_fop', {
+        orders: [orderRow('0000-070217', '600'), orderRow('0000-070218', '400')],
+      });
+      orders.createGroup.mockResolvedValue([order(10, '0000-070217'), order(11, '0000-070218')]);
+
+      await service.complete(manager, 'req1', body([]));
+
+      expect(callArg(orders.createGroup, 2)).toMatchObject({ paidAt: undefined });
     });
 
     it('should still answer with the orders when the card cannot be redrawn', async () => {
@@ -738,6 +774,480 @@ describe('RequestCompletionService', () => {
         ),
       ).resolves.toMatchObject({ orderNumbers: ['MC-1'] });
       expect(cards.releaseCompletion).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('closing', () => {
+    it.each<RequestKind>(['foreign_fop', 'card'])(
+      'should close a %s task with the completion and leave no button',
+      async (kind) => {
+        sender.miniAppUrl = 'https://cab.example.ua/tg/request';
+        view(kind, { orders: [orderRow('0000-070217', '1000')] });
+        orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+        await service.complete(
+          manager,
+          'req1',
+          body([{ payerName: 'Іван', amount: '1000', date: '2026-11-04', time: '10:00' }]),
+        );
+
+        expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date), true);
+        const [, , html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
+        expect(html).toContain('✅ Оформлено: № 0000-070217');
+        expect(html).not.toContain('Оплачено');
+        expect(buttons).toBeUndefined();
+      },
+    );
+
+    it('should close a minus task with the completion', async () => {
+      view('minus', { clientLabel: 'Гук Руслан' });
+      orders.create.mockResolvedValue(order(10, 'MC-1'));
+
+      await service.complete(
+        manager,
+        'req1',
+        body([{ amount: '1000', date: '2026-11-04', time: '10:00' }]),
+      );
+
+      expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date), true);
+    });
+  });
+
+  describe('overrides', () => {
+    const rows = (...pairs: [string, string, string][]) =>
+      pairs.map(([orderNumber, amount, exchangeRate]) => ({ orderNumber, amount, exchangeRate }));
+    const two = {
+      orders: [orderRow('0000-070217', '600', '45'), orderRow('0000-070218', '400', '45')],
+    };
+    const pay = [{ payerName: 'Іван', amount: '1000', date: '2026-11-04', time: '10:00' }];
+
+    it('should create the our_fop order with the amount and rate of the form', async () => {
+      view('our_fop', { orders: [orderRow('0000-070217', '1000', '45')] });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.complete(manager, 'req1', {
+        payments: [],
+        orders: rows([' 0000-070217 ', '1200.50', '46.5']),
+        comment: ' нова примітка ',
+      });
+
+      expect(callArg(orders.create, 1)).toMatchObject({
+        orderNumber: '0000-070217',
+        amountDue: '1200.50',
+        exchangeRate: '46.5',
+        comment: 'нова примітка',
+      });
+    });
+
+    it('should override each order of a group', async () => {
+      view('our_fop', two);
+      orders.createGroup.mockResolvedValue([order(10, '0000-070217'), order(11, '0000-070218')]);
+
+      await service.complete(manager, 'req1', {
+        payments: [],
+        orders: rows(['0000-070218', '350', '44'], ['0000-070217', '650', '46']),
+      });
+
+      expect(callArg(orders.createGroup, 1)).toEqual([
+        { orderNumber: '0000-070217', amountDue: '650.00', exchangeRate: '46' },
+        { orderNumber: '0000-070218', amountDue: '350.00', exchangeRate: '44' },
+      ]);
+    });
+
+    it('should override the amounts of a card order group and its rate', async () => {
+      view('card', two);
+      orders.createGroup.mockResolvedValue([order(10, '0000-070217'), order(11, '0000-070218')]);
+
+      await service.complete(manager, 'req1', {
+        payments: pay,
+        orders: rows(['0000-070217', '650', '46'], ['0000-070218', '350', '44']),
+      });
+
+      expect(orders.createGroup).toHaveBeenCalled();
+      expect(callArg(orders.createGroup, 1)).toEqual([
+        { orderNumber: '0000-070217', amountDue: '650.00', exchangeRate: '46' },
+        { orderNumber: '0000-070218', amountDue: '350.00', exchangeRate: '44' },
+      ]);
+    });
+
+    it('should keep the request comment when none is sent and clear it for a blank one', async () => {
+      view('our_fop', { orders: [orderRow('0000-070217', '1000', '45')] });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.complete(manager, 'req1', { payments: [] });
+      expect(callArg(orders.create, 1)).toMatchObject({ comment: 'терміново' });
+
+      orders.create.mockClear();
+      cards.byRequestId.mockResolvedValue(card);
+      await service.complete(manager, 'req1', { payments: [], comment: '  ' });
+      expect(callArg(orders.create, 1)).toMatchObject({ comment: undefined });
+    });
+
+    it('should keep the numbers of finance on the manager card', async () => {
+      view('our_fop', { orders: [orderRow('0000-070217', '1000', '45')] });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.complete(manager, 'req1', {
+        payments: [],
+        orders: rows(['0000-070217', '1200', '46']),
+      });
+
+      const [, , html] = sender.editMessage.mock.calls[0] as unknown[];
+      expect(html).toContain('1 000');
+    });
+
+    it('should put the form comment on a minus order', async () => {
+      view('minus', { clientLabel: 'Гук Руслан', withPercent: true });
+      orders.create.mockResolvedValue(order(10, 'MC-1'));
+
+      await service.complete(manager, 'req1', {
+        payments: [{ amount: '1000', date: '2026-11-04', time: '10:00' }],
+        comment: 'з таблиці',
+      });
+
+      expect(callArg(orders.create, 1)).toMatchObject({
+        comment: 'з таблиці · з урахуванням %: так',
+      });
+    });
+
+    it.each([
+      ['an unknown number', rows(['0000-070217', '600', '45'], ['0000-099999', '400', '45'])],
+      ['a missing number', rows(['0000-070217', '600', '45'])],
+      [
+        'a repeated number',
+        rows(['0000-070217', '600', '45'], ['0000-070217', '400', '45'], ['0000-070218', '1', '1']),
+      ],
+      ['a bad amount', rows(['0000-070217', '6,5', '45'], ['0000-070218', '400', '45'])],
+      ['a bad rate', rows(['0000-070217', '600', '2000'], ['0000-070218', '400', '45'])],
+      ['an empty list', []],
+    ])('should answer 400 and claim nothing for %s', async (_, overrides) => {
+      view('card', two);
+
+      const error = await failure(
+        service.complete(manager, 'req1', { payments: pay, orders: overrides }),
+      );
+
+      expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'invalid-request' });
+      expect(cards.claimCompletion).not.toHaveBeenCalled();
+      expect(orders.create).not.toHaveBeenCalled();
+      expect(orders.createGroup).not.toHaveBeenCalled();
+    });
+
+    it('should refuse numbers for a minus request, which has none', async () => {
+      view('minus', { clientLabel: 'Гук Руслан' });
+
+      const error = await failure(
+        service.complete(manager, 'req1', {
+          payments: [{ amount: '1000', date: '2026-11-04', time: '10:00' }],
+          orders: rows(['0000-070217', '600', '45']),
+        }),
+      );
+
+      expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST });
+      expect(cards.claimCompletion).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('payments of the form', () => {
+    it('should refuse a payment in the future', async () => {
+      view('card', { orders: [orderRow('0000-070217', '1000')] });
+
+      const error = await failure(
+        service.complete(
+          manager,
+          'req1',
+          body([{ payerName: 'Іван', amount: '1', date: '2999-01-01', time: '10:00' }]),
+        ),
+      );
+
+      expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'invalid-request' });
+      expect(cards.claimCompletion).not.toHaveBeenCalled();
+    });
+
+    it.each<RequestKind>(['foreign_fop', 'card', 'minus'])(
+      'should refuse no payments at all for %s',
+      async (kind) => {
+        view(kind, { orders: kind === 'minus' ? [] : [orderRow('0000-070217', '1000')] });
+
+        const error = await failure(service.complete(manager, 'req1', body([])));
+
+        expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'invalid-request' });
+        expect(cards.claimCompletion).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('accept', () => {
+    const stored = [
+      {
+        payerName: 'Петренко Іван',
+        account: '4441111069645962',
+        amount: '700.00',
+        paidAt: '2026-11-04T08:15:00.000Z',
+      },
+      {
+        payerName: 'Петренко Ірина',
+        account: null,
+        amount: '300.00',
+        paidAt: '2026-11-04T09:00:00.000Z',
+      },
+    ];
+    const withStored = (payments: unknown) =>
+      cards.byRequestId.mockResolvedValue({ ...card, payments });
+
+    it.each<RequestKind>(['card', 'foreign_fop'])(
+      'should create the %s orders with the stored payments and the request comment',
+      async (kind) => {
+        withStored(stored);
+        view(kind, { orders: [orderRow('0000-070217', '1000', '45')] });
+        orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+        const result = await service.accept(manager, 'req1');
+
+        expect(result).toEqual({ orderNumbers: ['0000-070217'], skipped: [] });
+        expect(callArg(orders.create, 1)).toMatchObject({
+          orderNumber: '0000-070217',
+          amountDue: '1000.00',
+          exchangeRate: '45',
+          comment: 'терміново',
+        });
+        expect(requisites.addMany).toHaveBeenCalledWith(
+          10,
+          [
+            {
+              payerName: 'Петренко Іван',
+              account: '4441111069645962',
+              amount: '700.00',
+              paidAt: new Date('2026-11-04T08:15:00.000Z'),
+            },
+            {
+              payerName: 'Петренко Ірина',
+              account: null,
+              amount: '300.00',
+              paidAt: new Date('2026-11-04T09:00:00.000Z'),
+            },
+          ],
+          { telegramId: 555n, name: 'Уляна' },
+        );
+        expect(sender.sendToAdmins).toHaveBeenCalledWith(
+          expect.stringContaining('Оплата на реквізити'),
+        );
+        expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date), true);
+        expect(cards.setOrderIds).toHaveBeenCalledWith('req1', [10]);
+        expect(receipts.attachHeld).toHaveBeenCalled();
+      },
+    );
+
+    it('should create MINUS_CLOSING with the stored payment date and close the task', async () => {
+      withStored([
+        { payerName: null, account: null, amount: '1000.00', paidAt: '2026-11-04T07:05:00.000Z' },
+      ]);
+      view('minus', { clientLabel: 'Гук Руслан', comment: null });
+      orders.create.mockResolvedValue(order(10, 'MC-1'));
+
+      await service.accept(manager, 'req1');
+
+      expect(callArg(orders.create, 1)).toMatchObject({
+        orderType: OrderType.MINUS_CLOSING,
+        paidAt: new Date('2026-11-04T07:05:00.000Z'),
+      });
+      expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date), true);
+      expect(sender.sendToAdmins).toHaveBeenCalled();
+    });
+
+    it('should create the our_fop orders without paidAt and keep the task open', async () => {
+      view('our_fop', { orders: [orderRow('0000-070217', '1000', '45')] });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.accept(manager, 'req1');
+
+      expect(callArg(orders.create, 1)).toMatchObject({ paidAt: undefined, amountDue: '1000.00' });
+      expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date), false);
+    });
+
+    it('should redraw the manager card as completed', async () => {
+      withStored(stored);
+      view('card', { orders: [orderRow('0000-070217', '1000')] });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.accept(manager, 'req1');
+
+      const [chat, message, html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
+      expect([chat, message, buttons]).toEqual([555n, 77, undefined]);
+      expect(html).toContain('✅ Оформлено: № 0000-070217');
+    });
+
+    it.each<RequestKind>(['card', 'foreign_fop', 'minus'])(
+      'should refuse %s without stored payments, claiming nothing',
+      async (kind) => {
+        view(kind, { orders: kind === 'minus' ? [] : [orderRow('0000-070217', '1000')] });
+
+        const error = await failure(service.accept(manager, 'req1'));
+
+        expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'invalid-request' });
+        expect(cards.claimCompletion).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should be safe to press twice: the second press creates nothing', async () => {
+      withStored(stored);
+      view('card', { orders: [orderRow('0000-070217', '1000')] });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+      await service.accept(manager, 'req1');
+      cards.byRequestId.mockResolvedValue({ ...card, payments: stored, completedAt: new Date() });
+
+      const error = await failure(service.accept(manager, 'req1'));
+
+      expect(error).toMatchObject({ status: HttpStatus.CONFLICT, code: 'already-completed' });
+      expect(orders.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('should lose a race at the claim without creating orders', async () => {
+      withStored(stored);
+      view('card', { orders: [orderRow('0000-070217', '1000')] });
+      cards.claimCompletion.mockResolvedValue(false);
+
+      const error = await failure(service.accept(manager, 'req1'));
+
+      expect(error).toMatchObject({ status: HttpStatus.CONFLICT, code: 'already-completed' });
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
+    it('should offer a part, not add one, for an existing number', async () => {
+      view('our_fop', { orders: [orderRow('0000-070217', '1000')] });
+      orders.findWithBalance.mockResolvedValue({
+        order: order(3, '0000-070217'),
+        amountPaid: new Prisma.Decimal('0'),
+      });
+
+      const error = await failure(service.accept(manager, 'req1'));
+
+      expect(error).toMatchObject({ status: HttpStatus.CONFLICT, code: 'order-exists-part' });
+      expect(orders.create).not.toHaveBeenCalled();
+    });
+
+    it('should answer 404 for the request of another manager', async () => {
+      cards.byRequestId.mockResolvedValue({ ...card, managerId: 9 });
+
+      const error = await failure(service.accept(manager, 'req1'));
+
+      expect(error).toMatchObject({ status: HttpStatus.NOT_FOUND });
+    });
+  });
+
+  describe('markPaid', () => {
+    const done = { ...card, completedAt: new Date('2026-11-04T10:00:00Z'), orderIds: [10, 11] };
+    const when = { date: '2026-11-04', time: '14:30' };
+    const paidAt = kyivDateTime(2026, 11, 4, 14, 30);
+
+    beforeEach(() => {
+      cards.byRequestId.mockResolvedValue(done);
+      cards.claimClosing.mockResolvedValue(true);
+      cards.releaseClosing.mockResolvedValue(undefined);
+      orders.setPaidAt.mockResolvedValue(undefined);
+      orders.numbersByIds.mockResolvedValue(['0000-070217', '0000-070218']);
+      view('our_fop');
+    });
+
+    it('should stamp every order, close the task and redraw the card', async () => {
+      sender.miniAppUrl = 'https://cab.example.ua/tg/request';
+
+      const result = await service.markPaid(manager, 'req1', when);
+
+      expect(result).toEqual({ paidAt: paidAt.toISOString() });
+      expect(cards.claimClosing).toHaveBeenCalledWith('req1', expect.any(Date));
+      expect(orders.setPaidAt).toHaveBeenCalledWith([10, 11], paidAt);
+      const [chat, message, html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
+      expect([chat, message, buttons]).toEqual([555n, 77, undefined]);
+      expect(html).toContain('✅ Оформлено: № 0000-070217, 0000-070218');
+      expect(html).toContain('✅ Оплачено 04.11.2026 14:30 · закрито');
+    });
+
+    it('should start the day at Kyiv midnight without a time', async () => {
+      await service.markPaid(manager, 'req1', { date: '2026-11-04' });
+
+      expect(orders.setPaidAt).toHaveBeenCalledWith([10, 11], kyivDateTime(2026, 11, 4));
+    });
+
+    it('should answer 404 for the request of another manager', async () => {
+      cards.byRequestId.mockResolvedValue({ ...done, managerId: 9 });
+
+      const error = await failure(service.markPaid(manager, 'req1', when));
+
+      expect(error).toMatchObject({ status: HttpStatus.NOT_FOUND, code: 'not-found' });
+      expect(orders.setPaidAt).not.toHaveBeenCalled();
+    });
+
+    it('should answer 409 not-completed before the orders exist', async () => {
+      cards.byRequestId.mockResolvedValue(card);
+
+      const error = await failure(service.markPaid(manager, 'req1', when));
+
+      expect(error).toMatchObject({ status: HttpStatus.CONFLICT, code: 'not-completed' });
+      expect(cards.claimClosing).not.toHaveBeenCalled();
+    });
+
+    it('should answer 409 already-closed for a closed card', async () => {
+      cards.byRequestId.mockResolvedValue({ ...done, closedAt: new Date() });
+
+      const error = await failure(service.markPaid(manager, 'req1', when));
+
+      expect(error).toMatchObject({ status: HttpStatus.CONFLICT, code: 'already-closed' });
+      expect(orders.setPaidAt).not.toHaveBeenCalled();
+    });
+
+    it('should answer 409 already-closed when a parallel press closed it first', async () => {
+      cards.claimClosing.mockResolvedValue(false);
+
+      const error = await failure(service.markPaid(manager, 'req1', when));
+
+      expect(error).toMatchObject({ status: HttpStatus.CONFLICT, code: 'already-closed' });
+      expect(orders.setPaidAt).not.toHaveBeenCalled();
+    });
+
+    it.each<RequestKind>(['card', 'foreign_fop', 'minus'])(
+      'should answer 409 not-our-fop for %s',
+      async (kind) => {
+        view(kind);
+
+        const error = await failure(service.markPaid(manager, 'req1', when));
+
+        expect(error).toMatchObject({ status: HttpStatus.CONFLICT, code: 'not-our-fop' });
+        expect(cards.claimClosing).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['a date in the future', { date: '2999-01-01' }],
+      ['a time in the future today', { date: '2999-01-01', time: '00:01' }],
+      ['a malformed date', { date: '04.11.2026' }],
+      ['a day the calendar does not have', { date: '2026-02-30' }],
+      ['a bad time', { date: '2026-11-04', time: '25:00' }],
+    ])('should answer 400 for %s', async (_, dto) => {
+      const error = await failure(service.markPaid(manager, 'req1', dto));
+
+      expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'invalid-request' });
+      expect(cards.claimClosing).not.toHaveBeenCalled();
+      expect(orders.setPaidAt).not.toHaveBeenCalled();
+    });
+
+    it('should release the closing and rethrow when the orders cannot be stamped', async () => {
+      const boom = new Error('db down');
+      orders.setPaidAt.mockRejectedValue(boom);
+
+      await expect(service.markPaid(manager, 'req1', when)).rejects.toBe(boom);
+
+      expect(cards.releaseClosing).toHaveBeenCalledWith('req1');
+      expect(sender.editMessage).not.toHaveBeenCalled();
+    });
+
+    it('should still answer when the card cannot be redrawn', async () => {
+      sender.editMessage.mockRejectedValue(new Error('telegram down'));
+
+      await expect(service.markPaid(manager, 'req1', when)).resolves.toEqual({
+        paidAt: paidAt.toISOString(),
+      });
+      expect(cards.releaseClosing).not.toHaveBeenCalled();
     });
   });
 });

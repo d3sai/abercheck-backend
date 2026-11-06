@@ -106,6 +106,30 @@ describe('RequestCreateService', () => {
       );
     });
 
+    it('should keep the validated payments on the card and not send them to finance', async () => {
+      const payments = [
+        {
+          payerName: 'Петренко Іван',
+          account: null,
+          amount: '4972.00',
+          paidAt: '2026-11-04T08:15:00.000Z',
+        },
+      ];
+
+      await service.create(manager, { ...input, kind: 'card', payments });
+
+      expect(cards.create).toHaveBeenCalledWith(expect.objectContaining({ payments }));
+      expect(JSON.stringify(finance.create.mock.calls[0])).not.toContain('Петренко');
+    });
+
+    it('should store a card without payments for an our_fop request', async () => {
+      await service.create(manager, input);
+
+      expect(cards.create).toHaveBeenCalledWith(
+        expect.not.objectContaining({ payments: expect.anything() as unknown }),
+      );
+    });
+
     it('should create the request, store the mapping and show both cards', async () => {
       const answer = await service.create(manager, input);
 

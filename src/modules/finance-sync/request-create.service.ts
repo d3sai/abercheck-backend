@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { Manager } from '../../generated/prisma/client';
+import type { Manager, Prisma } from '../../generated/prisma/client';
 import { button } from '../telegram/core/bot-reply';
 import { escapeHtml } from '../telegram/core/format';
 import { TelegramSender } from '../telegram/core/telegram-sender';
@@ -12,6 +12,7 @@ import {
 } from './finance.types';
 import { groupCard, managerCard } from './request-card.messages';
 import { RequestCardsRepository } from './request-cards.repository';
+import type { StoredPayment } from './stored-payments';
 
 /** Already validated: money and rates are normalised decimal strings. */
 export interface CreateRequestInput {
@@ -25,6 +26,8 @@ export interface CreateRequestInput {
   withPercent?: boolean | null;
   comment: string | null;
   officialDocs: boolean;
+  /** foreign_fop, card, minus: kept on the card until the manager accepts the ready text. */
+  payments?: StoredPayment[];
 }
 
 /** `created` with a `note` means the request exists but something after it did not go through. */
@@ -111,6 +114,7 @@ export class RequestCreateService {
         managerChatId: manager.telegramId,
         groupChatId: BigInt(groupChatId),
         groupMessageId,
+        ...(input.payments && { payments: input.payments as unknown as Prisma.InputJsonValue }),
       });
     } catch (error) {
       this.logger.error(`Request ${created.id} was created but its card was not stored`, error);
