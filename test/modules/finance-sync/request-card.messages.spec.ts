@@ -7,7 +7,6 @@ import {
   acceptRefusal,
   groupCard,
   managerCard,
-  myRequestsReply,
 } from '../../../src/modules/finance-sync/request-card.messages';
 
 const ID = 'cmabcdefghij0123456789xyz';
@@ -421,51 +420,5 @@ describe('acceptRefusal', () => {
     expect(
       acceptRefusal('fop-foreign-project', { project: 'я'.repeat(500) }).length,
     ).toBeLessThanOrEqual(200);
-  });
-});
-
-describe('myRequestsReply', () => {
-  const at = new Date('2026-11-05T10:00:00.000Z');
-  const listed = (
-    number: string,
-    notifiedStatus: string | null,
-    completedAt: Date | null = null,
-  ) => ({
-    requestId: `id${number}`,
-    number,
-    notifiedStatus,
-    completedAt,
-    createdAt: at,
-  });
-  const URL = 'https://check.example/tg/request';
-
-  it('puts the accepted, not completed requests first, each with a completion button', () => {
-    const reply = myRequestsReply(
-      [
-        listed('5', null),
-        listed('4', 'accepted'),
-        listed('3', 'cancelled'),
-        listed('2', 'paid', at),
-        listed('1', 'paid'),
-      ],
-      URL,
-    );
-
-    expect(reply.html.split('\n')).toEqual([
-      '<b>Мої запити</b>',
-      '#4 · 05.11.2026 · 📎 прийнято, додайте дату',
-      '#1 · 05.11.2026 · 📎 прийнято, додайте дату',
-      '#5 · 05.11.2026 · 🕓 чекає фінансиста',
-      '#3 · 05.11.2026 · ❌ скасовано',
-      '#2 · 05.11.2026 · ✅ оформлено',
-    ]);
-    const buttons = (reply.buttons ?? []).flat() as { text: string; web_app: { url: string } }[];
-    expect(buttons.map((b) => b.text)).toEqual(['📎 Додати дату · #4', '📎 Додати дату · #1']);
-    expect(buttons[0]!.web_app.url).toBe(`${URL}?mode=complete&id=id4`);
-  });
-
-  it('has no buttons without the Mini App and a hint when there are no requests', () => {
-    expect(myRequestsReply([listed('4', 'accepted')]).buttons).toBeUndefined();
-    expect(myRequestsReply([]).html).toContain('📝 Новий запит');
   });
 });

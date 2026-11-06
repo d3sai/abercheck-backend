@@ -23,8 +23,6 @@ export interface CreateRequestInput {
   clientLabel?: string;
   sheetUrl?: string | null;
   withPercent?: boolean | null;
-  /** Ignored: rates are per order. Kept optional until the Mini App DTO stops passing it. */
-  exchangeRate?: string | null;
   comment: string | null;
   officialDocs: boolean;
 }

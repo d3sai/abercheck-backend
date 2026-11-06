@@ -73,7 +73,7 @@ describe('FinanceSyncUpdate', () => {
     refresh: jest.fn(),
     onText: jest.fn(),
   };
-  const managerActions = { cancel: jest.fn(), onText: jest.fn(), myRequests: jest.fn() };
+  const managerActions = { cancel: jest.fn(), onText: jest.fn() };
   const receipts = { onFile: jest.fn() };
   const update = new FinanceSyncUpdate(
     actions as unknown as FinancierActionsService,
@@ -99,18 +99,6 @@ describe('FinanceSyncUpdate', () => {
   });
 
   describe('text', () => {
-    it('should answer «Мої запити» and the /requests command with the list', async () => {
-      const c = { chat: { type: 'private' }, text: '🗂 Мої запити' };
-      const next = jest.fn();
-
-      await update.text(c as never, next);
-      await update.requests(c as never);
-
-      expect(managerActions.myRequests).toHaveBeenCalledTimes(2);
-      expect(actions.onText).not.toHaveBeenCalled();
-      expect(next).not.toHaveBeenCalled();
-    });
-
     it('should give the financiers first and the manager second, then fall through', async () => {
       const c = {};
       const next = jest.fn();

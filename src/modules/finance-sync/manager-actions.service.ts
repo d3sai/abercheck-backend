@@ -4,17 +4,14 @@ import type { FinanceRequestCard } from '../../generated/prisma/client';
 import { NOT_A_MANAGER } from '../telegram/access/access.messages';
 import { fullName, isPrivate, type MatchContext, reply } from '../telegram/core/telegram-context';
 import { ManagersService } from '../managers/managers.service';
-import { TelegramSender } from '../telegram/core/telegram-sender';
 import { FinanceClient } from './finance.client';
 import { FinanceApiError } from './finance.types';
-import { myRequestsReply } from './request-card.messages';
 import { RequestCardsRepository } from './request-cards.repository';
 import { RequestSyncService } from './request-sync.service';
 
 type Next = () => Promise<void>;
 
 const NOT_ANSWERED = 'Фінанси не відповіли, спробуйте ще раз';
-const MY_REQUESTS_LIMIT = 20;
 
 /** Private-chat actions of a manager: cancel a request, answer the financiers, list the requests. */
 @Injectable()
@@ -23,15 +20,8 @@ export class ManagerActionsService {
     private readonly finance: FinanceClient,
     private readonly cards: RequestCardsRepository,
     private readonly sync: RequestSyncService,
-    private readonly sender: TelegramSender,
     private readonly managers: ManagersService,
   ) {}
-
-  async myRequests(ctx: Context): Promise<void> {
-    if (!isPrivate(ctx) || !ctx.chat) return;
-    const cards = await this.cards.latestOfManager(BigInt(ctx.chat.id), MY_REQUESTS_LIMIT);
-    await reply(ctx, myRequestsReply(cards, this.sender.miniAppUrl));
-  }
 
   async cancel(ctx: MatchContext): Promise<void> {
     if (!isPrivate(ctx) || !ctx.from) return;

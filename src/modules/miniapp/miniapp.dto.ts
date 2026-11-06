@@ -78,11 +78,6 @@ export class CreateMiniappRequestDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(16)
-  exchangeRate?: string;
-
-  @IsOptional()
-  @IsString()
   @MaxLength(1000)
   comment?: string;
 
@@ -91,11 +86,6 @@ export class CreateMiniappRequestDto {
 }
 
 export class EditMiniappRequestDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(16)
-  exchangeRate?: string;
-
   @IsOptional()
   @IsString()
   @MaxLength(1000)
@@ -170,9 +160,6 @@ function rate(value: string): string {
   return trimmed;
 }
 
-const optionalRate = (value: string | undefined | null): string | null =>
-  value?.trim() ? rate(value) : null;
-
 function requiredRate(value: string | undefined | null, orderNumber: string): string {
   if (!value?.trim()) throw invalid(`Вкажіть курс для № ${orderNumber}.`);
   return rate(value);
@@ -186,8 +173,6 @@ const text = (value: string | undefined | null): string | null => {
 export function toCreateInput(dto: CreateMiniappRequestDto): CreateRequestInput {
   const common = {
     kind: dto.kind,
-    // the form asks for a rate per order number, not for the whole request
-    exchangeRate: optionalRate(dto.exchangeRate),
     comment: text(dto.comment),
     officialDocs: dto.officialDocs,
   };
@@ -232,7 +217,6 @@ export function toEditBody(
   return {
     requesterTelegramId,
     ...(dto.sum != null && { sum: Number(money(dto.sum)) }),
-    ...(dto.exchangeRate != null && { exchangeRate: Number(rate(dto.exchangeRate)) }),
     ...(dto.comment != null && { comment: text(dto.comment) }),
     ...(dto.officialDocs != null && { officialDocs: dto.officialDocs }),
   };

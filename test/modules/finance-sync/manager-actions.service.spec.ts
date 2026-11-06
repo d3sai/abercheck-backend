@@ -9,7 +9,6 @@ import { NOT_A_MANAGER } from '../../../src/modules/telegram/access/access.messa
 import { ManagerActionsService } from '../../../src/modules/finance-sync/manager-actions.service';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import type { RequestSyncService } from '../../../src/modules/finance-sync/request-sync.service';
-import type { TelegramSender } from '../../../src/modules/telegram/core/telegram-sender';
 
 const MANAGER_CHAT = 555;
 
@@ -30,16 +29,13 @@ describe('ManagerActionsService', () => {
     byRequestId: jest.fn(),
     byManagerMessage: jest.fn(),
     requestOfChatMessage: jest.fn(),
-    latestOfManager: jest.fn(),
   };
   const sync = { renderGroup: jest.fn(), renderManager: jest.fn(), notifyManager: jest.fn() };
-  const sender = { miniAppUrl: 'https://check.example/tg/request' };
   const managers = { findActiveByTelegramId: jest.fn() };
   const service = new ManagerActionsService(
     finance as unknown as FinanceClient,
     cards as unknown as RequestCardsRepository,
     sync as unknown as RequestSyncService,
-    sender as unknown as TelegramSender,
     managers as unknown as ManagersService,
   );
 
@@ -145,26 +141,6 @@ describe('ManagerActionsService', () => {
 
   describe('text', () => {
     const toCard = { message_id: 31, from: { id: 1 } };
-    it("should list the manager's requests from the local cards", async () => {
-      cards.latestOfManager.mockResolvedValue([
-        { ...card, notifiedStatus: 'accepted', completedAt: null, createdAt: new Date() },
-      ]);
-      const c = textCtx('🗂 Мої запити');
-
-      await service.myRequests(c as never);
-
-      expect(cards.latestOfManager).toHaveBeenCalledWith(BigInt(MANAGER_CHAT), 20);
-      const [html, options] = c.reply.mock.calls[0] as [string, { reply_markup?: unknown }];
-      expect(html).toContain('#42');
-      expect(options.reply_markup).toBeDefined();
-    });
-
-    it('should not list requests outside the private chat', async () => {
-      await service.myRequests(textCtx('🗂 Мої запити', undefined, 'group') as never);
-
-      expect(cards.latestOfManager).not.toHaveBeenCalled();
-    });
-
     const textCtx = (text: string, replyTo?: object, type = 'private') => ({
       chat: { id: MANAGER_CHAT, type },
       from: { id: 555, first_name: 'Іван' },

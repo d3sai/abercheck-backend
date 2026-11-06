@@ -1,6 +1,6 @@
-import { type FinanceRequestCard, Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { type BotReply, button } from '../telegram/core/bot-reply';
-import { escapeHtml, formatKyivDate, formatMoneyIn } from '../telegram/core/format';
+import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
 import { formatRate } from '../telegram/notifications/order-templates';
 import type {
   FinanceFop,
@@ -189,45 +189,6 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   return view.status === 'accepted' && miniAppUrl
     ? { html, buttons: [[webApp('📎 Додати дату', miniAppUrl, 'complete', view.id)]] }
     : { html };
-}
-
-type ListedCard = Pick<
-  FinanceRequestCard,
-  'requestId' | 'number' | 'notifiedStatus' | 'completedAt' | 'createdAt'
->;
-
-// `notifiedStatus` is the last status the manager was told about; null means still pending
-const awaitsCompletion = (card: ListedCard): boolean =>
-  !card.completedAt && (card.notifiedStatus === 'accepted' || card.notifiedStatus === 'paid');
-
-const listedStatus = (card: ListedCard): string =>
-  card.completedAt
-    ? '✅ оформлено'
-    : card.notifiedStatus === 'cancelled'
-      ? '❌ скасовано'
-      : awaitsCompletion(card)
-        ? '📎 прийнято, додайте дату'
-        : '🕓 чекає фінансиста';
-
-/** «Мої запити»: the accepted but not completed ones first, each with a button to complete it. */
-export function myRequestsReply(cards: ListedCard[], miniAppUrl?: string): BotReply {
-  if (cards.length === 0) {
-    return { html: 'Запитів ще немає. Новий запит — кнопка «📝 Новий запит» біля поля вводу.' };
-  }
-  const todo = cards.filter(awaitsCompletion);
-  const lines = [...todo, ...cards.filter((card) => !awaitsCompletion(card))].map(
-    (card) =>
-      `#${escapeHtml(card.number)} · ${formatKyivDate(card.createdAt)} · ${listedStatus(card)}`,
-  );
-  const buttons = miniAppUrl
-    ? todo.map((card) => [
-        webApp(`📎 Додати дату · #${card.number}`, miniAppUrl, 'complete', card.requestId),
-      ])
-    : [];
-  return {
-    html: ['<b>Мої запити</b>', ...lines].join('\n'),
-    ...(buttons.length > 0 && { buttons }),
-  };
 }
 
 /** Alert text for a failed accept; `status` is only needed for 403. Telegram caps alerts at 200 chars. */

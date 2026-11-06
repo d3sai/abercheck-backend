@@ -25,7 +25,6 @@ const input: CreateRequestInput = {
     { orderNumber: '0000-070217', amount: '4972', exchangeRate: null },
     { orderNumber: '0000-072611', amount: '11124.50', exchangeRate: null },
   ],
-  exchangeRate: '45.7',
   comment: 'Терміново',
   officialDocs: true,
 };

@@ -85,7 +85,6 @@ describe('MiniappController', () => {
       expect(requests.create).toHaveBeenCalledWith(manager, {
         kind: 'our_fop',
         orders: [{ orderNumber: '0000-070217', amount: '4972', exchangeRate: '45.7' }],
-        exchangeRate: null,
         comment: 'Терміново',
         officialDocs: true,
       });
@@ -128,7 +127,6 @@ describe('MiniappController', () => {
         clientLabel: ' Іван ',
         sheetUrl: 'https://s/1',
         withPercent: true,
-        exchangeRate: undefined,
       });
 
       expect(requests.create).toHaveBeenCalledWith(manager, {
@@ -137,7 +135,6 @@ describe('MiniappController', () => {
         clientLabel: 'Іван',
         sheetUrl: 'https://s/1',
         withPercent: true,
-        exchangeRate: null,
         comment: null,
         officialDocs: true,
       });
@@ -147,22 +144,21 @@ describe('MiniappController', () => {
       await create({
         kind: 'card',
         orders: [order],
-        exchangeRate: null,
         comment: null,
       } as unknown as Partial<CreateMiniappRequestDto>);
 
       expect(requests.create).toHaveBeenCalledWith(
         manager,
-        expect.objectContaining({ exchangeRate: null, comment: null }),
+        expect.objectContaining({ comment: null }),
       );
     });
 
     it('should not require a rate for minus', async () => {
-      await create({ kind: 'minus', sum: '100', clientLabel: 'A', exchangeRate: undefined });
+      await create({ kind: 'minus', sum: '100', clientLabel: 'A' });
 
       expect(requests.create).toHaveBeenCalledWith(
         manager,
-        expect.objectContaining({ kind: 'minus', exchangeRate: null }),
+        expect.objectContaining({ kind: 'minus' }),
       );
     });
 
@@ -191,7 +187,7 @@ describe('MiniappController', () => {
       ['a bad order number', { kind: 'card', orders: [{ ...order, orderNumber: '070217' }] }],
       ['a bad amount', { kind: 'card', orders: [{ ...order, amount: '0' }] }],
       ['a bad row rate', { kind: 'card', orders: [{ ...order, exchangeRate: 'abc' }] }],
-      ['a rate above 1000', { kind: 'card', orders: [order], exchangeRate: '1001' }],
+      ['a rate above 1000', { kind: 'card', orders: [{ ...order, exchangeRate: '1001' }] }],
       ['duplicate numbers', { kind: 'our_fop', orders: [order, { ...order, amount: '5' }] }],
     ] as [string, Partial<CreateMiniappRequestDto>][])(
       'should answer 400 and not create for %s',
@@ -534,24 +530,16 @@ describe('MiniappController', () => {
     const edit = (dto: Partial<EditMiniappRequestDto>) => controller.edit(manager, 'req1', dto);
 
     it('should send the changes, redraw both cards and return the view', async () => {
-      const answer = await edit({ exchangeRate: '45.7', comment: ' ', officialDocs: false });
+      const answer = await edit({ comment: ' ', officialDocs: false });
 
       expect(finance.edit).toHaveBeenCalledWith('req1', {
         requesterTelegramId: 555,
-        exchangeRate: 45.7,
         comment: null,
         officialDocs: false,
       });
       expect(sync.renderManager).toHaveBeenCalledWith(card, view);
       expect(sync.renderGroup).toHaveBeenCalledWith(card, view);
       expect(answer).toEqual({ request: view, managerName: 'Уляна', completed: false });
-    });
-
-    it('should refuse a blank rate: it cannot be cleared', async () => {
-      const error = await failure(edit({ exchangeRate: '' }));
-
-      expect(error).toMatchObject({ status: 400, code: 'invalid-request' });
-      expect(finance.edit).not.toHaveBeenCalled();
     });
 
     it('should send a sum as a number', async () => {
@@ -596,15 +584,15 @@ describe('MiniappController', () => {
       expect(error).toMatchObject({ status: 400, code: 'sum-locked' });
     });
 
-    it.each([
-      ['a bad sum', { sum: '1,5' }],
-      ['a bad rate', { exchangeRate: '0' }],
-    ])('should answer 400, without calling finance, for %s', async (_, dto) => {
-      const error = await failure(edit(dto));
+    it.each([['a bad sum', { sum: '1,5' }]])(
+      'should answer 400, without calling finance, for %s',
+      async (_, dto) => {
+        const error = await failure(edit(dto));
 
-      expect(error).toMatchObject({ status: 400, code: 'invalid-request' });
-      expect(finance.edit).not.toHaveBeenCalled();
-    });
+        expect(error).toMatchObject({ status: 400, code: 'invalid-request' });
+        expect(finance.edit).not.toHaveBeenCalled();
+      },
+    );
 
     it('should answer 404 for another manager’s request', async () => {
       cards.byRequestId.mockResolvedValue({ ...card, managerId: 9 });
