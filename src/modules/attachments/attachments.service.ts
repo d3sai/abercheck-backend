@@ -54,10 +54,10 @@ export class AttachmentsService {
     uploader: Initiator,
     keepMessageOnDelete: boolean,
   ): Promise<OrderAttachment[]> {
-    const attachments: OrderAttachment[] = [];
-    for (const file of files) {
-      attachments.push(
-        await this.store(
+    // in parallel: one by one, a few phone photos outlast the Mini App's wait for the upload
+    return Promise.all(
+      files.map((file) =>
+        this.store(
           order,
           uploader,
           keepMessageOnDelete,
@@ -69,9 +69,8 @@ export class AttachmentsService {
               { caption: caption(order, uploader), parse_mode: 'HTML' },
             ),
         ),
-      );
-    }
-    return attachments;
+      ),
+    );
   }
 
   async saveFromTelegram(
