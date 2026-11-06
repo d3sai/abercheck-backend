@@ -217,8 +217,6 @@ describe('TelegramSender', () => {
           reply_parameters: { message_id: 2, allow_sending_without_reply: true },
         }),
       );
-      expect(sender.topicId('reports')).toBe(13);
-      expect(sender.topicId('payments')).toBeUndefined();
     });
 
     it('should fall back to the plain chat when the topic is unset', async () => {

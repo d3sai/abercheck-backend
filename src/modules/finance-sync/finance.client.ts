@@ -65,7 +65,6 @@ export class FinanceClient {
       fopId?: number;
       payoutsText?: string;
       fopName?: string;
-      exchangeRate?: number | null;
     },
   ): Promise<FinanceRequestView> {
     return (await this.post(id, 'accept', body)).request;

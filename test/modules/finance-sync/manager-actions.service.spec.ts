@@ -1,9 +1,11 @@
 import type { FinanceRequestCard } from '../../../src/generated/prisma/client';
+import type { ManagersService } from '../../../src/modules/managers/managers.service';
 import type { FinanceClient } from '../../../src/modules/finance-sync/finance.client';
 import {
   FinanceApiError,
   type FinanceRequestView,
 } from '../../../src/modules/finance-sync/finance.types';
+import { NOT_A_MANAGER } from '../../../src/modules/telegram/access/access.messages';
 import { ManagerActionsService } from '../../../src/modules/finance-sync/manager-actions.service';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import type { RequestSyncService } from '../../../src/modules/finance-sync/request-sync.service';
@@ -32,14 +34,19 @@ describe('ManagerActionsService', () => {
   };
   const sync = { renderGroup: jest.fn(), renderManager: jest.fn(), notifyManager: jest.fn() };
   const sender = { miniAppUrl: 'https://check.example/tg/request' };
+  const managers = { findActiveByTelegramId: jest.fn() };
   const service = new ManagerActionsService(
     finance as unknown as FinanceClient,
     cards as unknown as RequestCardsRepository,
     sync as unknown as RequestSyncService,
     sender as unknown as TelegramSender,
+    managers as unknown as ManagersService,
   );
 
-  beforeEach(() => cards.byRequestId.mockResolvedValue(card));
+  beforeEach(() => {
+    cards.byRequestId.mockResolvedValue(card);
+    managers.findActiveByTelegramId.mockResolvedValue({ id: 4 });
+  });
   afterEach(() => jest.resetAllMocks());
 
   const press = (chatId = MANAGER_CHAT, type = 'private') => ({
@@ -102,6 +109,37 @@ describe('ManagerActionsService', () => {
 
       expect(finance.cancel).not.toHaveBeenCalled();
       expect(other.answerCbQuery).toHaveBeenCalledWith('Запит не знайдено', { show_alert: true });
+    });
+  });
+
+  describe('deactivated manager', () => {
+    it('should not cancel a request and should alert NOT_A_MANAGER', async () => {
+      managers.findActiveByTelegramId.mockResolvedValue(null);
+      const c = press();
+
+      await service.cancel(c as never);
+
+      expect(managers.findActiveByTelegramId).toHaveBeenCalledWith(555n);
+      expect(finance.cancel).not.toHaveBeenCalled();
+      expect(c.answerCbQuery).toHaveBeenCalledWith(NOT_A_MANAGER, { show_alert: true });
+    });
+
+    it('should not post a reply to finance and should answer NOT_A_MANAGER', async () => {
+      managers.findActiveByTelegramId.mockResolvedValue(null);
+      cards.byManagerMessage.mockResolvedValue(card);
+      const c = {
+        chat: { id: MANAGER_CHAT, type: 'private' },
+        from: { id: 555, first_name: 'Іван' },
+        text: 'ок',
+        message: { message_id: 90, text: 'ок', reply_to_message: { message_id: 31 } },
+        reply: jest.fn(),
+        react: jest.fn(),
+      };
+
+      await service.onText(c as never, jest.fn());
+
+      expect(finance.postMessage).not.toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith(NOT_A_MANAGER, expect.anything());
     });
   });
 

@@ -10,6 +10,7 @@ import {
 } from '../attachments/attachments.constants';
 import { AttachmentsService, type TelegramFileRef } from '../attachments/attachments.service';
 import { ManagersService } from '../managers/managers.service';
+import { NOT_A_MANAGER } from '../telegram/access/access.messages';
 import type { BotReply } from '../telegram/core/bot-reply';
 import { isPrivate, reply } from '../telegram/core/telegram-context';
 import { RequestCardsRepository } from './request-cards.repository';
@@ -43,9 +44,11 @@ export class RequestReceiptsService {
     if (!requestId) return next();
 
     const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from.id));
-    if (!manager || (await this.cards.byRequestId(requestId))?.managerId !== manager.id) {
-      return next();
+    if (!manager) {
+      await reply(ctx, { html: NOT_A_MANAGER }, message!.message_id);
+      return;
     }
+    if ((await this.cards.byRequestId(requestId))?.managerId !== manager.id) return next();
     await reply(ctx, await this.receive(manager, requestId, file), message!.message_id);
   }
 
@@ -59,32 +62,43 @@ export class RequestReceiptsService {
 
     // read fresh: completion may have finished while the file travelled
     const card = await this.cards.byRequestId(requestId);
-    if (!card?.completedAt) {
+    // completedAt is claimed before the orders exist: with no ids yet the receipt is held as well
+    if (!card?.completedAt || card.orderIds.length === 0) {
       // Telegram's media group takes 10 items, so more held files could never be attached
       if ((await this.cards.heldFiles(requestId)).length >= MAX_FILES_PER_UPLOAD) {
         return { html: `⚠️ Максимум ${MAX_FILES_PER_UPLOAD} файлів на замовлення.` };
       }
       await this.cards.holdFile(requestId, file);
-      return { html: '📎 Квитанцію збережено — додамо до замовлення після оформлення' };
+      // completion may have stored the ids and attached the held files between the read and the hold
+      const late = await this.orderById((await this.cards.byRequestId(requestId))?.orderIds[0]);
+      if (!late) return { html: '📎 Квитанцію збережено — додамо до замовлення після оформлення' };
+      // shortcut: a parallel completion attaching the same held rows can attach this file twice; rare, upgrade to a claim on the rows if it shows up
+      return this.storing(late, () => this.attachHeld(manager, requestId, late));
     }
 
     // a crash between creating the orders and storing their ids leaves completedAt set with no ids
-    const orderId = card.orderIds[0];
-    const order =
-      orderId === undefined ? null : await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.orderById(card.orderIds[0]);
     if (!order) {
       this.logger.error(
         `Request ${requestId} is completed but has no order to attach a receipt to`,
       );
       return { html: NO_ORDER };
     }
+    return this.storing(order, () => this.attach(manager, order, [file]));
+  }
+
+  private async storing(order: Order, store: () => Promise<unknown>): Promise<BotReply> {
     try {
-      await this.attach(manager, order, [file]);
+      await store();
     } catch (error) {
       if (!(error instanceof AttachmentStorageError)) throw error;
       return { html: '⚠️ Не вдалося зберегти квитанцію, спробуйте ще раз' };
     }
     return { html: `📎 Квитанцію додано до № ${order.orderNumber}` };
+  }
+
+  private async orderById(id: number | undefined): Promise<Order | null> {
+    return id === undefined ? null : this.prisma.order.findUnique({ where: { id } });
   }
 
   /** At completion: put the receipts sent earlier on the order. The rows go only after they are attached. */

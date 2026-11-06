@@ -55,6 +55,23 @@ function payoutLines(payout: FinancePayoutView): string[] {
   return [`• ${parts.map(escapeHtml).join(' · ')}`, ...warningLines(payout.warnings)];
 }
 
+// Telegram refuses a message over 4096 chars; the headroom is for what the callers add after the body
+const MAX_BODY = 3500;
+const MAX_COMMENT = 300;
+
+/** Whole payouts that fit the budget; «…» marks the rest. */
+function fitPayouts(payouts: string[][], budget: number): string[] {
+  const shown: string[] = [];
+  let used = 0;
+  for (const lines of payouts) {
+    const size = lines.join('\n').length + 1;
+    if (used + size > budget - 2) return [...shown, '…'];
+    shown.push(...lines);
+    used += size;
+  }
+  return shown;
+}
+
 function body(view: FinanceRequestView, managerName?: string): string[] {
   const kind = view.kind ? KIND_LABEL[view.kind] : 'Запит';
   const lines = [`<b>${kind}</b> #${escapeHtml(view.number)}`];
@@ -73,19 +90,28 @@ function body(view: FinanceRequestView, managerName?: string): string[] {
   if (view.officialDocs !== null) {
     lines.push(`Офіційні документи: ${view.officialDocs ? 'так' : 'ні'}`);
   }
-  if (view.comment) lines.push(`Коментар: ${escapeHtml(view.comment)}`);
-
-  const status: string[] = [];
-  if (view.status === 'cancelled') status.push('❌ Скасовано');
-  if (view.status === 'accepted') {
-    status.push(
-      `✅ Прийняв(ла): ${escapeHtml(view.responderName ?? '—')} · ФОП: ${escapeHtml(view.fopLabel ?? '—')}`,
-      ...view.payouts.flatMap(payoutLines),
-    );
+  if (view.comment) {
+    const chars = [...view.comment];
+    const comment =
+      chars.length > MAX_COMMENT ? `${chars.slice(0, MAX_COMMENT).join('')}…` : view.comment;
+    lines.push(`Коментар: ${escapeHtml(comment)}`);
   }
-  if (view.isPaid) status.push('💰 Оплачено');
+
   const warnings = warningLines(view.warnings);
-  return [...lines, ...(status.length > 0 ? ['', ...status] : []), ...warnings];
+  const assemble = (payouts: string[]): string[] => {
+    const status: string[] = [];
+    if (view.status === 'cancelled') status.push('❌ Скасовано');
+    if (view.status === 'accepted') {
+      status.push(
+        `✅ Прийняв(ла): ${escapeHtml(view.responderName ?? '—')} · ФОП: ${escapeHtml(view.fopLabel ?? '—')}`,
+        ...payouts,
+      );
+    }
+    if (view.isPaid) status.push('💰 Оплачено');
+    return [...lines, ...(status.length > 0 ? ['', ...status] : []), ...warnings];
+  };
+  const fixed = assemble([]).join('\n').length;
+  return assemble(fitPayouts(view.payouts.map(payoutLines), MAX_BODY - fixed));
 }
 
 // a FOP whose limit cannot take the sum is noise; it can still be named in a «ФОП …» reply
@@ -100,11 +126,9 @@ export function groupCard(
   managerName?: string,
 ): BotReply {
   const lines = body(view, managerName);
-  if (fops?.limitsStatus === 'unavailable') lines.push('', '⚠️ Залишки ФОП зараз недоступні');
-  if (view.status !== 'pending') return { html: lines.join('\n') };
-
+  const picksFop = view.status === 'pending' && (view.kind === 'our_fop' || view.kind === 'minus');
   const fopRows =
-    fops && (view.kind === 'our_fop' || view.kind === 'minus')
+    fops && picksFop
       ? fops.fops
           .filter((fop) => fits(fop, view.sum, fops))
           .map((fop) => [
@@ -114,6 +138,14 @@ export function groupCard(
             ),
           ])
       : [];
+  // a pending card without FOP buttons must say why, or the financier sees a dead card
+  if (fops?.limitsStatus === 'unavailable' || (picksFop && !fops)) {
+    lines.push('', '⚠️ Залишки ФОП зараз недоступні');
+  } else if (picksFop && fopRows.length === 0) {
+    lines.push('', '⚠️ Жоден ФОП не вміщує суму — відповідайте «ФОП …»');
+  }
+  if (view.status !== 'pending') return { html: lines.join('\n') };
+
   return {
     html: lines.join('\n'),
     buttons: [...fopRows, [button('🔄 Оновити', `fu:${view.id}`)]],

@@ -157,6 +157,73 @@ describe('groupCard', () => {
   });
 });
 
+describe('groupCard hints and length', () => {
+  it('says no FOP fits when every FOP is filtered out by its limit', () => {
+    const tight = fops({ fops: [{ fopId: 1, label: 'ФОП А', leftMonthWithReserve: '100' }] });
+    const reply = groupCard(view(), tight);
+    expect(reply.html).toContain('Жоден ФОП не вміщує суму — відповідайте «ФОП …»');
+    expect(flat(reply).map((b) => b.text)).toEqual(['🔄 Оновити']);
+  });
+
+  it('says the balances are unavailable when fops is null on a pending FOP request', () => {
+    expect(groupCard(view(), null).html).toContain('Залишки ФОП зараз недоступні');
+    expect(groupCard(view(), null).html).not.toContain('Жоден ФОП');
+  });
+
+  it('has no FOP hint when a FOP button is shown, for card kind, or when accepted', () => {
+    expect(groupCard(view(), fops()).html).not.toContain('ФОП …');
+    expect(groupCard(view({ kind: 'card' }), null).html).not.toContain('недоступні');
+    expect(groupCard(view({ status: 'accepted' }), null).html).not.toContain('недоступні');
+  });
+
+  const payout = (index: number) => ({
+    method: 'iban' as const,
+    recipientName: `Отримувач ${index} ${'Я'.repeat(30)}`,
+    iban: `UA${String(index).padStart(27, '0')}`,
+    taxId: '1234567890',
+    purpose: 'оплата за послуги '.repeat(2),
+    amount: '100',
+    warnings: [],
+  });
+
+  it('keeps an accepted card with a 4000-char payouts set under 4096 and marks the cut', () => {
+    const accepted = view({
+      status: 'accepted',
+      responderName: 'Фін',
+      fopLabel: 'ФОП А',
+      isPaid: true,
+      comment: 'довгий коментар '.repeat(100),
+      payouts: Array.from({ length: 40 }, (_, i) => payout(i)),
+    });
+    expect(accepted.payouts.map((p) => p.iban).join('').length).toBeGreaterThan(1000);
+
+    for (const html of [
+      groupCard(accepted, null, 'Іван').html,
+      managerCard(accepted, { completed: { orderNumbers: ['0000-1', '0000-2'] } }).html,
+    ]) {
+      expect(html.length).toBeLessThan(4096);
+      expect(html).toContain('…');
+      expect(html).toContain('Отримувач 0');
+      expect(html).toContain('💰 Оплачено');
+    }
+  });
+
+  it('does not mark a cut when all payouts fit', () => {
+    const html = groupCard(
+      view({ status: 'accepted', payouts: [payout(1), payout(2)] }),
+      null,
+    ).html;
+    expect(html).not.toContain('…');
+    expect(html).toContain('Отримувач 2');
+  });
+
+  it('cuts a long comment', () => {
+    const html = groupCard(view({ comment: 'ы'.repeat(1000) }), fops()).html;
+    expect(html.length).toBeLessThan(1000);
+    expect(html).toContain('ы…');
+  });
+});
+
 describe('warnings', () => {
   const warned = (): FinanceRequestView =>
     view({
