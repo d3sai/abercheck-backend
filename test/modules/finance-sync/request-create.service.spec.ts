@@ -88,7 +88,7 @@ describe('RequestCreateService', () => {
   afterEach(() => jest.resetAllMocks());
 
   describe('create', () => {
-    it('should give the manager card the «Змінити» Mini App button when the URL is set', async () => {
+    it('should give the pending manager card only the cancel button even when the URL is set', async () => {
       sender.miniAppUrl = 'https://cab.example.ua/tg/request';
 
       await service.create(manager, input);
@@ -97,10 +97,7 @@ describe('RequestCreateService', () => {
         text: string;
         web_app?: unknown;
       }[][];
-      expect(buttons[0]![0]).toEqual({
-        text: '✏️ Змінити',
-        web_app: { url: 'https://cab.example.ua/tg/request?mode=edit&id=req1' },
-      });
+      expect(buttons).toEqual([[{ text: '✖ Скасувати запит', callback_data: 'fc:req1' }]]);
       expect(JSON.stringify(sender.editMessage.mock.calls[0] as unknown[])).not.toContain(
         'web_app',
       );

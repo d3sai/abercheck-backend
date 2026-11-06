@@ -258,13 +258,11 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
         : [];
     return { html: lines.join('\n'), buttons: [[...paid, attachButton(view.id)]] };
   }
+  // no editing: a manager accepts or cancels; a change is a new request
   if (view.status === 'pending') {
-    const cancel = button('✖ Скасувати запит', `fc:${view.id}`);
     return {
       html: body(view).join('\n'),
-      buttons: [
-        miniAppUrl ? [webApp('✏️ Змінити', miniAppUrl, 'edit', view.id), cancel] : [cancel],
-      ],
+      buttons: [[button('✖ Скасувати запит', `fc:${view.id}`)]],
     };
   }
   if (view.status !== 'accepted') return { html: body(view).join('\n') };
@@ -278,10 +276,12 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
     ATTACH_HINT,
   ].join('\n');
   const row = [
-    ...(ready ? [button('✅ Прийняти', `mo:${view.id}`)] : []),
-    ...(miniAppUrl
-      ? [webApp(ready ? '✏️ Змінити' : '📎 Додати дату', miniAppUrl, 'complete', view.id)]
-      : []),
+    ...(ready
+      ? [button('✅ Прийняти', `mo:${view.id}`)]
+      : miniAppUrl
+        ? [webApp('📎 Додати дату', miniAppUrl, 'complete', view.id)]
+        : []),
+    button('✖ Скасувати', `fc:${view.id}`),
   ];
   return { html, buttons: [...(row.length > 0 ? [row] : []), [attachButton(view.id)]] };
 }

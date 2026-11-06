@@ -142,13 +142,14 @@ describe('RequestSyncService', () => {
     type Edit = [bigint, number, string, { text: string }[][] | undefined];
     const edit = (index = 0) => sender.editMessage.mock.calls[index] as Edit;
 
-    it('should add the Mini App buttons to a pending card when the URL is set', async () => {
+    it('should give a pending card only the cancel button even when the URL is set', async () => {
       sender.miniAppUrl = URL_;
 
       await service.renderManager(card, view());
 
       const buttons = edit()[3]!;
-      expect(buttons[0]!.map((b) => b.text)).toEqual(['✏️ Змінити', '✖ Скасувати запит']);
+      expect(buttons[0]!.map((b) => b.text)).toEqual(['✖ Скасувати запит']);
+      expect(buttons).toHaveLength(1);
       expect(orders.numbersByIds).not.toHaveBeenCalled();
     });
 
@@ -166,7 +167,7 @@ describe('RequestSyncService', () => {
       const [, , html, buttons] = edit();
       expect(buttons!.flat().map((b) => b.text)).toEqual([
         '✅ Прийняти',
-        '✏️ Змінити',
+        '✖ Скасувати',
         '📎 Прикріпити файли',
       ]);
       expect(html).toContain('• Іван · 700 грн · 04.11.2026 10:15');
@@ -315,13 +316,19 @@ describe('RequestSyncService', () => {
         31,
         expect.stringContaining('Прийняв'),
         [
-          [{ text: '✅ Прийняти', callback_data: 'mo:req1' }],
+          [
+            { text: '✅ Прийняти', callback_data: 'mo:req1' },
+            { text: '✖ Скасувати', callback_data: 'fc:req1' },
+          ],
           [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
         ],
       );
       // the card then moves down: one new message instead of a notice
       expect(sender.send).toHaveBeenCalledWith(555n, expect.stringContaining('Прийняв'), [
-        [{ text: '✅ Прийняти', callback_data: 'mo:req1' }],
+        [
+          { text: '✅ Прийняти', callback_data: 'mo:req1' },
+          { text: '✖ Скасувати', callback_data: 'fc:req1' },
+        ],
         [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
       ]);
       expect(sender.deleteMessage).toHaveBeenCalledWith(555n, 31);

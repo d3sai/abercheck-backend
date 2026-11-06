@@ -290,7 +290,11 @@ describe('managerCard', () => {
 
   it('accepted: «Прийняти» without the Mini App, responder and fop', () => {
     const reply = managerCard(view({ status: 'accepted', responderName: 'Фін', fopLabel: 'А' }));
-    expect(flat(reply)).toEqual([{ text: '✅ Прийняти', callback_data: `mo:${ID}` }, ATTACH]);
+    expect(flat(reply)).toEqual([
+      { text: '✅ Прийняти', callback_data: `mo:${ID}` },
+      { text: '✖ Скасувати', callback_data: `fc:${ID}` },
+      ATTACH,
+    ]);
     expect(reply.html).toContain('✅ Прийняв(ла): Фін · ФОП: А');
   });
 });
@@ -300,36 +304,34 @@ describe('managerCard with the Mini App', () => {
   const accepted = () => view({ status: 'accepted', responderName: 'Фін', fopLabel: 'А' });
   const all = (reply: { buttons?: unknown[][] }) => rows(reply);
 
-  it('pending: «Змінити» opens the edit form next to «Скасувати запит»', () => {
+  it('pending: only «Скасувати запит», no editing', () => {
     const reply = managerCard(view(), { miniAppUrl });
 
-    expect(all(reply)).toEqual([
-      [
-        { text: '✏️ Змінити', web_app: { url: `${miniAppUrl}?mode=edit&id=${ID}` } },
-        { text: '✖ Скасувати запит', callback_data: `fc:${ID}` },
-      ],
-    ]);
+    expect(all(reply)).toEqual([[{ text: '✖ Скасувати запит', callback_data: `fc:${ID}` }]]);
   });
 
-  it('accepted and not completed: «Прийняти» next to «Змінити», which opens the completion form', () => {
+  it('accepted and not completed: «Прийняти» next to «Скасувати»', () => {
     const reply = managerCard(accepted(), { miniAppUrl, completed: false });
 
     expect(all(reply)).toEqual([
       [
         { text: '✅ Прийняти', callback_data: `mo:${ID}` },
-        { text: '✏️ Змінити', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } },
+        { text: '✖ Скасувати', callback_data: `fc:${ID}` },
       ],
       [ATTACH],
     ]);
   });
 
   it('encodes the request id and keeps the query already on the URL', () => {
-    const reply = managerCard(view({ id: 'a b&c' }), { miniAppUrl: `${miniAppUrl}?lang=uk` });
+    const reply = managerCard(view({ id: 'a b&c', status: 'accepted', kind: 'card' }), {
+      miniAppUrl: `${miniAppUrl}?lang=uk`,
+      payments: [],
+    });
 
     const url = (flat(reply)[0] as unknown as { web_app: { url: string } }).web_app.url;
     expect(new URL(url).searchParams.get('id')).toBe('a b&c');
     expect(new URL(url).searchParams.get('lang')).toBe('uk');
-    expect(new URL(url).searchParams.get('mode')).toBe('edit');
+    expect(new URL(url).searchParams.get('mode')).toBe('complete');
   });
 
   it('completed: the «Оформлено» line and no button for a kind that closes with the completion', () => {
@@ -403,12 +405,13 @@ describe('managerCard with the Mini App', () => {
     expect(managerCard(view({ status: 'cancelled' }), { miniAppUrl }).buttons ?? []).toEqual([]);
   });
 
-  it('without the URL: the cancel button only, and «Прийняти» without «Змінити»', () => {
+  it('without the URL: «Скасувати запит» only, and «Прийняти» next to «Скасувати»', () => {
     expect(flat(managerCard(view(), {}))).toEqual([
       { text: '✖ Скасувати запит', callback_data: `fc:${ID}` },
     ]);
     expect(flat(managerCard(accepted(), { completed: false }))).toEqual([
       { text: '✅ Прийняти', callback_data: `mo:${ID}` },
+      { text: '✖ Скасувати', callback_data: `fc:${ID}` },
       ATTACH,
     ]);
   });
@@ -474,17 +477,20 @@ describe('managerCard with the Mini App', () => {
       expect(reply.html).toContain('Платіж: клієнт ще не оплатив');
       expect(flat(reply).map((b) => b.text)).toEqual([
         '✅ Прийняти',
-        '✏️ Змінити',
+        '✖ Скасувати',
         '📎 Прикріпити файли',
       ]);
     });
 
-    it('offers only «Додати дату» for a card without stored payments', () => {
+    it('offers «Додати дату» instead of «Прийняти» for a card without stored payments', () => {
       const reply = managerCard(card(), { miniAppUrl, payments: [] });
 
       expect(reply.html).not.toContain('Платіж');
       expect(all(reply)).toEqual([
-        [{ text: '📎 Додати дату', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } }],
+        [
+          { text: '📎 Додати дату', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } },
+          { text: '✖ Скасувати', callback_data: `fc:${ID}` },
+        ],
         [ATTACH],
       ]);
     });
@@ -527,7 +533,7 @@ describe('callback data', () => {
       ...flat(managerCard(view())),
       ...flat(managerCard(accepted)),
     ].map((b) => b.callback_data);
-    expect(all).toHaveLength(6);
+    expect(all).toHaveLength(7);
     for (const data of all) {
       expect(Buffer.byteLength(data, 'utf8')).toBeLessThanOrEqual(64);
     }
