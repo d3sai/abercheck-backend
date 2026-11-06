@@ -40,7 +40,7 @@ export class ManagerActionsService {
     }
     await ctx.answerCbQuery();
     const prompt = await ctx.reply(
-      `📎 Запит #${card.number}: надішліть фото або файли відповіддю на це повідомлення. Можна кілька.`,
+      `📎 Запит #${card.number}: надішліть фото або файл відповіддю на це повідомлення.`,
       {
         reply_markup: { force_reply: true, input_field_placeholder: 'Фото або файл квитанції' },
       },

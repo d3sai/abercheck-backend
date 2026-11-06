@@ -25,6 +25,8 @@ export const FinanceAction = {
 } as const;
 
 const attachButton = (id: string) => button('📎 Прикріпити файли', `ma:${id}`);
+const ATTACH_HINT =
+  '📎 Квитанція: натисніть «Прикріпити файли» або надішліть фото чи файл відповіддю на цю картку.';
 
 const KIND_LABEL: Record<RequestKind, string> = {
   our_fop: 'Наш ФОП',
@@ -242,6 +244,7 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   const { miniAppUrl, completed, payments = [] } = opts;
   if (completed) {
     const lines = [...body(view), '', completedLine(completed.orderNumbers)];
+    lines.push(ATTACH_HINT);
     const paysLater = paysAfterConfirm(view.kind);
     if (paysLater && completed.closed) {
       lines.push(
@@ -268,7 +271,11 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   // accepted: the ready text. A request without stored payments (older cards) cannot be accepted
   // as it stands, except our_fop and foreign_fop, whose client has not paid yet.
   const ready = paysAfterConfirm(view.kind) || payments.length > 0;
-  const html = body(view, { extra: paymentLines(view.kind, payments), allRates: true }).join('\n');
+  const html = [
+    ...body(view, { extra: paymentLines(view.kind, payments), allRates: true }),
+    '',
+    ATTACH_HINT,
+  ].join('\n');
   const row = [
     ...(ready ? [button('✅ Прийняти', `mo:${view.id}`)] : []),
     ...(miniAppUrl

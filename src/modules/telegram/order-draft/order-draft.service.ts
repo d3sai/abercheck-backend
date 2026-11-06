@@ -91,6 +91,12 @@ export class OrderDraftService implements OnApplicationShutdown {
   }
 
   async addFile(manager: Manager, file: TelegramFileRef, caption?: string): Promise<BotReply> {
+    // outside a text mode a file is a receipt sent past the card: say how it reaches the request
+    if (!this.modes.some((mode) => mode.isArmed(manager.telegramId))) {
+      return {
+        html: 'Щоб додати файл до запиту, надішліть його відповіддю на картку запиту або натисніть під нею «📎 Прикріпити файли».',
+      };
+    }
     if (!ALLOWED_MIME_TYPES.has(file.mimeType)) {
       return { html: '⚠️ Такий тип файлу не підтримується. Додайте фото, PDF або зображення.' };
     }
