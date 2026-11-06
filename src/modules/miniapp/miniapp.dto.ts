@@ -111,6 +111,39 @@ export class EditMiniappRequestDto {
   @IsString()
   @MaxLength(32)
   sum?: string;
+
+  /** Order kinds: the whole list replaces the current one. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_ORDERS)
+  @ValidateNested({ each: true })
+  @Type(() => MiniappOrderDto)
+  orders?: MiniappOrderDto[];
+
+  /** Minus */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  clientLabel?: string;
+
+  /** Minus; null clears it. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  sheetUrl?: string | null;
+
+  /** Minus; null clears it. */
+  @IsOptional()
+  @IsBoolean()
+  withPercent?: boolean | null;
+
+  /** Card and minus: replaces what the client paid. Kept here, not sent to finance. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_PAYMENTS)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentRowDto)
+  payments?: PaymentRowDto[];
 }
 
 export class PaymentRowDto {
@@ -222,6 +255,27 @@ const text = (value: string | undefined | null): string | null => {
   return trimmed === undefined || trimmed === '' ? null : trimmed;
 };
 
+/** 1..20 orders, normalised numbers, no duplicates, a rate on every row. */
+function toOrders(
+  rows: MiniappOrderDto[],
+): { orderNumber: string; amount: string; exchangeRate: string }[] {
+  if (rows.length < 1 || rows.length > MAX_ORDERS) {
+    throw invalid(`Додайте від 1 до ${MAX_ORDERS} замовлень.`);
+  }
+  const seen = new Set<string>();
+  return rows.map((row) => {
+    const number = parseOrderNumber(row.orderNumber);
+    if (!number.ok) throw invalid(number.error);
+    if (seen.has(number.value)) throw invalid(`Номер ${number.value} повторюється.`);
+    seen.add(number.value);
+    return {
+      orderNumber: number.value,
+      amount: money(row.amount),
+      exchangeRate: requiredRate(row.exchangeRate, number.value),
+    };
+  });
+}
+
 export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): CreateRequestInput {
   const common = {
     kind: dto.kind,
@@ -231,22 +285,7 @@ export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): C
   };
 
   if (ORDER_KINDS.includes(dto.kind)) {
-    const rows = dto.orders ?? [];
-    if (rows.length < 1 || rows.length > MAX_ORDERS) {
-      throw invalid(`Додайте від 1 до ${MAX_ORDERS} замовлень.`);
-    }
-    const seen = new Set<string>();
-    const orders = rows.map((row) => {
-      const number = parseOrderNumber(row.orderNumber);
-      if (!number.ok) throw invalid(number.error);
-      if (seen.has(number.value)) throw invalid(`Номер ${number.value} повторюється.`);
-      seen.add(number.value);
-      return {
-        orderNumber: number.value,
-        amount: money(row.amount),
-        exchangeRate: requiredRate(row.exchangeRate, number.value),
-      };
-    });
+    const orders = toOrders(dto.orders ?? []);
     if (paysAfterConfirm(dto.kind)) {
       if ((dto.payments ?? []).length > 0) {
         throw invalid('Для «Наш ФОП» і «Чужий ФОП» платіж ще не вказують: клієнт не оплатив.');
@@ -284,7 +323,37 @@ export function toEditBody(
     ...(dto.sum != null && { sum: Number(money(dto.sum)) }),
     ...(dto.comment != null && { comment: text(dto.comment) }),
     ...(dto.officialDocs != null && { officialDocs: dto.officialDocs }),
+    ...(dto.orders != null && { orders: toOrders(dto.orders).map(numeric) }),
+    ...(dto.clientLabel != null && {
+      clientLabel: requiredText(dto.clientLabel, 'Вкажіть клієнта.'),
+    }),
+    ...(dto.sheetUrl !== undefined && { sheetUrl: text(dto.sheetUrl) }),
+    ...(dto.withPercent !== undefined && { withPercent: dto.withPercent }),
   };
+}
+
+const numeric = (order: { orderNumber: string; amount: string; exchangeRate: string }) => ({
+  orderNumber: order.orderNumber,
+  amount: Number(order.amount),
+  exchangeRate: Number(order.exchangeRate),
+});
+
+/** Payments of a pending card or minus request, ready for the card's JSON; minus must equal its (new) sum. */
+export function toEditPayments(
+  kind: RequestKind | null,
+  currentSum: string,
+  dto: EditMiniappRequestDto,
+  now = new Date(),
+): StoredPayment[] {
+  if (kind !== 'card' && kind !== 'minus') {
+    throw invalid('Платежі можна змінити лише в запиті «Картка» або «Мінус».');
+  }
+  const payments = toPayments(kind, dto.payments ?? [], now);
+  const sum = dto.sum != null ? money(dto.sum) : currentSum;
+  if (kind === 'minus' && !new Prisma.Decimal(payments[0]!.amount).equals(sum)) {
+    throw invalid('Сума платежу має дорівнювати сумі мінусу.');
+  }
+  return storable(payments);
 }
 
 export interface Payment {

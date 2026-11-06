@@ -16,6 +16,17 @@ export function financeError(error: unknown): unknown {
     );
   }
   if (error.status === 404) return notFound();
+  if (error.status === 409 && error.code === 'order-taken') {
+    const number = error.details?.orderNumber;
+    return new ApiError(
+      HttpStatus.CONFLICT,
+      'order-taken',
+      `Номер ${typeof number === 'string' ? number : ''} уже використовується в іншому запиті`.replace(
+        '  ',
+        ' ',
+      ),
+    );
+  }
   if (error.status === 409) {
     return new ApiError(
       HttpStatus.CONFLICT,

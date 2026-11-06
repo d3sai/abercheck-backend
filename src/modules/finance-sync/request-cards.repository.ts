@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { FinanceRequestCard, FinanceRequestFile, Prisma } from '../../generated/prisma/client';
 import { isUniqueViolation } from '../../common/prisma/prisma-errors';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type { StoredPayment } from './stored-payments';
 import type { TelegramFileRef } from '../attachments/attachments.service';
 
 export type NewRequestCard = Prisma.FinanceRequestCardUncheckedCreateInput;
@@ -43,6 +44,13 @@ export class RequestCardsRepository {
     managerMessageId: number,
   ): Promise<FinanceRequestCard | null> {
     return this.prisma.financeRequestCard.findFirst({ where: { managerChatId, managerMessageId } });
+  }
+
+  setPayments(requestId: string, payments: StoredPayment[]): Promise<FinanceRequestCard> {
+    return this.prisma.financeRequestCard.update({
+      where: { requestId },
+      data: { payments: payments as unknown as Prisma.InputJsonValue },
+    });
   }
 
   setManagerMessage(requestId: string, managerMessageId: number): Promise<FinanceRequestCard> {
