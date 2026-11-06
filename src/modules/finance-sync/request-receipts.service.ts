@@ -120,7 +120,13 @@ export class RequestReceiptsService {
   }
 
   /** At completion: put the receipts sent earlier on the order. The rows go only after they are attached. */
-  async attachHeld(manager: Manager, requestId: string, order: Order): Promise<void> {
+  /** `caption`: the order notice, so the files and the notice are one message in «Оплати». */
+  async attachHeld(
+    manager: Manager,
+    requestId: string,
+    order: Order,
+    caption?: string,
+  ): Promise<void> {
     const held = await this.cards.heldFiles(requestId);
     if (held.length === 0) return;
     await this.attach(
@@ -133,17 +139,24 @@ export class RequestReceiptsService {
         size,
         kind: kind as TelegramFileRef['kind'],
       })),
+      caption,
     );
     await this.cards.deleteHeldFiles(held.map(({ id }) => id));
   }
 
   // group orders attach their files the same way: kept in the storage chat even if the order is deleted
-  private attach(manager: Manager, order: Order, files: TelegramFileRef[]): Promise<unknown> {
+  private attach(
+    manager: Manager,
+    order: Order,
+    files: TelegramFileRef[],
+    caption?: string,
+  ): Promise<unknown> {
     return this.attachments.saveFromTelegram(
       order,
       files,
       { telegramId: manager.telegramId, name: manager.name },
       true,
+      caption,
     );
   }
 }

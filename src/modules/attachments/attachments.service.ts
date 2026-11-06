@@ -4,6 +4,7 @@ import { InjectBot } from 'nestjs-telegraf';
 import { Telegraf } from 'telegraf';
 import type { Convenience, Message } from 'telegraf/types';
 import type { EnvironmentVariables } from '../../common/config/env.validation';
+import { optionalPositiveInt } from '../../common/config/optional-config';
 import type { Order, OrderAttachment } from '../../generated/prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Initiator } from '../refunds/refund.events';
@@ -39,6 +40,8 @@ function caption(order: CaptionOrder, uploader: Initiator): string {
 export class AttachmentsService {
   private readonly logger = new Logger(AttachmentsService.name);
   private readonly storageChatId: number;
+  // files live in the «Оплати» topic next to the order notices, not in the group's general topic
+  private readonly storageThreadId: number | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -46,6 +49,7 @@ export class AttachmentsService {
     config: ConfigService<EnvironmentVariables, true>,
   ) {
     this.storageChatId = config.get('TELEGRAM_ADMIN_CHAT_ID', { infer: true });
+    this.storageThreadId = optionalPositiveInt(config, 'TELEGRAM_TOPIC_PAYMENTS_ID');
   }
 
   async save(
@@ -66,7 +70,11 @@ export class AttachmentsService {
             this.bot.telegram.sendDocument(
               this.storageChatId,
               { source: file.buffer, filename: file.originalname },
-              { caption: caption(order, uploader), parse_mode: 'HTML' },
+              {
+                caption: caption(order, uploader),
+                parse_mode: 'HTML',
+                message_thread_id: this.storageThreadId,
+              },
             ),
         ),
       ),
@@ -122,10 +130,12 @@ export class AttachmentsService {
             ? this.bot.telegram.sendPhoto(this.storageChatId, file.fileId, {
                 caption: captionText,
                 parse_mode: 'HTML',
+                message_thread_id: this.storageThreadId,
               })
             : this.bot.telegram.sendDocument(this.storageChatId, file.fileId, {
                 caption: captionText,
                 parse_mode: 'HTML',
+                message_thread_id: this.storageThreadId,
               }),
         ),
       ];
@@ -140,7 +150,9 @@ export class AttachmentsService {
     })) as unknown as Convenience.MediaGroup;
     let sent: SentMedia[];
     try {
-      sent = (await this.bot.telegram.sendMediaGroup(this.storageChatId, media)) as SentMedia[];
+      sent = (await this.bot.telegram.sendMediaGroup(this.storageChatId, media, {
+        message_thread_id: this.storageThreadId,
+      })) as SentMedia[];
     } catch (error) {
       this.logger.error(`Failed to store attachments for order #${order.id} in Telegram`, error);
       throw new AttachmentStorageError(error);

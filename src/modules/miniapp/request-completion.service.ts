@@ -1,3 +1,4 @@
+import { TELEGRAM_CAPTION_LIMIT } from '../attachments/attachments.constants';
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ApiError } from '../../common/api-error';
 import {
@@ -311,13 +312,35 @@ export class RequestCompletionService {
         made.orders.map((order) => order.id),
       ),
     );
-    await this.safely(requestId, 'admin notice', async () => {
-      if (made.notice) await this.sender.sendToAdmins(made.notice);
-    });
+    // with receipts held, the notice is their caption: one message in «Оплати» instead of two
+    const merged =
+      made.notice !== null &&
+      made.notice !== undefined &&
+      made.notice.length <= TELEGRAM_CAPTION_LIMIT &&
+      made.orders[0] !== undefined &&
+      (await this.cards.heldFiles(requestId)).length > 0;
+    if (!merged) {
+      await this.safely(requestId, 'admin notice', async () => {
+        if (made.notice) await this.sender.sendToAdmins(made.notice);
+      });
+    }
     // a receipt held before this point is found here; one sent after the ids is attached at once
     const receiptsAttached = await this.safely(requestId, 'held receipts', async () => {
-      if (made.orders[0]) await this.receipts.attachHeld(manager, requestId, made.orders[0]);
+      if (made.orders[0]) {
+        await this.receipts.attachHeld(
+          manager,
+          requestId,
+          made.orders[0],
+          merged ? (made.notice ?? undefined) : undefined,
+        );
+      }
     });
+    // the files did not go: the notice must not get lost with them
+    if (merged && !receiptsAttached) {
+      await this.safely(requestId, 'admin notice', async () => {
+        if (made.notice) await this.sender.sendToAdmins(made.notice);
+      });
+    }
     if (!receiptsAttached) note = [note, RECEIPTS_NOTE].filter(Boolean).join(' ');
     await this.safely(requestId, 'manager card', () =>
       this.markCompleted(card, requested, orderNumbers),
