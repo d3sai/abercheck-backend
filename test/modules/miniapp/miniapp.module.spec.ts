@@ -20,6 +20,7 @@ import { CashDraftService } from '../../../src/modules/telegram/order-draft/cash
 import { ForeignDraftService } from '../../../src/modules/telegram/order-draft/foreign-draft.service';
 import { KitDraftService } from '../../../src/modules/telegram/order-draft/kit-draft.service';
 import { TelegramSender } from '../../../src/modules/telegram/core/telegram-sender';
+import { OrderDraftService } from '../../../src/modules/telegram/order-draft/order-draft.service';
 import { TelegramModule } from '../../../src/modules/telegram/telegram.module';
 
 @Global()
@@ -41,11 +42,18 @@ class ManagersStub {}
 @Module({
   providers: [
     { provide: TelegramSender, useValue: { financeEnabled: true } },
+    { provide: OrderDraftService, useValue: { isArmed: () => false } },
     { provide: KitDraftService, useValue: {} },
     { provide: CashDraftService, useValue: {} },
     { provide: ForeignDraftService, useValue: {} },
   ],
-  exports: [TelegramSender, KitDraftService, CashDraftService, ForeignDraftService],
+  exports: [
+    TelegramSender,
+    KitDraftService,
+    CashDraftService,
+    ForeignDraftService,
+    OrderDraftService,
+  ],
 })
 class TelegramStub {}
 
