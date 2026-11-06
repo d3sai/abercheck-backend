@@ -1,6 +1,11 @@
 import { HttpStatus, Logger } from '@nestjs/common';
 import { ApiError } from '../../../src/common/api-error';
-import type { FinanceRequestCard, Manager } from '../../../src/generated/prisma/client';
+import {
+  Currency,
+  type FinanceRequestCard,
+  type Manager,
+  Prisma,
+} from '../../../src/generated/prisma/client';
 import type { FinanceClient } from '../../../src/modules/finance-sync/finance.client';
 import { FinanceApiError } from '../../../src/modules/finance-sync/finance.types';
 import type {
@@ -9,10 +14,14 @@ import type {
 } from '../../../src/modules/finance-sync/finance.types';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import type { RequestCreateService } from '../../../src/modules/finance-sync/request-create.service';
+import type { KitPlan } from '../../../src/modules/telegram/order-draft/kit.parser';
+import type { DirectOrdersService } from '../../../src/modules/miniapp/direct-orders.service';
 import type { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
 import type { RequestSyncService } from '../../../src/modules/finance-sync/request-sync.service';
 import { MiniappController } from '../../../src/modules/miniapp/miniapp.controller';
 import type {
+  CreateMiniappOrderDto,
+  OrderPlan,
   CreateMiniappRequestDto,
   EditMiniappRequestDto,
 } from '../../../src/modules/miniapp/miniapp.dto';
@@ -40,12 +49,14 @@ describe('MiniappController', () => {
   const cards = { byRequestId: jest.fn() };
   const sync = { renderManager: jest.fn(), renderGroup: jest.fn() };
   const completion = { complete: jest.fn() };
+  const directOrders = { create: jest.fn() };
   const controller = new MiniappController(
     requests as unknown as RequestCreateService,
     finance as unknown as FinanceClient,
     cards as unknown as RequestCardsRepository,
     sync as unknown as RequestSyncService,
     completion as unknown as RequestCompletionService,
+    directOrders as unknown as DirectOrdersService,
   );
 
   beforeEach(() => {
@@ -270,6 +281,230 @@ describe('MiniappController', () => {
         status: 422,
         code: 'finance-refused',
         message: `Фінанси відхилили запит (${code}).`,
+      });
+    });
+  });
+
+  describe('createOrders', () => {
+    const answer = { orderNumbers: ['0000-070217'], skipped: [] };
+    const when = { date: '2026-01-15', time: '14:30' };
+    const paidAt = new Date('2026-01-15T12:30:00.000Z');
+    const send = (dto: Partial<CreateMiniappOrderDto>) =>
+      controller.createOrders(manager, dto as CreateMiniappOrderDto);
+
+    const planPassed = () => directOrders.create.mock.calls[0] as [Manager, OrderPlan];
+
+    beforeEach(() => directOrders.create.mockResolvedValue(answer));
+
+    describe('kit', () => {
+      const kit = {
+        kind: 'kit' as const,
+        accessCode: ' 647143353 ',
+        items: [
+          { orderNumber: ' 0000-062265 ', amount: '2696.71' },
+          { orderNumber: '0000-062937', amount: '480' },
+        ],
+        ...when,
+      };
+
+      it('should pass a plan with the total of the items and the Kyiv time', async () => {
+        await expect(send({ ...kit, comment: ' до обіду ' })).resolves.toBe(answer);
+
+        const [passedManager, order] = planPassed();
+        expect(passedManager).toBe(manager);
+        expect(order.kind).toBe('kit');
+        expect(order.plan).toMatchObject({
+          accessCode: '647143353',
+          items: [
+            { number: '0000-062265', amount: new Prisma.Decimal('2696.71') },
+            { number: '0000-062937', amount: new Prisma.Decimal('480') },
+          ],
+          paidAt,
+          comment: 'до обіду',
+          warnings: [],
+        });
+        expect((order.plan as KitPlan).total.toFixed(2)).toBe('3176.71');
+      });
+
+      it.each([
+        ['no code', { accessCode: ' ' }, 'Вкажіть код доступу.'],
+        ['no items', { items: [] }, 'Додайте від 1 до 20 замовлень.'],
+        [
+          'twenty-one items',
+          {
+            items: Array.from({ length: 21 }, (_, i) => ({
+              orderNumber: `0000-0${60000 + i}`,
+              amount: '1',
+            })),
+          },
+          'Додайте від 1 до 20 замовлень.',
+        ],
+        [
+          'a repeated number',
+          {
+            items: [
+              { orderNumber: '0000-062265', amount: '1' },
+              { orderNumber: ' 0000-062265 ', amount: '2' },
+            ],
+          },
+          'Номер 0000-062265 повторюється.',
+        ],
+        [
+          'a short number',
+          { items: [{ orderNumber: '000-062265', amount: '1' }] },
+          'Бракує цифри. Може, 0000-062265?',
+        ],
+        [
+          'a bad amount',
+          { items: [{ orderNumber: '0000-062265', amount: '1,5' }] },
+          'Вкажіть суму числом, до копійок: 6158.41',
+        ],
+        ['no time', { time: undefined }, 'Вкажіть дату й час оплати.'],
+      ])('should refuse %s with a 400', async (_name, patch, message) => {
+        expect(await failure(send({ ...kit, ...patch }))).toMatchObject({
+          status: 400,
+          code: 'invalid-request',
+          message,
+        });
+        expect(directOrders.create).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('cash', () => {
+      const cash = {
+        kind: 'cash' as const,
+        orderNumber: '0000-066498',
+        amount: '4260',
+        currency: Currency.UAH,
+        rate: '44,9',
+        handedBy: ' Христина Павлів ',
+        ...when,
+      };
+
+      it('should pass a plan with a normalised rate and no percent by default', async () => {
+        await send(cash);
+
+        expect(planPassed()[1]).toEqual({
+          kind: 'cash',
+          plan: {
+            number: '0000-066498',
+            amount: new Prisma.Decimal('4260'),
+            currency: 'UAH',
+            rate: '44.9',
+            paidAt,
+            handedBy: 'Христина Павлів',
+            withPercent: null,
+            comment: null,
+            warnings: [],
+          },
+        });
+      });
+
+      it('should pass withPercent, a dollar amount and the comment', async () => {
+        await send({
+          ...cash,
+          currency: Currency.USD,
+          withPercent: false,
+          comment: 'у конверті',
+        });
+
+        expect(planPassed()[1].plan).toMatchObject({
+          currency: 'USD',
+          withPercent: false,
+          comment: 'у конверті',
+        });
+      });
+
+      it.each([
+        ['no rate', { rate: undefined }, 'Вкажіть курс числом до 1000: 44.9'],
+        ['a rate over 1000', { rate: '1000.5' }, 'Вкажіть курс числом до 1000: 44.9'],
+        ['a rate that is not a number', { rate: 'abc' }, 'Вкажіть курс числом до 1000: 44.9'],
+        ['no handedBy', { handedBy: ' ' }, 'Вкажіть, ким передано.'],
+        ['euros', { currency: Currency.EUR }, 'Оберіть валюту: UAH, USD.'],
+        ['no currency', { currency: undefined }, 'Оберіть валюту: UAH, USD.'],
+        ['no time', { time: undefined }, 'Вкажіть дату й час оплати.'],
+        ['a zero amount', { amount: '0' }, 'Вкажіть суму числом, до копійок: 6158.41'],
+        ['a day the calendar lacks', { date: '2026-02-30' }, 'Такої дати немає: 2026-02-30.'],
+        [
+          'a date in the wrong shape',
+          { date: '15.01.2026' },
+          'Вкажіть дату як 2026-11-04, час як 14:30.',
+        ],
+      ])('should refuse %s with a 400', async (_name, patch, message) => {
+        expect(await failure(send({ ...cash, ...patch }))).toMatchObject({
+          status: 400,
+          code: 'invalid-request',
+          message,
+        });
+        expect(directOrders.create).not.toHaveBeenCalled();
+      });
+
+      it('should refuse a date in the future', async () => {
+        expect(await failure(send({ ...cash, date: '2999-01-01' }))).toMatchObject({
+          status: 400,
+          code: 'invalid-request',
+          message: 'Дата й час оплати не можуть бути в майбутньому.',
+        });
+      });
+    });
+
+    describe('foreign', () => {
+      const foreign = {
+        kind: 'foreign' as const,
+        orderNumber: '0000-066498',
+        amount: '100',
+        currency: Currency.EUR,
+        recipient: ' Абертайм ТОВ ',
+        rate: '44.9',
+        date: '2026-01-15',
+      };
+
+      it('should pass a plan; without a time the day starts at Kyiv midnight', async () => {
+        await send({ ...foreign, comment: ' за товар ' });
+
+        expect(planPassed()[1]).toEqual({
+          kind: 'foreign',
+          plan: {
+            number: '0000-066498',
+            amount: new Prisma.Decimal('100'),
+            currency: 'EUR',
+            recipient: 'Абертайм ТОВ',
+            rate: '44.9',
+            paidAt: new Date('2026-01-14T22:00:00.000Z'),
+            comment: 'за товар',
+            warnings: [],
+          },
+        });
+      });
+
+      it('should use the time when it is given', async () => {
+        await send({ ...foreign, time: '09:05' });
+
+        expect(planPassed()[1].plan.paidAt).toEqual(new Date('2026-01-15T07:05:00.000Z'));
+      });
+
+      it.each([
+        ['no recipient', { recipient: '' }, 'Вкажіть, на кого оплата.'],
+        ['no rate', { rate: ' ' }, 'Вкажіть курс числом до 1000: 44.9'],
+        ['a bad time', { time: '25:00' }, 'Вкажіть дату як 2026-11-04, час як 14:30.'],
+        ['no currency', { currency: undefined }, 'Оберіть валюту: UAH, USD, EUR.'],
+        ['a bad number', { orderNumber: '66498' }, 'Номер має бути у форматі 0000-066717.'],
+      ])('should refuse %s with a 400', async (_name, patch, message) => {
+        expect(await failure(send({ ...foreign, ...patch }))).toMatchObject({
+          status: 400,
+          code: 'invalid-request',
+          message,
+        });
+        expect(directOrders.create).not.toHaveBeenCalled();
+      });
+
+      it('should refuse a time in the future today', async () => {
+        const tomorrow = new Date(Date.now() + 36 * 3_600_000).toISOString().slice(0, 10);
+
+        expect(await failure(send({ ...foreign, date: tomorrow, time: '23:59' }))).toMatchObject({
+          status: 400,
+          message: 'Дата й час оплати не можуть бути в майбутньому.',
+        });
       });
     });
   });

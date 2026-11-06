@@ -1,7 +1,7 @@
 import type { Context } from 'telegraf';
-import type { ForceReply, InlineKeyboardMarkup, ReplyKeyboardMarkup } from 'telegraf/types';
+import type { ForceReply, InlineKeyboardMarkup, ReplyKeyboardRemove } from 'telegraf/types';
 import type { BotReply } from './bot-reply';
-import { mainMenuKeyboard } from './menu';
+import { removeKeyboard } from './menu';
 
 export type CommandContext = Context & { payload?: string };
 export type MatchContext = Context & { match: RegExpExecArray };
@@ -14,13 +14,13 @@ export const fullName = (ctx: Context) =>
 function markup({
   buttons,
   forceReply,
-  menu,
-}: BotReply): InlineKeyboardMarkup | ReplyKeyboardMarkup | ForceReply | undefined {
+  removeKeyboard: clear,
+}: BotReply): InlineKeyboardMarkup | ReplyKeyboardRemove | ForceReply | undefined {
   if (forceReply) {
     return { force_reply: true, selective: true, input_field_placeholder: forceReply.placeholder };
   }
-  if (menu) {
-    return mainMenuKeyboard;
+  if (clear) {
+    return removeKeyboard;
   }
   return buttons ? { inline_keyboard: buttons } : undefined;
 }

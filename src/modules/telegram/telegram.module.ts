@@ -86,6 +86,6 @@ import { TelegramSender } from './core/telegram-sender';
     AdminFlowService,
     DailyReportJob,
   ],
-  exports: [TelegramSender],
+  exports: [TelegramSender, KitDraftService, CashDraftService, ForeignDraftService],
 })
 export class TelegramModule {}

@@ -21,6 +21,8 @@ export interface CashPlan {
   handedBy: string | null;
   /** «З відсотком» / «Без відсотка»; null when the line is missing or left as the template's «з відсотком чи без». */
   withPercent: boolean | null;
+  /** Only the form has it; the text template has no comment line. */
+  comment?: string | null;
   warnings: string[];
 }
 

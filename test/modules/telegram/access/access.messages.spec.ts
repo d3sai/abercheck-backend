@@ -43,19 +43,20 @@ describe('newManagerNotice', () => {
 });
 
 describe('startReply', () => {
-  it('should greet an active manager with the menu and the help text', () => {
+  it('should greet an active manager with the help text and clears the old keyboard', () => {
     const reply = startReply(manager({ status: ManagerStatus.ACTIVE }));
 
     expect(reply.html).toContain('Вітаю, Христина!');
     expect(reply.html).toContain(HELP);
-    expect(reply.menu).toBe(true);
+    expect(reply.removeKeyboard).toBe(true);
+    expect(reply.html).toContain('Новий запит');
   });
 
   it('should tell a pending manager their request is still under review', () => {
     const reply = startReply(manager({ status: ManagerStatus.PENDING }));
 
     expect(reply.html).toContain('ще на розгляді');
-    expect(reply.menu).toBeUndefined();
+    expect(reply.removeKeyboard).toBeUndefined();
   });
 
   it('should tell a rejected manager access was not granted', () => {

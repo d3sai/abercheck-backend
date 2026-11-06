@@ -6,6 +6,7 @@ import { OrderNumberTakenError } from '../../../../src/modules/orders/orders.err
 import { OrdersService } from '../../../../src/modules/orders/orders.service';
 import { PaymentsService } from '../../../../src/modules/payments/payments.service';
 import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
+import { NEW_REQUEST_LABEL } from '../../../../src/modules/telegram/core/menu';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import {
   CashDraftService,
@@ -183,7 +184,6 @@ describe('OrderDraftService', () => {
       );
 
       expect(reply?.html).toContain('кілька номерів або чужі реквізити');
-      expect(reply?.html).toContain('💳 Кілька номерів / реквізити');
       expect(reply?.html).toContain('/requisites');
       expect(orders.create).not.toHaveBeenCalled();
     });
@@ -1432,7 +1432,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       const reply = await service.handleText(MANAGER, SAMPLE);
 
       expect(reply?.html).toContain('схоже на дату');
-      expect(reply?.html).toContain('/cash');
+      expect(reply?.html).toContain(NEW_REQUEST_LABEL);
       expect(orders.create).not.toHaveBeenCalled();
     });
   });
@@ -1491,15 +1491,15 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
     });
 
-    it('should point to /foreign when the template comes outside the button', async () => {
+    it('should point to the new-request button when the template comes outside the mode', async () => {
       const reply = await service.handleText(MANAGER, TEMPLATE);
 
-      expect(reply?.html).toContain('/foreign');
+      expect(reply?.html).toContain(NEW_REQUEST_LABEL);
       expect(orders.create).not.toHaveBeenCalled();
       expect(orders.createGroup).not.toHaveBeenCalled();
 
       const withFile = await service.addFile(MANAGER, file(), TEMPLATE);
-      expect(withFile.html).toContain('/foreign');
+      expect(withFile.html).toContain(NEW_REQUEST_LABEL);
     });
 
     it('should create the order in the currency the template names', async () => {

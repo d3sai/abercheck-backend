@@ -27,6 +27,8 @@ import { TelegramSender } from './telegram-sender';
 
 type Next = () => Promise<void>;
 
+const LEGACY_BUTTONS: ReadonlySet<string> = new Set(Object.values(MENU_LABEL));
+
 @Update()
 export class BotUpdate implements OnApplicationBootstrap {
   constructor(
@@ -43,11 +45,6 @@ export class BotUpdate implements OnApplicationBootstrap {
         { command: 'new', description: 'Нове замовлення' },
         { command: 'newminus', description: 'Закрити мінус' },
         { command: 'requisites', description: 'Кілька номерів або чужі реквізити' },
-        { command: 'kit', description: 'Оплата на Кит' },
-        { command: 'cash', description: 'Оплата готівкою' },
-        { command: 'foreign', description: 'Оплата закордонного замовлення' },
-        { command: 'requests', description: 'Мої запити до фінансистів' },
-        { command: 'list', description: 'Мої відкриті замовлення' },
         { command: 'cancel', description: 'Скасувати' },
         { command: 'help', description: 'Що вміє бот' },
       ],
@@ -90,7 +87,7 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (ctx.chat?.id === this.sender.adminChatId) {
       await reply(ctx, { html: ADMIN_HELP });
     } else if (isPrivate(ctx)) {
-      await reply(ctx, { html: HELP, menu: true });
+      await reply(ctx, { html: HELP, removeKeyboard: true });
     }
   }
 
@@ -108,10 +105,7 @@ export class BotUpdate implements OnApplicationBootstrap {
       await reply(ctx, await this.lists.forAdmins(all));
       return;
     }
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await reply(ctx, await this.lists.forManager(manager.id, all));
-    }
+    // managers have no list: their requests and orders live in the Mini App
   }
 
   @Action(DeleteAction.Ask)
@@ -321,30 +315,15 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (!isPrivate(ctx) || !ctx.from || !ctx.text || ctx.text.startsWith('/')) {
       return next();
     }
-    switch (ctx.text) {
-      case MENU_LABEL.NewOrder:
-        return this.newOrder(ctx);
-      case MENU_LABEL.NewMinus:
-        return this.newMinusOrder(ctx);
-      case MENU_LABEL.Requisites:
-        return this.requisites(ctx);
-      case MENU_LABEL.Kit:
-        return this.kit(ctx);
-      case MENU_LABEL.Cash:
-        return this.cash(ctx);
-      case MENU_LABEL.Foreign:
-        return this.foreign(ctx);
-      case MENU_LABEL.List:
-        return this.list(ctx);
-      case MENU_LABEL.Cancel:
-        return this.cancel(ctx);
-    }
     const manager = await this.activeManager(ctx);
     if (!manager) {
       return;
     }
-    const answer = await this.drafts.handleText(manager, ctx.text);
-    await reply(ctx, answer ?? { html: HELP, menu: true });
+    // a press of a button from the old reply keyboard: clear the keyboard and point at the new one
+    const answer = LEGACY_BUTTONS.has(ctx.text)
+      ? null
+      : await this.drafts.handleText(manager, ctx.text);
+    await reply(ctx, answer ?? { html: HELP, removeKeyboard: true });
   }
 
   @On('document')

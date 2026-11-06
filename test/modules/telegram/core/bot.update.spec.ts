@@ -22,7 +22,7 @@ import { RequisitesService } from '../../../../src/modules/requisites/requisites
 import { AdminFlowService } from '../../../../src/modules/telegram/admin/admin-flow.service';
 import { AdminUpdate } from '../../../../src/modules/telegram/admin/admin.update';
 import { BotUpdate } from '../../../../src/modules/telegram/core/bot.update';
-import { MENU_LABEL } from '../../../../src/modules/telegram/core/menu';
+import { MENU_LABEL, NEW_REQUEST_LABEL } from '../../../../src/modules/telegram/core/menu';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import {
   CashDraftService,
@@ -135,6 +135,7 @@ interface SendMessagePayload {
   text: string;
   reply_markup?: {
     keyboard?: { text: string }[][];
+    remove_keyboard?: boolean;
     inline_keyboard?: { text: string; callback_data?: string }[][];
   };
 }
@@ -150,9 +151,6 @@ const privateChat = (id: number): Chat.PrivateChat => ({
   first_name: 'Христина',
 });
 const adminGroup: Chat.SupergroupChat = { id: ADMIN_CHAT_ID, type: 'supergroup', title: 'Адміни' };
-
-const menuOf = ({ reply_markup }: SendMessagePayload) =>
-  reply_markup?.keyboard?.flat().map((button) => button.text);
 
 describe('BotUpdate', () => {
   let moduleRef: TestingModule;
@@ -288,69 +286,69 @@ describe('BotUpdate', () => {
       },
     });
 
-  describe('the main menu', () => {
+  describe('the old reply keyboard', () => {
     it.each(['/start', '/help', 'привіт'])(
-      'should show the nine buttons in reply to %s',
+      'should be removed, not replaced, in reply to %s',
       async (text) => {
         const replies = await say(text);
 
         expect(replies).toHaveLength(1);
-        expect(menuOf(replies[0]!)).toHaveLength(9);
-        expect(menuOf(replies[0]!)).toEqual(Object.values(MENU_LABEL));
+        expect(replies[0]!.reply_markup).toEqual({ remove_keyboard: true });
+        expect(replies[0]!.text).toContain(NEW_REQUEST_LABEL);
       },
     );
-  });
 
-  describe('a menu button pressed in a private chat', () => {
-    it('should answer "new order" with the regular order format', async () => {
-      const replies = await say(MENU_LABEL.NewOrder);
+    it.each(Object.values(MENU_LABEL))(
+      'should be removed when its stale button %s is pressed',
+      async (label) => {
+        const replies = await say(label);
 
-      expect(replies).toHaveLength(1);
-      expect(replies[0]!.text).toContain('Нове замовлення');
-      expect(replies[0]!.text).toContain('Номер*');
-    });
+        expect(replies).toHaveLength(1);
+        expect(replies[0]!.reply_markup).toEqual({ remove_keyboard: true });
+        expect(replies[0]!.text).toContain(NEW_REQUEST_LABEL);
+        expect(ordersMock.create).not.toHaveBeenCalled();
+      },
+    );
 
-    it('should answer "close minus" with the debt-closing template', async () => {
-      const replies = await say(MENU_LABEL.NewMinus);
-
-      expect(replies).toHaveLength(1);
-      expect(replies[0]!.text).toContain('Закриття мінусу');
-      expect(replies[0]!.text).not.toContain('0000-066717');
-    });
-
-    it('should answer "list" with the manager\'s open orders', async () => {
-      const replies = await say(MENU_LABEL.List);
-
-      expect(replies).toHaveLength(1);
-      expect(replies[0]!.text).toContain('Мої відкриті замовлення');
-      expect(replies[0]!.text).toContain('0000-066717');
-    });
-
-    it('should say there is nothing to cancel when no files are pending', async () => {
-      const replies = await say(MENU_LABEL.Cancel);
-
-      expect(replies.map(({ text }) => text)).toEqual(['Нема чого скасовувати.']);
-    });
-
-    it('should forget the attached files on "cancel"', async () => {
-      const attached = await sendPdf();
-      const cancelled = await say(MENU_LABEL.Cancel);
-
-      expect(attached[0]!.text).toContain('invoice.pdf');
-      expect(cancelled.map(({ text }) => text)).toEqual(['Скасовано.']);
-      expect((await say(MENU_LABEL.Cancel)).map(({ text }) => text)).toEqual([
-        'Нема чого скасовувати.',
-      ]);
-    });
-
-    it('should send someone who is not a manager to /start', async () => {
-      const replies = await say(MENU_LABEL.List, {
+    it('should send someone who is not a manager to /start from a stale button', async () => {
+      const replies = await say(MENU_LABEL.Cancel, {
         chat: privateChat(STRANGER_ID),
         fromId: STRANGER_ID,
       });
 
       expect(replies).toHaveLength(1);
       expect(replies[0]!.text).toContain('/start');
+    });
+  });
+
+  describe('lists for managers', () => {
+    it('should not answer /list in a private chat', async () => {
+      expect(await say('/list')).toEqual([]);
+      expect(await say('/list all')).toEqual([]);
+    });
+
+    it('should still answer /list in the admin group', async () => {
+      const replies = await say('/list', { chat: adminGroup, fromId: MANAGER_ID });
+
+      expect(replies).toHaveLength(1);
+      expect(replies[0]!.text).toContain('0000-066717');
+    });
+  });
+
+  describe('/cancel', () => {
+    it('should say there is nothing to cancel when no files are pending', async () => {
+      const replies = await say('/cancel');
+
+      expect(replies.map(({ text }) => text)).toEqual(['Нема чого скасовувати.']);
+    });
+
+    it('should forget the attached files', async () => {
+      const attached = await sendPdf();
+      const cancelled = await say('/cancel');
+
+      expect(attached[0]!.text).toContain('invoice.pdf');
+      expect(cancelled.map(({ text }) => text)).toEqual(['Скасовано.']);
+      expect((await say('/cancel')).map(({ text }) => text)).toEqual(['Нема чого скасовувати.']);
     });
   });
 
@@ -455,7 +453,7 @@ describe('BotUpdate', () => {
         createdAt: new Date('2026-09-18T21:28:00Z'),
       }));
 
-    it.each(['/requisites', MENU_LABEL.Requisites])(
+    it.each(['/requisites'])(
       'should show the format hint and arm waiting for the very next message in reply to %s',
       async (text) => {
         const replies = await say(text);
@@ -470,7 +468,6 @@ describe('BotUpdate', () => {
 
       expect(replies[0]!.text).not.toContain('Кілька номерів однією оплатою');
       expect(replies[0]!.text).toContain('кілька номерів або чужі реквізити');
-      expect(replies[0]!.text).toContain(MENU_LABEL.Requisites);
       expect(replies[0]!.text).toContain('/requisites');
       expect(ordersMock.createGroup).not.toHaveBeenCalled();
     });
@@ -565,5 +562,25 @@ describe('BotUpdate bootstrap', () => {
 
     expect(sender.setDefaultMenuButton).toHaveBeenCalledWith(null);
     expect(sender.registerCommands).toHaveBeenCalledTimes(2);
+  });
+
+  it('should not offer the lists and the Kit, cash and foreign modes to managers', async () => {
+    const { sender, update } = build();
+    const commandCalls = () =>
+      sender.registerCommands.mock.calls as [{ command: string }[], object][];
+
+    await update.onApplicationBootstrap();
+
+    const [privateCommands, privateScope] = commandCalls()[0]!;
+    expect(privateScope).toEqual({ type: 'all_private_chats' });
+    expect(privateCommands.map((c) => c.command)).toEqual([
+      'new',
+      'newminus',
+      'requisites',
+      'cancel',
+      'help',
+    ]);
+    const [adminCommands] = commandCalls()[1]!;
+    expect(adminCommands.map((c) => c.command)).toContain('list');
   });
 });

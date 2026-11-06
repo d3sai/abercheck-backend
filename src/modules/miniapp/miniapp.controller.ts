@@ -17,13 +17,16 @@ import type { FinanceRequestView } from '../finance-sync/finance.types';
 import { RequestCardsRepository } from '../finance-sync/request-cards.repository';
 import { RequestCreateService } from '../finance-sync/request-create.service';
 import { RequestSyncService } from '../finance-sync/request-sync.service';
+import { type DirectOrdersResult, DirectOrdersService } from './direct-orders.service';
 import { MiniappManager, MiniappAuthGuard } from './miniapp-auth.guard';
 import {
   CompleteMiniappRequestDto,
+  CreateMiniappOrderDto,
   CreateMiniappRequestDto,
   EditMiniappRequestDto,
   toCreateInput,
   toEditBody,
+  toOrderPlan,
 } from './miniapp.dto';
 import { financeError, notFound } from './miniapp.errors';
 import { type CompletionResult, RequestCompletionService } from './request-completion.service';
@@ -52,6 +55,7 @@ export class MiniappController {
     private readonly cards: RequestCardsRepository,
     private readonly sync: RequestSyncService,
     private readonly completion: RequestCompletionService,
+    private readonly directOrders: DirectOrdersService,
   ) {}
 
   @Post('requests')
@@ -71,6 +75,15 @@ export class MiniappController {
       number: result.number,
       ...(result.note && { message: result.note }),
     };
+  }
+
+  /** Kit, cash and foreign payments: orders and notices without a request to the financiers. */
+  @Post('orders')
+  async createOrders(
+    @MiniappManager() manager: Manager,
+    @Body() dto: CreateMiniappOrderDto,
+  ): Promise<DirectOrdersResult> {
+    return this.directOrders.create(manager, toOrderPlan(dto));
   }
 
   @Get('requests/:id')

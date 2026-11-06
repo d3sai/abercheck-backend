@@ -66,24 +66,24 @@ describe('reply', () => {
     expect(options.reply_markup).toEqual({ inline_keyboard: buttons });
   });
 
-  it('should attach the persistent menu keyboard when menu is true, even with buttons given', async () => {
+  it('should remove the old reply keyboard when removeKeyboard is true, even with buttons given', async () => {
     const { ctx, replyFn } = ctxWith();
     const buttons = [[{ text: 'OK', callback_data: 'ok' }]];
 
-    await reply(ctx, { html: 'text', buttons, menu: true });
+    await reply(ctx, { html: 'text', buttons, removeKeyboard: true });
 
     const [, options] = replyFn.mock.calls[0]!;
     expect(options.reply_markup).not.toEqual({ inline_keyboard: buttons });
-    expect(options.reply_markup).toHaveProperty('keyboard');
+    expect(options.reply_markup).toEqual({ remove_keyboard: true });
   });
 
-  it('should force a reply with the given placeholder, taking priority over buttons and menu', async () => {
+  it('should force a reply with the given placeholder, taking priority over buttons and removeKeyboard', async () => {
     const { ctx, replyFn } = ctxWith();
 
     await reply(ctx, {
       html: 'text',
       buttons: [[{ text: 'OK', callback_data: 'ok' }]],
-      menu: true,
+      removeKeyboard: true,
       forceReply: { placeholder: '0000-066717' },
     });
 

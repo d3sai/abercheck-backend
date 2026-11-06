@@ -1,5 +1,7 @@
-import type { ReplyKeyboardMarkup } from 'telegraf/types';
+import type { ReplyKeyboardRemove } from 'telegraf/types';
 
+// The buttons the reply keyboard used to carry. Kept to recognise a press from a keyboard
+// that is still on someone's screen.
 export const MENU_LABEL = {
   MyRequests: '🗂 Мої запити',
   NewOrder: '📝 Нове замовлення',
@@ -16,14 +18,5 @@ export const MENU_LABEL = {
 // opened from a keyboard button no initData, so the form could not authenticate.
 export const NEW_REQUEST_LABEL = '📝 Новий запит';
 
-export const mainMenuKeyboard: ReplyKeyboardMarkup = {
-  keyboard: [
-    [{ text: MENU_LABEL.MyRequests }],
-    [{ text: MENU_LABEL.NewOrder }, { text: MENU_LABEL.NewMinus }],
-    [{ text: MENU_LABEL.Requisites }],
-    [{ text: MENU_LABEL.Kit }, { text: MENU_LABEL.Cash }],
-    [{ text: MENU_LABEL.Foreign }],
-    [{ text: MENU_LABEL.List }, { text: MENU_LABEL.Cancel }],
-  ],
-  resize_keyboard: true,
-};
+// The bot has no reply keyboard any more; this clears the old one from existing users' chats.
+export const removeKeyboard: ReplyKeyboardRemove = { remove_keyboard: true };

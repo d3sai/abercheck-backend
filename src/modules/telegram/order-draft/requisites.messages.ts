@@ -7,7 +7,7 @@ import {
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
-import { MENU_LABEL } from '../core/menu';
+import { NEW_REQUEST_LABEL } from '../core/menu';
 import { formatRate } from '../notifications/order-templates';
 import type { NumberCheck } from './draft-orders';
 import type { RequisitesPlan } from './requisites.parser';
@@ -69,8 +69,8 @@ export function multipleOrRequisitesGuard(): BotReply {
   return {
     html: [
       '⚠️ Схоже на кілька номерів або чужі реквізити.',
-      `Натисніть «${escapeHtml(MENU_LABEL.Requisites)}» (/requisites) і надішліть це повідомлення ще раз.`,
-      `Якщо це оплата на Кит, натисніть «${escapeHtml(MENU_LABEL.Kit)}» (/kit).`,
+      'Надішліть /requisites і повторіть це повідомлення.',
+      `Якщо це оплата на Кит, натисніть «${NEW_REQUEST_LABEL}».`,
     ].join('\n'),
   };
 }

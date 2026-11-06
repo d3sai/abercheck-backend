@@ -13,7 +13,11 @@ import { OrdersModule } from '../../../src/modules/orders/orders.module';
 import { OrdersService } from '../../../src/modules/orders/orders.service';
 import { RequisitesModule } from '../../../src/modules/requisites/requisites.module';
 import { RequisitesService } from '../../../src/modules/requisites/requisites.service';
+import { DirectOrdersService } from '../../../src/modules/miniapp/direct-orders.service';
 import { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
+import { CashDraftService } from '../../../src/modules/telegram/order-draft/cash-draft.service';
+import { ForeignDraftService } from '../../../src/modules/telegram/order-draft/foreign-draft.service';
+import { KitDraftService } from '../../../src/modules/telegram/order-draft/kit-draft.service';
 import { TelegramSender } from '../../../src/modules/telegram/core/telegram-sender';
 import { TelegramModule } from '../../../src/modules/telegram/telegram.module';
 
@@ -34,8 +38,13 @@ class GlobalStubs {}
 class ManagersStub {}
 
 @Module({
-  providers: [{ provide: TelegramSender, useValue: { financeEnabled: true } }],
-  exports: [TelegramSender],
+  providers: [
+    { provide: TelegramSender, useValue: { financeEnabled: true } },
+    { provide: KitDraftService, useValue: {} },
+    { provide: CashDraftService, useValue: {} },
+    { provide: ForeignDraftService, useValue: {} },
+  ],
+  exports: [TelegramSender, KitDraftService, CashDraftService, ForeignDraftService],
 })
 class TelegramStub {}
 
@@ -76,5 +85,6 @@ describe('MiniappModule', () => {
 
     expect(moduleRef.get(MiniappController)).toBeInstanceOf(MiniappController);
     expect(moduleRef.get(RequestCompletionService)).toBeInstanceOf(RequestCompletionService);
+    expect(moduleRef.get(DirectOrdersService)).toBeInstanceOf(DirectOrdersService);
   });
 });

@@ -1,7 +1,7 @@
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn } from '../core/format';
-import { MENU_LABEL } from '../core/menu';
+import { NEW_REQUEST_LABEL } from '../core/menu';
 import type { ForeignPlan } from './foreign.parser';
 
 export const ForeignAction = {
@@ -48,7 +48,7 @@ export function foreignGuard(): BotReply {
   return {
     html: [
       '⚠️ Схоже на оплату закордонного замовлення.',
-      `Натисніть «${escapeHtml(MENU_LABEL.Foreign)}» (/foreign) і надішліть це повідомлення ще раз.`,
+      `Створіть її кнопкою «${NEW_REQUEST_LABEL}» біля поля введення.`,
     ].join('\n'),
   };
 }

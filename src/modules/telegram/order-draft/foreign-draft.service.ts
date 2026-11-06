@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { TelegramFileRef } from '../../attachments/attachments.service';
 import type { Manager, Order } from '../../../generated/prisma/client';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
 import { OrdersService } from '../../orders/orders.service';
@@ -68,13 +69,60 @@ export class ForeignDraftService {
       return requisitesErrors(parsed.errors);
     }
     const { plan } = parsed;
-    const exists = Boolean(await this.orders.findWithBalance(plan.number));
+    const exists = await this.exists(plan);
     this.drafts.setDraft(manager.telegramId, {
       plan,
       exists,
       expiresAt: Date.now() + FOREIGN_DRAFT_TTL_MS,
     });
     return foreignPreview(plan, exists, this.pendingFiles.list(manager.telegramId).length);
+  }
+
+  async exists(plan: ForeignPlan): Promise<boolean> {
+    return Boolean(await this.orders.findWithBalance(plan.number));
+  }
+
+  /** Creates the order unless it exists; throws OrderNumberTakenError if it just appeared. */
+  async createOrder(
+    manager: Manager,
+    plan: ForeignPlan,
+    exists: boolean,
+  ): Promise<Order | undefined> {
+    if (exists) return undefined;
+    const [created] = await this.orders.createGroup(
+      manager.id,
+      [{ orderNumber: plan.number, amountDue: plan.amount.toFixed(2) }],
+      {
+        clientName: FOREIGN_LABEL,
+        currency: plan.currency,
+        exchangeRate: plan.rate ?? undefined,
+        paidAt: plan.paidAt ?? undefined,
+        comment: [FOREIGN_LABEL, plan.recipient && `на ${plan.recipient}`, plan.comment]
+          .filter(Boolean)
+          .join(' · '),
+      },
+    );
+    return created;
+  }
+
+  /** Tells the admins; the files, if any, go with the notice on the order. */
+  async announce(
+    manager: Manager,
+    plan: ForeignPlan,
+    exists: boolean,
+    created: Order | undefined,
+    files: TelegramFileRef[] = [],
+  ): Promise<void> {
+    const notice = adminForeignMessage(plan, exists, manager.name);
+    const fileOrder =
+      files.length > 0
+        ? (created ?? (await this.orders.findWithBalance(plan.number))?.order)
+        : undefined;
+    if (fileOrder) {
+      await this.notifier.notify(fileOrder, manager, files, notice);
+    } else {
+      await this.sender.sendToAdmins(notice);
+    }
   }
 
   async confirm(manager: Manager): Promise<BotReply> {
@@ -86,21 +134,7 @@ export class ForeignDraftService {
 
     let created: Order | undefined;
     try {
-      if (!exists) {
-        [created] = await this.orders.createGroup(
-          manager.id,
-          [{ orderNumber: plan.number, amountDue: plan.amount.toFixed(2) }],
-          {
-            clientName: FOREIGN_LABEL,
-            currency: plan.currency,
-            exchangeRate: plan.rate ?? undefined,
-            paidAt: plan.paidAt ?? undefined,
-            comment: [FOREIGN_LABEL, plan.recipient && `на ${plan.recipient}`, plan.comment]
-              .filter(Boolean)
-              .join(' · '),
-          },
-        );
-      }
+      created = await this.createOrder(manager, plan, exists);
     } catch (error) {
       if (error instanceof OrderNumberTakenError) {
         this.drafts.arm(manager.telegramId, Date.now() + FOREIGN_MODE_TTL_MS);
@@ -112,17 +146,7 @@ export class ForeignDraftService {
     }
     this.drafts.disarm(manager.telegramId);
 
-    const files = this.pendingFiles.take(manager.telegramId);
-    const notice = adminForeignMessage(plan, exists, manager.name);
-    const fileOrder =
-      files.length > 0
-        ? (created ?? (await this.orders.findWithBalance(plan.number))?.order)
-        : undefined;
-    if (fileOrder) {
-      await this.notifier.notify(fileOrder, manager, files, notice);
-    } else {
-      await this.sender.sendToAdmins(notice);
-    }
+    await this.announce(manager, plan, exists, created, this.pendingFiles.take(manager.telegramId));
     return foreignCreatedReply(plan);
   }
 

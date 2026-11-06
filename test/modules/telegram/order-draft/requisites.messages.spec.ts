@@ -16,7 +16,7 @@ import {
   parseRequisites,
   type RequisitesPlan,
 } from '../../../../src/modules/telegram/order-draft/requisites.parser';
-import { MENU_LABEL } from '../../../../src/modules/telegram/core/menu';
+import { NEW_REQUEST_LABEL } from '../../../../src/modules/telegram/core/menu';
 
 const d = (value: string) => new Prisma.Decimal(value);
 
@@ -258,10 +258,10 @@ describe('adminRequisitesMessage — requisite rendering', () => {
 });
 
 describe('multipleOrRequisitesGuard', () => {
-  it('should name the current menu button and the /requisites command', () => {
+  it('should name the /requisites command and the new-request button for Kit', () => {
     const reply = multipleOrRequisitesGuard();
 
-    expect(reply.html).toContain(MENU_LABEL.Requisites);
+    expect(reply.html).toContain(NEW_REQUEST_LABEL);
     expect(reply.html).toContain('/requisites');
     expect(reply.buttons).toBeUndefined();
   });

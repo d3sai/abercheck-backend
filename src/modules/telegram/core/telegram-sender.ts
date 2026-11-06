@@ -5,7 +5,7 @@ import { Telegraf } from 'telegraf';
 import type { BotCommand, BotCommandScope, InlineKeyboardButton } from 'telegraf/types';
 import type { EnvironmentVariables } from '../../../common/config/env.validation';
 import { optionalNonBlank, optionalPositiveInt } from '../../../common/config/optional-config';
-import { mainMenuKeyboard } from './menu';
+import { removeKeyboard } from './menu';
 
 export type TelegramTopic = 'requests' | 'payments' | 'reports';
 
@@ -49,14 +49,18 @@ export class TelegramSender {
     chatId: number | bigint,
     html: string,
     buttons?: InlineKeyboardButton[][],
-    menu = false,
+    clearKeyboard = false,
     options: SendOptions = {},
   ): Promise<number | null> {
     try {
       const sent = await this.bot.telegram.sendMessage(Number(chatId), html, {
         parse_mode: 'HTML',
         link_preview_options: { is_disabled: true },
-        reply_markup: menu ? mainMenuKeyboard : buttons ? { inline_keyboard: buttons } : undefined,
+        reply_markup: clearKeyboard
+          ? removeKeyboard
+          : buttons
+            ? { inline_keyboard: buttons }
+            : undefined,
         ...(options.threadId === undefined ? {} : { message_thread_id: options.threadId }),
         ...replyParameters(options.replyTo),
       });
@@ -67,7 +71,7 @@ export class TelegramSender {
         this.logger.warn(
           `Topic ${options.threadId} not found in chat ${chatId}, sending without it`,
         );
-        return this.send(chatId, html, buttons, menu, { ...options, threadId: undefined });
+        return this.send(chatId, html, buttons, clearKeyboard, { ...options, threadId: undefined });
       }
       this.logger.error(`Failed to send a message to chat ${chatId}`, error);
       return null;

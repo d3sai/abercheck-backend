@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { TelegramFileRef } from '../../attachments/attachments.service';
 import { Currency, type Manager, type Order } from '../../../generated/prisma/client';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
 import { OrdersService } from '../../orders/orders.service';
@@ -63,10 +64,7 @@ export class KitDraftService {
       return requisitesErrors(parsed.errors);
     }
     const { plan } = parsed;
-    const found = await Promise.all(
-      plan.items.map((item) => this.orders.findWithBalance(item.number)),
-    );
-    const existing = plan.items.filter((_, index) => found[index]).map((item) => item.number);
+    const existing = await this.existingNumbers(plan);
     this.drafts.setDraft(manager.telegramId, {
       plan,
       existing,
@@ -75,33 +73,65 @@ export class KitDraftService {
     return kitPreview(plan, existing, this.pendingFiles.list(manager.telegramId).length);
   }
 
+  /** The plan's numbers the system already has. */
+  async existingNumbers(plan: KitPlan): Promise<string[]> {
+    const found = await Promise.all(
+      plan.items.map((item) => this.orders.findWithBalance(item.number)),
+    );
+    return plan.items.filter((_, index) => found[index]).map((item) => item.number);
+  }
+
+  /** Creates the numbers the system does not have yet; throws OrderNumberTakenError if one just appeared. */
+  async createOrders(manager: Manager, plan: KitPlan, existing: string[]): Promise<Order[]> {
+    const fresh = plan.items.filter((item) => !existing.includes(item.number));
+    if (fresh.length === 0) return [];
+    return this.orders.createGroup(
+      manager.id,
+      fresh.map((item) => ({
+        orderNumber: item.number,
+        amountDue: item.amount.toFixed(2),
+      })),
+      {
+        clientName: KIT_LABEL,
+        currency: Currency.USD,
+        paidAt: plan.paidAt ?? undefined,
+        comment: [`${KIT_LABEL} · код доступу ${plan.accessCode}`, plan.comment]
+          .filter(Boolean)
+          .join(' · '),
+      },
+    );
+  }
+
+  /** Tells the admins; the files, if any, go with the notice on the first order. */
+  async announce(
+    manager: Manager,
+    plan: KitPlan,
+    existing: string[],
+    created: Order[],
+    files: TelegramFileRef[] = [],
+  ): Promise<void> {
+    const notice = adminKitMessage(plan, existing, manager.name);
+    const fileOrder =
+      files.length > 0
+        ? (created[0] ?? (await this.orders.findWithBalance(existing[0]!))?.order)
+        : undefined;
+    if (fileOrder) {
+      await this.notifier.notify(fileOrder, manager, files, notice);
+    } else {
+      await this.sender.sendToAdmins(notice);
+    }
+  }
+
   async confirm(manager: Manager): Promise<BotReply> {
     const draft = this.drafts.takeDraft(manager.telegramId);
     if (!draft || draft.expiresAt < Date.now()) {
       return { html: '⚠️ Немає даних для відправки. Надішліть повідомлення ще раз.' };
     }
     const { plan, existing } = draft;
-    const fresh = plan.items.filter((item) => !existing.includes(item.number));
 
-    let created: Order[] = [];
+    let created: Order[];
     try {
-      if (fresh.length > 0) {
-        created = await this.orders.createGroup(
-          manager.id,
-          fresh.map((item) => ({
-            orderNumber: item.number,
-            amountDue: item.amount.toFixed(2),
-          })),
-          {
-            clientName: KIT_LABEL,
-            currency: Currency.USD,
-            paidAt: plan.paidAt ?? undefined,
-            comment: [`${KIT_LABEL} · код доступу ${plan.accessCode}`, plan.comment]
-              .filter(Boolean)
-              .join(' · '),
-          },
-        );
-      }
+      created = await this.createOrders(manager, plan, existing);
     } catch (error) {
       if (error instanceof OrderNumberTakenError) {
         this.drafts.arm(manager.telegramId, Date.now() + KIT_MODE_TTL_MS);
@@ -113,17 +143,13 @@ export class KitDraftService {
     }
     this.drafts.disarm(manager.telegramId);
 
-    const files = this.pendingFiles.take(manager.telegramId);
-    const notice = adminKitMessage(plan, existing, manager.name);
-    const fileOrder =
-      files.length > 0
-        ? (created[0] ?? (await this.orders.findWithBalance(existing[0]!))?.order)
-        : undefined;
-    if (fileOrder) {
-      await this.notifier.notify(fileOrder, manager, files, notice);
-    } else {
-      await this.sender.sendToAdmins(notice);
-    }
+    await this.announce(
+      manager,
+      plan,
+      existing,
+      created,
+      this.pendingFiles.take(manager.telegramId),
+    );
     return kitCreatedReply(plan, created.length);
   }
 
