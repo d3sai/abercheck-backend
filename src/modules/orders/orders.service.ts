@@ -279,6 +279,10 @@ export class OrdersService {
     return ids.flatMap((id) => byId.get(id) ?? []);
   }
 
+  findById(id: number): Promise<Order | null> {
+    return this.prisma.order.findUnique({ where: { id } });
+  }
+
   /** The client paid: stamps the date on every order of `ids`. */
   async setPaidAt(ids: number[], paidAt: Date): Promise<void> {
     await this.prisma.order.updateMany({ where: { id: { in: ids } }, data: { paidAt } });

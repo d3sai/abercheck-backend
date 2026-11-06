@@ -14,7 +14,11 @@ import { ApiError } from '../../common/api-error';
 import { kyivDateTime, kyivParts } from '../../common/kyiv-time';
 import { MONEY_PATTERN } from '../../common/money';
 import { Currency, Prisma } from '../../generated/prisma/client';
-import type { EditRequestBody, RequestKind } from '../finance-sync/finance.types';
+import {
+  type EditRequestBody,
+  paysAfterConfirm,
+  type RequestKind,
+} from '../finance-sync/finance.types';
 import type { CreateRequestInput } from '../finance-sync/request-create.service';
 import type { StoredPayment } from '../finance-sync/stored-payments';
 import { EXCHANGE_RATE_PATTERN } from '../orders/dto/create-order.dto';
@@ -84,7 +88,7 @@ export class CreateMiniappRequestDto {
   @IsBoolean()
   officialDocs!: boolean;
 
-  /** foreign_fop, card and minus: what the client already paid; our_fop sends none. */
+  /** card and minus: what the client already paid; our_fop and foreign_fop send none. */
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_PAYMENTS)
@@ -151,7 +155,7 @@ export class CompleteOrderDto {
 
 /** Shape only; the per-kind rules live in `toPayments` and `toOrderOverrides`. */
 export class CompleteMiniappRequestDto {
-  /** May be empty for our_fop: the client has not paid yet. */
+  /** May be empty for our_fop and foreign_fop: the client has not paid yet. */
   @IsArray()
   @ArrayMaxSize(MAX_PAYMENTS)
   @ValidateNested({ each: true })
@@ -243,9 +247,9 @@ export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): C
         exchangeRate: requiredRate(row.exchangeRate, number.value),
       };
     });
-    if (dto.kind === 'our_fop') {
+    if (paysAfterConfirm(dto.kind)) {
       if ((dto.payments ?? []).length > 0) {
-        throw invalid('Для «Наш ФОП» платіж ще не вказують: клієнт не оплатив.');
+        throw invalid('Для «Наш ФОП» і «Чужий ФОП» платіж ще не вказують: клієнт не оплатив.');
       }
       return { ...common, orders };
     }
@@ -325,18 +329,19 @@ const notInFuture = (paid: Date, now: Date): Date => {
 };
 
 /**
- * Date and time are required for every kind except our_fop, which may have no payment at all (the
- * client has not paid yet); several rows only for foreign_fop and card. Never in the future.
+ * Date and time are required for every kind except our_fop and foreign_fop, which may have no payment
+ * at all (the client has not paid yet); several rows only for card. Never in the future.
  */
 export function toPayments(kind: RequestKind, rows: PaymentRowDto[], now = new Date()): Payment[] {
-  const withPayers = kind === 'foreign_fop' || kind === 'card';
-  if (rows.length < (kind === 'our_fop' ? 0 : 1) || rows.length > MAX_PAYMENTS) {
+  const withPayers = kind === 'card';
+  const payLater = paysAfterConfirm(kind);
+  if (rows.length < (payLater ? 0 : 1) || rows.length > MAX_PAYMENTS) {
     throw invalid(`Додайте від 1 до ${MAX_PAYMENTS} платежів.`);
   }
   if (!withPayers && rows.length > 1) throw invalid('Для цього запиту потрібна одна дата оплати.');
   return rows.map((row) => {
     const time = text(row.time);
-    if (kind !== 'our_fop' && time === null) throw invalid('Вкажіть дату й час оплати.');
+    if (!payLater && time === null) throw invalid('Вкажіть дату й час оплати.');
     const payerName = text(row.payerName);
     if (withPayers && payerName === null) throw invalid('Вкажіть, хто платив.');
     return {

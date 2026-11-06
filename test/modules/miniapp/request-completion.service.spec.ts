@@ -8,6 +8,7 @@ import {
   OrderType,
   Prisma,
 } from '../../../src/generated/prisma/client';
+import type { AttachmentsService } from '../../../src/modules/attachments/attachments.service';
 import type { FinanceClient } from '../../../src/modules/finance-sync/finance.client';
 import {
   FinanceApiError,
@@ -132,6 +133,7 @@ describe('RequestCompletionService', () => {
     requisites as unknown as RequisitesService,
     sender as unknown as TelegramSender,
     receipts as unknown as RequestReceiptsService,
+    { save: jest.fn() } as unknown as AttachmentsService,
   );
 
   let logError: jest.SpyInstance;

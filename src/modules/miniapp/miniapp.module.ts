@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { AttachmentsModule } from '../attachments/attachments.module';
 import { FinanceSyncModule } from '../finance-sync/finance-sync.module';
 import { ManagersModule } from '../managers/managers.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -12,6 +13,7 @@ import { RequestCompletionService } from './request-completion.service';
 
 @Module({
   imports: [
+    AttachmentsModule,
     ManagersModule,
     // forwardRef: FinanceSyncModule loads TelegramModule, which lists this module in its `include`
     forwardRef(() => FinanceSyncModule),

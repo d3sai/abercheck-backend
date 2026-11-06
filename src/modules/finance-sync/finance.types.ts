@@ -1,5 +1,9 @@
 // Mirrors finance-backend src/modules/internal/internal-requests.dto.ts. Keep in step by hand.
 export type RequestKind = 'our_fop' | 'foreign_fop' | 'card' | 'minus';
+/** These kinds are paid after the manager confirms: the card stays open until «💰 Оплачено». */
+const PAYS_AFTER_CONFIRM: readonly RequestKind[] = ['our_fop', 'foreign_fop'];
+export const paysAfterConfirm = (kind: RequestKind | null): boolean =>
+  kind !== null && PAYS_AFTER_CONFIRM.includes(kind);
 export type RequestStatus = 'pending' | 'accepted' | 'cancelled';
 export type RequestWarning = 'multi_order' | 'sum_mismatch' | 'iban_invalid' | 'card_invalid';
 

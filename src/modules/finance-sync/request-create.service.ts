@@ -26,7 +26,7 @@ export interface CreateRequestInput {
   withPercent?: boolean | null;
   comment: string | null;
   officialDocs: boolean;
-  /** foreign_fop, card, minus: kept on the card until the manager accepts the ready text. */
+  /** card, minus: kept on the card until the manager accepts the ready text. */
   payments?: StoredPayment[];
 }
 

@@ -3,13 +3,14 @@ import { Prisma } from '../../generated/prisma/client';
 import { type BotReply, button } from '../telegram/core/bot-reply';
 import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
 import { formatRate } from '../telegram/notifications/order-templates';
-import type {
-  FinanceFop,
-  FinancePayoutView,
-  FinanceFops,
-  FinanceRequestView,
-  RequestKind,
-  RequestWarning,
+import {
+  type FinanceFop,
+  type FinancePayoutView,
+  type FinanceFops,
+  type FinanceRequestView,
+  paysAfterConfirm,
+  type RequestKind,
+  type RequestWarning,
 } from './finance.types';
 import type { StoredPayment } from './stored-payments';
 
@@ -221,7 +222,7 @@ function paymentLine(payment: StoredPayment): string {
 
 /** The payments the orders will get; whole lines within the budget, «…» for the rest. */
 function paymentLines(kind: RequestKind | null, payments: StoredPayment[]): string[] {
-  if (payments.length === 0) return kind === 'our_fop' ? ['Платіж: клієнт ще не оплатив'] : [];
+  if (payments.length === 0) return paysAfterConfirm(kind) ? ['Платіж: клієнт ще не оплатив'] : [];
   const lines = ['<b>Платежі:</b>'];
   let used = lines[0]!.length;
   for (const payment of payments) {
@@ -237,19 +238,20 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   const { miniAppUrl, completed, payments = [] } = opts;
   if (completed) {
     const lines = [...body(view), '', completedLine(completed.orderNumbers)];
-    const ourFop = view.kind === 'our_fop';
-    if (ourFop && completed.closed) {
+    const paysLater = paysAfterConfirm(view.kind);
+    if (paysLater && completed.closed) {
       lines.push(
         completed.paidAt ? `✅ Оплачено ${dateTime(completed.paidAt)} · закрито` : '✅ Закрито',
       );
     }
+    // open: the paid form also takes files; closed: only the files are left to add
+    const action = completed.closed
+      ? { text: '📎 Додати файли', mode: 'files' }
+      : paysLater && { text: '💰 Оплачено', mode: 'paid' };
     return {
       html: lines.join('\n'),
-      ...(ourFop &&
-        !completed.closed &&
-        miniAppUrl && {
-          buttons: [[webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)]],
-        }),
+      ...(miniAppUrl &&
+        action && { buttons: [[webApp(action.text, miniAppUrl, action.mode, view.id)]] }),
     };
   }
   if (view.status === 'pending') {
@@ -264,8 +266,8 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   if (view.status !== 'accepted') return { html: body(view).join('\n') };
 
   // accepted: the ready text. A request without stored payments (older cards) cannot be accepted
-  // as it stands, except our_fop, whose client has not paid yet.
-  const ready = view.kind === 'our_fop' || payments.length > 0;
+  // as it stands, except our_fop and foreign_fop, whose client has not paid yet.
+  const ready = paysAfterConfirm(view.kind) || payments.length > 0;
   const html = body(view, { extra: paymentLines(view.kind, payments), allRates: true }).join('\n');
   const row = [
     ...(ready ? [button('✅ Прийняти', `mo:${view.id}`)] : []),

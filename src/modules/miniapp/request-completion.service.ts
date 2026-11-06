@@ -8,8 +8,14 @@ import {
   OrderType,
   Prisma,
 } from '../../generated/prisma/client';
+import { AttachmentsService } from '../attachments/attachments.service';
+import { initiatorOf } from '../cabinet/cabinet-access';
 import { FinanceClient } from '../finance-sync/finance.client';
-import type { FinanceRequestView, RequestKind } from '../finance-sync/finance.types';
+import {
+  type FinanceRequestView,
+  paysAfterConfirm,
+  type RequestKind,
+} from '../finance-sync/finance.types';
 import { managerCard } from '../finance-sync/request-card.messages';
 import { RequestCardsRepository } from '../finance-sync/request-cards.repository';
 import { RequestReceiptsService } from '../finance-sync/request-receipts.service';
@@ -48,7 +54,7 @@ export interface CompletionResult {
 interface Made {
   orders: Order[];
   skipped: string[];
-  /** The admin notice that still has to go out; our_fop's goes out through the order events. */
+  /** The admin notice that still has to go out; our_fop's and foreign_fop's go out through the order events. */
   notice: string | null;
 }
 
@@ -133,6 +139,7 @@ export class RequestCompletionService {
     private readonly requisites: RequisitesService,
     private readonly sender: TelegramSender,
     private readonly receipts: RequestReceiptsService,
+    private readonly attachments: AttachmentsService,
   ) {}
 
   /** «✏️ Змінити»: the payments, and optionally the amounts, rates and comment, come from the form. */
@@ -154,7 +161,7 @@ export class RequestCompletionService {
     return this.finish(manager, requestId, {
       payments: (kind, card) => {
         const stored = storedPayments(card.payments);
-        if (kind !== 'our_fop' && stored.length === 0) {
+        if (!paysAfterConfirm(kind) && stored.length === 0) {
           throw apiError(
             HttpStatus.BAD_REQUEST,
             'invalid-request',
@@ -167,7 +174,7 @@ export class RequestCompletionService {
     });
   }
 
-  /** «💰 Оплачено» of our_fop: the client paid, the date goes to the orders and the task closes. */
+  /** «💰 Оплачено» of our_fop and foreign_fop: the client paid, the date goes to the orders and the task closes. */
   async markPaid(
     manager: Manager,
     requestId: string,
@@ -178,9 +185,6 @@ export class RequestCompletionService {
     if (!card.completedAt) {
       throw apiError(HttpStatus.CONFLICT, 'not-completed', 'Запит ще не оформлено');
     }
-    if (card.closedAt) {
-      throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
-    }
     const paidAt = toPaidAt(body);
     let view: FinanceRequestView;
     try {
@@ -188,8 +192,16 @@ export class RequestCompletionService {
     } catch (error) {
       throw financeError(error);
     }
-    if (view.kind !== 'our_fop') {
-      throw apiError(HttpStatus.CONFLICT, 'not-our-fop', 'Оплату відмічають лише для «Наш ФОП»');
+    if (!paysAfterConfirm(view.kind)) {
+      throw apiError(
+        HttpStatus.CONFLICT,
+        'no-paid-step',
+        'Оплату відмічають лише для «Наш ФОП» і «Чужий ФОП»',
+      );
+    }
+    // after the kind check: a closed card or minus must hear «no paid step», not «already closed»
+    if (card.closedAt) {
+      throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
     }
     // atomic: two parallel presses close it once
     if (!(await this.cards.claimClosing(requestId, new Date()))) {
@@ -216,6 +228,30 @@ export class RequestCompletionService {
     return { paidAt: paidAt.toISOString() };
   }
 
+  /** Files from the Mini App go to the request's first order, like a receipt replied to the card. */
+  async addFiles(
+    manager: Manager,
+    requestId: string,
+    files: Express.Multer.File[],
+  ): Promise<{ attached: number }> {
+    const card = await this.cards.byRequestId(requestId);
+    if (card?.managerId !== manager.id) throw notFound();
+    const firstId = card.orderIds[0];
+    const order = firstId === undefined ? null : await this.orders.findById(firstId);
+    if (!order) {
+      throw apiError(
+        HttpStatus.CONFLICT,
+        'not-completed',
+        'Файли можна додати після «✅ Прийняти»',
+      );
+    }
+    if (files.length === 0) {
+      throw apiError(HttpStatus.BAD_REQUEST, 'no-files', 'Додайте хоча б один файл');
+    }
+    const saved = await this.attachments.save(order, files, initiatorOf(manager), true);
+    return { attached: saved.length };
+  }
+
   private async finish(
     manager: Manager,
     requestId: string,
@@ -236,7 +272,7 @@ export class RequestCompletionService {
     const live = view.kind === 'minus' ? null : await this.liveItems(view, input.addPart);
 
     // atomic: of two parallel completions only one may create orders
-    if (!(await this.cards.claimCompletion(requestId, new Date(), view.kind !== 'our_fop'))) {
+    if (!(await this.cards.claimCompletion(requestId, new Date(), !paysAfterConfirm(view.kind)))) {
       throw apiError(HttpStatus.CONFLICT, 'already-completed', 'Запит уже оформлено');
     }
 
@@ -320,12 +356,12 @@ export class RequestCompletionService {
     progress: Progress,
   ): Promise<Made> {
     if (live === null) return this.createMinus(manager, view, payments[0]!, progress);
-    return view.kind === 'our_fop'
-      ? this.createOurFop(manager, view, payments[0], live, progress)
+    return paysAfterConfirm(view.kind)
+      ? this.createPayLater(manager, view, payments[0], live, progress)
       : this.createRequisites(manager, view, payments, live, progress);
   }
 
-  private async createOurFop(
+  private async createPayLater(
     manager: Manager,
     view: FinanceRequestView,
     payment: Payment | undefined,
@@ -334,7 +370,7 @@ export class RequestCompletionService {
   ): Promise<Made> {
     progress.skipped = skipped;
     const common = {
-      clientName: view.fopLabel ?? 'Наш ФОП',
+      clientName: view.fopLabel ?? (view.kind === 'foreign_fop' ? 'Чужий ФОП' : 'Наш ФОП'),
       currency: Currency.UAH,
       exchangeRate: view.exchangeRate ?? undefined,
       comment: view.comment ?? undefined,
@@ -471,7 +507,7 @@ export class RequestCompletionService {
     if (card.managerMessageId === null) return;
     const { html, buttons } = managerCard(view, {
       miniAppUrl: this.sender.miniAppUrl,
-      completed: { orderNumbers, closed: view.kind !== 'our_fop' },
+      completed: { orderNumbers, closed: !paysAfterConfirm(view.kind) },
     });
     await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
   }

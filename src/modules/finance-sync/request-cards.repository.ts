@@ -40,7 +40,7 @@ export class RequestCardsRepository {
 
   /**
    * True only for the one caller that completes the request; everyone else must not create orders.
-   * `close` finishes the task in the same step (every kind but our_fop, which waits for its payment).
+   * `close` finishes the task in the same step (every kind but our_fop and foreign_fop, which wait for their payment).
    */
   async claimCompletion(requestId: string, now: Date, close: boolean): Promise<boolean> {
     const { count } = await this.prisma.financeRequestCard.updateMany({
