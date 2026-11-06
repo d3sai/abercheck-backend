@@ -34,12 +34,12 @@ function fileIdOf(sent: SentMedia): string {
 // the whole order, so the file in «Оплати» reads on its own
 function caption(order: CaptionOrder, uploader: Initiator): string {
   return [
-    `📎 <b>Квитанція</b> · ${escapeHtml(uploader.name)}`,
-    `<b>${escapeHtml(order.clientName)}</b>`,
+    `📎 <b>${escapeHtml(order.clientName)}</b>`,
     `№ ${escapeHtml(order.orderNumber)}`,
     `Сума: ${formatMoneyIn(order.amountDue, order.currency)}`,
     ...(order.exchangeRate ? [`Курс: ${formatRate(order.exchangeRate)}`] : []),
     ...(order.comment ? [`Коментар: ${escapeHtml(order.comment.slice(0, 300))}`] : []),
+    `Додав: ${escapeHtml(uploader.name)}`,
   ].join('\n');
 }
 
