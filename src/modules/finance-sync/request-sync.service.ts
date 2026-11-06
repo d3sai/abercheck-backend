@@ -10,12 +10,9 @@ import { groupCard, managerCard } from './request-card.messages';
 import { RequestCardsRepository } from './request-cards.repository';
 import { storedPayments } from './stored-payments';
 
-const NOTICE = {
-  accepted: (view: FinanceRequestView) =>
-    `✅ Запит #${escapeHtml(view.number)} прийнято${view.fopLabel ? ` · ФОП: ${escapeHtml(view.fopLabel)}` : ''}`,
-  cancelled: (view: FinanceRequestView) => `❌ Запит #${escapeHtml(view.number)} скасовано`,
-  paid: (view: FinanceRequestView) => `💰 Запит #${escapeHtml(view.number)} оплачено`,
-};
+// left in place of a card that moved down, in case Telegram refuses to delete it
+const movedStub = (view: FinanceRequestView): string =>
+  `⬇️ Запит #${escapeHtml(view.number)}: актуальна картка нижче`;
 
 @Injectable()
 export class RequestSyncService {
@@ -40,7 +37,12 @@ export class RequestSyncService {
 
   async renderManager(card: FinanceRequestCard, view: FinanceRequestView): Promise<void> {
     if (card.managerMessageId === null) return;
-    const { html, buttons } = managerCard(view, {
+    const { html, buttons } = await this.managerReply(card, view);
+    await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
+  }
+
+  private async managerReply(card: FinanceRequestCard, view: FinanceRequestView) {
+    return managerCard(view, {
       miniAppUrl: this.sender.miniAppUrl,
       payments: storedPayments(card.payments),
       completed: card.completedAt
@@ -55,7 +57,6 @@ export class RequestSyncService {
           }
         : false,
     });
-    await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
   }
 
   /** Redraws the group card; a pending one also needs the FOP list for its buttons. */
@@ -70,7 +71,11 @@ export class RequestSyncService {
     await this.sender.editMessage(card.groupChatId, card.groupMessageId, html, buttons);
   }
 
-  /** One short line per status change; `markNotified` makes concurrent duplicates and webhook echoes silent. */
+  /**
+   * No separate notices: a financier's answer (accepted, cancelled) moves the one card to the bottom of
+   * the chat, so the manager gets a single message with a ping; a payment only redraws the card in place.
+   * `markNotified` makes concurrent duplicates and webhook echoes silent.
+   */
   async notifyManager(view: FinanceRequestView): Promise<void> {
     const status =
       view.status === 'cancelled'
@@ -83,17 +88,21 @@ export class RequestSyncService {
     if (!status) return;
     const card = await this.cards.byRequestId(view.id);
     if (!card || !(await this.cards.markNotified(view.id, status))) return;
-    const sent = await this.sender.send(
-      card.managerChatId,
-      NOTICE[status](view),
-      undefined,
-      false,
-      { replyTo: card.managerMessageId ?? undefined },
-    );
-    // not delivered: let the next event notify again instead of losing the notice
-    if (sent === null) await this.cards.resetNotified(view.id, status);
-    // a manager reply to the notice then goes to the request chat, not to order parsing
-    else await this.cards.rememberChatMessage(card.managerChatId, sent, view.id);
+    if (status === 'paid') return;
+    const { html, buttons } = await this.managerReply(card, view);
+    const sent = await this.sender.send(card.managerChatId, html, buttons);
+    // not delivered: let the next event try again; the old card is still there and up to date
+    if (sent === null) {
+      await this.cards.resetNotified(view.id, status);
+      return;
+    }
+    await this.cards.setManagerMessage(view.id, sent);
+    const old = card.managerMessageId;
+    if (old === null) return;
+    // a reply to the old message still reaches the request, should Telegram keep it
+    await this.cards.rememberChatMessage(card.managerChatId, old, view.id);
+    await this.sender.editMessage(card.managerChatId, old, movedStub(view), []);
+    await this.sender.deleteMessage(card.managerChatId, old);
   }
 
   /** Finance marks the message `sent` once we answer, so a failed delivery must fail the webhook. */

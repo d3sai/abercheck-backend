@@ -41,6 +41,7 @@ describe('RequestSyncService', () => {
     miniAppUrl: undefined as string | undefined,
     send: jest.fn(),
     editMessage: jest.fn(),
+    deleteMessage: jest.fn(),
     sendDocument: jest.fn(),
   };
   const orders = { numbersByIds: jest.fn(), latestPaidAt: jest.fn() };
@@ -52,6 +53,7 @@ describe('RequestSyncService', () => {
     markSeen: jest.fn(),
     unmarkSeen: jest.fn(),
     rememberChatMessage: jest.fn(),
+    setManagerMessage: jest.fn(),
   };
   const managers = { findById: jest.fn() };
   const service = new RequestSyncService(
@@ -75,18 +77,37 @@ describe('RequestSyncService', () => {
 
   describe('notifyManager', () => {
     it.each([
-      ['accepted', { status: 'accepted' }, '✅ Запит #42 прийнято · ФОП: ФОП Іванов'],
-      ['cancelled', { status: 'cancelled' }, '❌ Запит #42 скасовано'],
-      ['paid', { status: 'accepted', isPaid: true }, '💰 Запит #42 оплачено'],
+      ['accepted', { status: 'accepted' }],
+      ['cancelled', { status: 'cancelled' }],
     ] as const)(
-      'should send the %s notice as a reply to the manager card',
-      async (status, patch, text) => {
+      'should move the card down on %s: a fresh card, the old one stubbed and deleted',
+      async (status, patch) => {
         await service.notifyManager(view(patch));
 
         expect(cards.markNotified).toHaveBeenCalledWith('req1', status);
-        expect(sender.send).toHaveBeenCalledWith(555n, text, undefined, false, { replyTo: 31 });
+        expect(sender.send).toHaveBeenCalledTimes(1);
+        const [chat, html] = sender.send.mock.calls[0] as [bigint, string];
+        expect(chat).toBe(555n);
+        expect(html).toContain('#42');
+        expect(cards.setManagerMessage).toHaveBeenCalledWith('req1', 77);
+        expect(cards.rememberChatMessage).toHaveBeenCalledWith(555n, 31, 'req1');
+        expect(sender.editMessage).toHaveBeenCalledWith(
+          555n,
+          31,
+          '⬇️ Запит #42: актуальна картка нижче',
+          [],
+        );
+        expect(sender.deleteMessage).toHaveBeenCalledWith(555n, 31);
       },
     );
+
+    it('should send nothing for a payment: the card is only redrawn in place', async () => {
+      await service.notifyManager(view({ status: 'accepted', isPaid: true }));
+
+      expect(cards.markNotified).toHaveBeenCalledWith('req1', 'paid');
+      expect(sender.send).not.toHaveBeenCalled();
+      expect(sender.deleteMessage).not.toHaveBeenCalled();
+    });
 
     it('should stay silent when this status was already notified', async () => {
       cards.markNotified.mockResolvedValue(false);
@@ -105,40 +126,14 @@ describe('RequestSyncService', () => {
       expect(sender.send).not.toHaveBeenCalled();
     });
 
-    it('should revert the notified status when the notice could not be sent, so a retry notifies again', async () => {
+    it('should keep the old card and revert the status when the new one could not be sent', async () => {
       sender.send.mockResolvedValue(null);
 
       await service.notifyManager(view({ status: 'accepted' }));
 
       expect(cards.resetNotified).toHaveBeenCalledWith('req1', 'accepted');
-    });
-
-    it('should remember the notice so a manager reply to it reaches the request chat', async () => {
-      await service.notifyManager(view({ status: 'accepted' }));
-
-      expect(cards.rememberChatMessage).toHaveBeenCalledWith(555n, 77, 'req1');
-    });
-
-    it('should not remember a notice that was not sent', async () => {
-      sender.send.mockResolvedValue(null);
-
-      await service.notifyManager(view({ status: 'accepted' }));
-
-      expect(cards.rememberChatMessage).not.toHaveBeenCalled();
-    });
-
-    it('should keep the notified status when the notice was sent', async () => {
-      await service.notifyManager(view({ status: 'accepted' }));
-
-      expect(cards.resetNotified).not.toHaveBeenCalled();
-    });
-
-    it('should leave out the FOP when the request has none', async () => {
-      await service.notifyManager(view({ status: 'accepted', fopLabel: null }));
-
-      expect(sender.send).toHaveBeenCalledWith(555n, '✅ Запит #42 прийнято', undefined, false, {
-        replyTo: 31,
-      });
+      expect(cards.setManagerMessage).not.toHaveBeenCalled();
+      expect(sender.deleteMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -317,13 +312,11 @@ describe('RequestSyncService', () => {
         expect.stringContaining('Прийняв'),
         [[{ text: '✅ Прийняти', callback_data: 'mo:req1' }]],
       );
-      expect(sender.send).toHaveBeenCalledWith(
-        555n,
-        '✅ Запит #42 прийнято · ФОП: ФОП Іванов',
-        undefined,
-        false,
-        { replyTo: 31 },
-      );
+      // the card then moves down: one new message instead of a notice
+      expect(sender.send).toHaveBeenCalledWith(555n, expect.stringContaining('Прийняв'), [
+        [{ text: '✅ Прийняти', callback_data: 'mo:req1' }],
+      ]);
+      expect(sender.deleteMessage).toHaveBeenCalledWith(555n, 31);
     });
 
     it('should keep the cancel button on the manager card while the request is pending', async () => {
@@ -341,7 +334,7 @@ describe('RequestSyncService', () => {
       expect(sender.send).not.toHaveBeenCalled();
     });
 
-    it('should send one notice for the same accepted event delivered twice', async () => {
+    it('should move the card once for the same accepted event delivered twice', async () => {
       cards.markNotified.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
       await service.handle(event());

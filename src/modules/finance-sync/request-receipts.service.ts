@@ -20,6 +20,9 @@ type Next = () => Promise<void>;
 const NO_ORDER = 'Запит оформлено, але бот не знайшов замовлення — додайте квитанцію в кабінеті';
 
 /** Receipts a manager sends in the bot chat as a reply to their request. */
+/** `stored`: the receipt was kept; the text then only serves if the 👍 reaction fails. */
+type ReceiptAnswer = BotReply & { stored?: true };
+
 @Injectable()
 export class RequestReceiptsService {
   private readonly logger = new Logger(RequestReceiptsService.name);
@@ -49,10 +52,20 @@ export class RequestReceiptsService {
       return;
     }
     if ((await this.cards.byRequestId(requestId))?.managerId !== manager.id) return next();
-    await reply(ctx, await this.receive(manager, requestId, file), message!.message_id);
+    const answer = await this.receive(manager, requestId, file);
+    // a stored receipt gets a 👍 on the file instead of one more message
+    if (answer.stored) {
+      await ctx.react('👍').catch(() => reply(ctx, answer, message!.message_id));
+      return;
+    }
+    await reply(ctx, answer, message!.message_id);
   }
 
-  async receive(manager: Manager, requestId: string, file: TelegramFileRef): Promise<BotReply> {
+  async receive(
+    manager: Manager,
+    requestId: string,
+    file: TelegramFileRef,
+  ): Promise<ReceiptAnswer> {
     if (!ALLOWED_MIME_TYPES.has(file.mimeType)) {
       return { html: '⚠️ Такий тип файлу не підтримується. Додайте фото, PDF або зображення.' };
     }
@@ -71,7 +84,12 @@ export class RequestReceiptsService {
       await this.cards.holdFile(requestId, file);
       // completion may have stored the ids and attached the held files between the read and the hold
       const late = await this.orderById((await this.cards.byRequestId(requestId))?.orderIds[0]);
-      if (!late) return { html: '📎 Квитанцію збережено — додамо до замовлення після оформлення' };
+      if (!late) {
+        return {
+          html: '📎 Квитанцію збережено — додамо до замовлення після оформлення',
+          stored: true,
+        };
+      }
       // shortcut: a parallel completion attaching the same held rows can attach this file twice; rare, upgrade to a claim on the rows if it shows up
       return this.storing(late, () => this.attachHeld(manager, requestId, late));
     }
@@ -87,14 +105,14 @@ export class RequestReceiptsService {
     return this.storing(order, () => this.attach(manager, order, [file]));
   }
 
-  private async storing(order: Order, store: () => Promise<unknown>): Promise<BotReply> {
+  private async storing(order: Order, store: () => Promise<unknown>): Promise<ReceiptAnswer> {
     try {
       await store();
     } catch (error) {
       if (!(error instanceof AttachmentStorageError)) throw error;
       return { html: '⚠️ Не вдалося зберегти квитанцію, спробуйте ще раз' };
     }
-    return { html: `📎 Квитанцію додано до № ${order.orderNumber}` };
+    return { html: `📎 Квитанцію додано до № ${order.orderNumber}`, stored: true };
   }
 
   private async orderById(id: number | undefined): Promise<Order | null> {

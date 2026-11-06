@@ -248,6 +248,7 @@ describe('RequestReceiptsService', () => {
       from: { id: 555 },
       message: { message_id: 90, reply_to_message: { message_id: 31 } },
       reply: jest.fn(),
+      react: jest.fn().mockResolvedValue(true),
       ...patch,
     });
 
@@ -256,7 +257,7 @@ describe('RequestReceiptsService', () => {
       cards.byManagerMessage.mockResolvedValue(open);
     });
 
-    it('should receive a file replied to the manager card and answer as a reply', async () => {
+    it('should keep a file replied to the manager card and answer with a 👍, not a message', async () => {
       const c = ctx();
       const next = jest.fn();
 
@@ -264,13 +265,34 @@ describe('RequestReceiptsService', () => {
 
       expect(cards.byManagerMessage).toHaveBeenCalledWith(555n, 31);
       expect(cards.holdFile).toHaveBeenCalledWith('req1', photo);
+      expect(c.react).toHaveBeenCalledWith('👍');
+      expect(c.reply).not.toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to the text when the reaction fails', async () => {
+      const c = ctx({ react: jest.fn().mockRejectedValue(new Error('no reactions')) });
+
+      await service.onFile(c as never, photo, jest.fn());
+
       expect(c.reply).toHaveBeenCalledWith(
         '📎 Квитанцію збережено — додамо до замовлення після оформлення',
         expect.objectContaining({
           reply_parameters: { message_id: 90, allow_sending_without_reply: true },
         }),
       );
-      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('should answer a refused file with a message', async () => {
+      const c = ctx();
+
+      await service.onFile(c as never, { ...photo, mimeType: 'video/mp4' }, jest.fn());
+
+      expect(c.react).not.toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith(
+        expect.stringContaining('не підтримується'),
+        expect.anything(),
+      );
     });
 
     it('should receive a file replied to a remembered chat message', async () => {
