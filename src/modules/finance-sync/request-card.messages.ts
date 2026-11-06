@@ -20,7 +20,11 @@ export const FinanceAction = {
   Refresh: /^fu:([\w-]+)$/,
   /** «✅ Прийняти» on the manager card: create the orders from the stored payments. */
   Accept: /^mo:([\w-]+)$/,
+  /** «📎 Прикріпити файли»: the bot asks for the files as a reply; they go straight to Telegram. */
+  Attach: /^ma:([\w-]+)$/,
 } as const;
+
+const attachButton = (id: string) => button('📎 Прикріпити файли', `ma:${id}`);
 
 const KIND_LABEL: Record<RequestKind, string> = {
   our_fop: 'Наш ФОП',
@@ -244,15 +248,11 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
         completed.paidAt ? `✅ Оплачено ${dateTime(completed.paidAt)} · закрито` : '✅ Закрито',
       );
     }
-    // open: the paid form also takes files; closed: only the files are left to add
-    const action = completed.closed
-      ? { text: '📎 Додати файли', mode: 'files' }
-      : paysLater && { text: '💰 Оплачено', mode: 'paid' };
-    return {
-      html: lines.join('\n'),
-      ...(miniAppUrl &&
-        action && { buttons: [[webApp(action.text, miniAppUrl, action.mode, view.id)]] }),
-    };
+    const paid =
+      miniAppUrl && paysLater && !completed.closed
+        ? [webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)]
+        : [];
+    return { html: lines.join('\n'), buttons: [[...paid, attachButton(view.id)]] };
   }
   if (view.status === 'pending') {
     const cancel = button('✖ Скасувати запит', `fc:${view.id}`);
@@ -275,7 +275,7 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
       ? [webApp(ready ? '✏️ Змінити' : '📎 Додати дату', miniAppUrl, 'complete', view.id)]
       : []),
   ];
-  return row.length > 0 ? { html, buttons: [row] } : { html };
+  return { html, buttons: [...(row.length > 0 ? [row] : []), [attachButton(view.id)]] };
 }
 
 /** Alert text for a failed accept; `status` is only needed for 403. Telegram caps alerts at 200 chars. */

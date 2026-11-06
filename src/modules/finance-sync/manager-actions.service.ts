@@ -23,6 +23,31 @@ export class ManagerActionsService {
     private readonly managers: ManagersService,
   ) {}
 
+  /**
+   * «📎 Прикріпити файли»: a force-reply prompt, so the files the manager sends next are replies to it and
+   * reach the request through the receipts flow — straight from Telegram, without an upload through us.
+   */
+  async askFiles(ctx: MatchContext): Promise<void> {
+    if (!isPrivate(ctx) || !ctx.from) return;
+    const card = await this.cards.byRequestId(ctx.match[1]!);
+    if (card?.managerChatId !== BigInt(ctx.chat!.id)) {
+      await ctx.answerCbQuery('Запит не знайдено', { show_alert: true });
+      return;
+    }
+    if (!(await this.managers.findActiveByTelegramId(BigInt(ctx.from.id)))) {
+      await ctx.answerCbQuery(NOT_A_MANAGER, { show_alert: true });
+      return;
+    }
+    await ctx.answerCbQuery();
+    const prompt = await ctx.reply(
+      `📎 Запит #${card.number}: надішліть фото або файли відповіддю на це повідомлення. Можна кілька.`,
+      {
+        reply_markup: { force_reply: true, input_field_placeholder: 'Фото або файл квитанції' },
+      },
+    );
+    await this.cards.rememberChatMessage(card.managerChatId, prompt.message_id, card.requestId);
+  }
+
   async cancel(ctx: MatchContext): Promise<void> {
     if (!isPrivate(ctx) || !ctx.from) return;
     if (!(await this.managers.findActiveByTelegramId(BigInt(ctx.from.id)))) {
