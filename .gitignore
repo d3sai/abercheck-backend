@@ -9,7 +9,8 @@
 /coverage
 
 # env
-.env
+.env*
+!.env.example
 
 # IDE
 /.vscode
