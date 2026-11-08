@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'node:crypto';
 import { type Manager, ManagerRole, ManagerStatus } from '../../generated/prisma/client';
+import type { EnvironmentVariables } from '../../common/config/env.validation';
 import { isUniqueViolation } from '../../common/prisma/prisma-errors';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuthErrors } from './auth.errors';
@@ -28,6 +30,7 @@ const dummyHash = () => (timingDummy ??= hashPassword(randomBytes(16).toString('
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService<EnvironmentVariables, true>,
     private readonly jwt: JwtService,
     private readonly telegram: TelegramLoginVerifier,
   ) {}
@@ -117,6 +120,10 @@ export class AuthService {
 
   private async bootstrapsAdmin(telegramId: bigint, existing: Manager | null): Promise<boolean> {
     if (existing?.status === ManagerStatus.ACTIVE || existing?.status === ManagerStatus.REJECTED) {
+      return false;
+    }
+    const only = this.config.get('BOOTSTRAP_ADMIN_TELEGRAM_ID', { infer: true });
+    if (only !== undefined && BigInt(only) !== telegramId) {
       return false;
     }
     const others = await this.prisma.manager.count({ where: { telegramId: { not: telegramId } } });

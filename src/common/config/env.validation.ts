@@ -70,6 +70,20 @@ export class EnvironmentVariables {
   @MinLength(32)
   WEB_JWT_SECRET!: string;
 
+  // With the table empty, only this Telegram id may become the first admin; unset, the first login wins.
+  @Transform(topicId)
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  BOOTSTRAP_ADMIN_TELEGRAM_ID?: number;
+
+  // Shared with the cabinet: only a login request carrying it may name the visitor's address (X-Client-IP).
+  @Transform(blankToUndefined)
+  @IsOptional()
+  @IsString()
+  @MinLength(16)
+  CLIENT_IP_TOKEN?: string;
+
   // Finance sync is off unless the URL is set; then both tokens are required.
   @Transform(blankToUndefined)
   @IsOptional()

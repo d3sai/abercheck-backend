@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { AuthService, JWT_AUDIENCE, JWT_ISSUER } from '../../../src/modules/auth/auth.service';
@@ -27,6 +28,7 @@ describe('AuthService', () => {
     count: jest.fn(),
   };
   const telegram = { verify: jest.fn() };
+  const config = { get: jest.fn() };
   const jwt = new JwtService({
     secret: 's'.repeat(32),
     signOptions: { expiresIn: 60, issuer: JWT_ISSUER, audience: JWT_AUDIENCE },
@@ -64,6 +66,7 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: { manager } },
         { provide: JwtService, useValue: jwt },
         { provide: TelegramLoginVerifier, useValue: telegram },
+        { provide: ConfigService, useValue: config },
       ],
     }).compile();
 
@@ -174,6 +177,28 @@ describe('AuthService', () => {
         'ACCESS_PENDING',
       );
       expect(manager.upsert).not.toHaveBeenCalled();
+    });
+
+    it('should bootstrap only the configured Telegram id when one is set', async () => {
+      config.get.mockReturnValue(222);
+      manager.findUnique.mockResolvedValue(null);
+      manager.count.mockResolvedValue(0);
+
+      await expect(failure(service.loginWithTelegram({ ...telegramLogin, id: 111 }))).resolves.toBe(
+        'NOT_REGISTERED',
+      );
+      expect(manager.upsert).not.toHaveBeenCalled();
+    });
+
+    it('should bootstrap the configured Telegram id into an admin', async () => {
+      config.get.mockReturnValue(111);
+      manager.findUnique.mockResolvedValue(null);
+      manager.count.mockResolvedValue(0);
+      manager.upsert.mockResolvedValue({ ...active, telegramId: 111n, role: ManagerRole.ADMIN });
+
+      await service.loginWithTelegram({ ...telegramLogin, id: 111 });
+
+      expect(manager.upsert).toHaveBeenCalled();
     });
 
     it('should not undo a rejection even if no one else is registered', async () => {
