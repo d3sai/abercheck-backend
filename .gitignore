@@ -29,3 +29,7 @@
 
 # prisma client (генерується `prisma generate`)
 /src/generated
+
+# agent tooling
+.playwright-mcp/
+.superpowers/
