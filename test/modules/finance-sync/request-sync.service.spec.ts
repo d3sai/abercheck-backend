@@ -439,6 +439,30 @@ describe('RequestSyncService', () => {
         expect(cards.unmarkSeen).toHaveBeenCalledWith('m1');
       });
 
+      it('should not resend the text when only its file failed, and tell the manager', async () => {
+        cards.markNotified.mockResolvedValue(false);
+        finance.file.mockResolvedValue({
+          data: Buffer.from('pdf'),
+          filename: 'a.pdf',
+          mimeType: 'application/pdf',
+        });
+        sender.sendDocument.mockResolvedValue(null);
+
+        await service.handle(
+          event({ type: 'message', message: { ...message, fileName: 'a.pdf' } }),
+        );
+
+        expect(cards.unmarkSeen).not.toHaveBeenCalled();
+        expect(sender.send).toHaveBeenCalledTimes(2);
+        expect(sender.send).toHaveBeenLastCalledWith(
+          555n,
+          expect.stringContaining('a.pdf'),
+          undefined,
+          false,
+          { replyTo: 31 },
+        );
+      });
+
       it('should forget the message when the file cannot be fetched', async () => {
         cards.markNotified.mockResolvedValue(false);
         finance.file.mockRejectedValue(new FinanceApiError(0, 'timeout'));

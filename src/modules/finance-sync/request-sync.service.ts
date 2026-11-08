@@ -117,6 +117,7 @@ export class RequestSyncService {
   ): Promise<void> {
     // shortcut: a parallel duplicate within finance's 10 s timeout can be acked while the first attempt later fails, losing the message; upgrade to a delivery status per messageId if it shows up
     if (!(await this.cards.markSeen(message.messageId))) return;
+    let textSent = false;
     try {
       const line = `💬 ${escapeHtml(message.author)}`;
       const replyTo = card.managerMessageId ?? undefined;
@@ -134,6 +135,7 @@ export class RequestSyncService {
             { replyTo },
           ),
         );
+        textSent = true;
       }
       if (file) {
         await this.deliver(card, () =>
@@ -146,6 +148,17 @@ export class RequestSyncService {
         );
       }
     } catch (error) {
+      // a retry would send the text again, so the manager is told about the lost file instead
+      if (textSent) {
+        await this.sender.send(
+          card.managerChatId,
+          `⚠️ Файл «${escapeHtml(message.fileName ?? '')}» не доставлено, він є в чаті запиту в кабінеті`,
+          undefined,
+          false,
+          { replyTo: card.managerMessageId ?? undefined },
+        );
+        return;
+      }
       await this.cards.unmarkSeen(message.messageId);
       throw error;
     }
