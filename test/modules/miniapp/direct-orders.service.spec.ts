@@ -91,9 +91,13 @@ const failure = async (promise: Promise<unknown>) => {
 };
 
 describe('DirectOrdersService', () => {
-  const orders = { findWithBalance: jest.fn(), createGroup: jest.fn() };
+  const orders = { findWithBalance: jest.fn(), createGroup: jest.fn(), setPaidAt: jest.fn() };
   const payments = { findByExternalId: jest.fn(), ingest: jest.fn() };
-  const sender = { sendToAdmins: jest.fn() };
+  const sender = {
+    sendToAdmins: jest.fn(),
+    send: jest.fn(),
+    miniAppUrl: undefined as string | undefined,
+  };
   let service: DirectOrdersService;
 
   beforeEach(async () => {
@@ -277,6 +281,39 @@ describe('DirectOrdersService', () => {
       expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('Абертайм ТОВ'));
     });
 
+    it('should write to the manager with «Оплачено» when the order has no date yet', async () => {
+      sender.miniAppUrl = 'https://cab.example.ua/tg/request';
+      const undated: OrderPlan = {
+        kind: 'foreign',
+        plan: { ...foreign.plan, paidAt: null },
+      };
+
+      await service.create(manager, undated);
+
+      expect(sender.send).toHaveBeenCalledWith(
+        manager.telegramId,
+        expect.stringContaining('0000-066498'),
+        [
+          [
+            {
+              text: '💰 Оплачено',
+              web_app: {
+                url: 'https://cab.example.ua/tg/request?mode=orderpaid&id=0000-066498',
+              },
+            },
+          ],
+        ],
+      );
+    });
+
+    it('should not write to the manager when the order has its date', async () => {
+      sender.miniAppUrl = 'https://cab.example.ua/tg/request';
+
+      await service.create(manager, foreign);
+
+      expect(sender.send).not.toHaveBeenCalled();
+    });
+
     it('should only tell the admins when the order exists', async () => {
       orders.findWithBalance.mockResolvedValue(stored('0000-066498', 'EUR'));
 
@@ -295,6 +332,56 @@ describe('DirectOrdersService', () => {
         code: 'order-taken',
       });
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('«Оплачено» of an order without a request', () => {
+    const own = {
+      order: {
+        id: 5,
+        managerId: manager.id,
+        orderNumber: '0000-066498',
+        clientName: 'Оплата закордонного замовлення',
+        amountDue: dec('100'),
+        currency: 'EUR',
+        paidAt: null,
+      },
+    };
+
+    it("should show the manager's own order", async () => {
+      orders.findWithBalance.mockResolvedValue(own);
+
+      await expect(service.view(manager, '0000-066498')).resolves.toEqual({
+        orderNumber: '0000-066498',
+        clientName: 'Оплата закордонного замовлення',
+        amount: '100.00',
+        currency: 'EUR',
+        paidAt: null,
+      });
+    });
+
+    it('should stamp the date and time the client paid', async () => {
+      orders.findWithBalance.mockResolvedValue(own);
+
+      const result = await service.markPaid(manager, '0000-066498', {
+        date: '2026-01-15',
+        time: '14:30',
+      });
+
+      expect(orders.setPaidAt).toHaveBeenCalledWith([5], new Date('2026-01-15T12:30:00.000Z'));
+      expect(result).toEqual({ paidAt: '2026-01-15T12:30:00.000Z' });
+    });
+
+    it.each([
+      ["another manager's order", { order: { ...own.order, managerId: 99 } }],
+      ['a missing order', null],
+    ])('should answer 404 for %s', async (_, found) => {
+      orders.findWithBalance.mockResolvedValue(found);
+
+      expect(
+        await failure(service.markPaid(manager, '0000-066498', { date: '2026-01-15' })),
+      ).toMatchObject({ status: 404 });
+      expect(orders.setPaidAt).not.toHaveBeenCalled();
     });
   });
 });

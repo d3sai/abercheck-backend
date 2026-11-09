@@ -173,9 +173,10 @@ describe('RequestSyncService', () => {
       expect(html).toContain('• Іван · 700 грн · 04.11.2026 10:15');
     });
 
-    it('should keep the «Оформлено» line and keep only «Прикріпити файли» on a completed card of a closed kind', async () => {
+    it('should keep the «Оформлено» line and drop «Оплачено» on a completed card whose orders are dated', async () => {
       sender.miniAppUrl = URL_;
       orders.numbersByIds.mockResolvedValue(['0000-1', '0000-2']);
+      orders.latestPaidAt.mockResolvedValue(new Date('2026-11-04T12:30:00.000Z'));
 
       await service.renderManager(
         { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10, 11] },
@@ -186,7 +187,24 @@ describe('RequestSyncService', () => {
       const [, , html, buttons] = edit();
       expect(html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
       expect(buttons).toEqual([[{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }]]);
-      expect(orders.latestPaidAt).not.toHaveBeenCalled();
+      expect(html).toContain('✅ Оплачено 04.11.2026 14:30');
+    });
+
+    it('should offer «Оплачено» on a completed card whose orders have no date yet', async () => {
+      sender.miniAppUrl = URL_;
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      orders.latestPaidAt.mockResolvedValue(null);
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10] },
+        view({ status: 'accepted', kind: 'card' }),
+      );
+
+      expect(
+        edit()[3]!
+          .flat()
+          .map((b) => b.text),
+      ).toEqual(['💰 Оплачено', '📎 Прикріпити файли']);
     });
 
     it('should offer «Оплачено» on a completed our_fop that is still open', async () => {

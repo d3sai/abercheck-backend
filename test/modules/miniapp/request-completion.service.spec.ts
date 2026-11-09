@@ -123,7 +123,7 @@ describe('RequestCompletionService', () => {
     setPaidAt: jest.fn(),
     numbersByIds: jest.fn(),
   };
-  const requisites = { addMany: jest.fn() };
+  const requisites = { addMany: jest.fn(), fillPaidAt: jest.fn() };
   const sender = {
     miniAppUrl: undefined as string | undefined,
     sendToAdmins: jest.fn(),
@@ -154,6 +154,7 @@ describe('RequestCompletionService', () => {
     cards.heldFiles.mockResolvedValue([]);
     orders.findWithBalance.mockResolvedValue(null);
     requisites.addMany.mockResolvedValue([]);
+    requisites.fillPaidAt.mockResolvedValue(undefined);
     sender.miniAppUrl = undefined;
     sender.sendToAdmins.mockResolvedValue(1);
     sender.editMessage.mockResolvedValue(true);
@@ -884,7 +885,7 @@ describe('RequestCompletionService', () => {
 
   describe('closing', () => {
     it.each<RequestKind>(['card'])(
-      'should close a %s task with the completion and leave only «Прикріпити файли»',
+      'should close a %s task with the completion and offer «Оплачено»',
       async (kind) => {
         sender.miniAppUrl = 'https://cab.example.ua/tg/request';
         view(kind, { orders: [orderRow('0000-070217', '1000')] });
@@ -899,8 +900,16 @@ describe('RequestCompletionService', () => {
         expect(cards.claimCompletion).toHaveBeenCalledWith('req1', expect.any(Date), true);
         const [, , html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
         expect(html).toContain('✅ Оформлено: № 0000-070217');
-        expect(html).not.toContain('Оплачено');
-        expect(buttons).toEqual([ATTACH]);
+        expect(html).not.toContain('✅ Оплачено');
+        expect(buttons).toEqual([
+          [
+            {
+              text: '💰 Оплачено',
+              web_app: { url: 'https://cab.example.ua/tg/request?mode=paid&id=req1' },
+            },
+            ...ATTACH,
+          ],
+        ]);
       },
     );
 
@@ -1268,6 +1277,7 @@ describe('RequestCompletionService', () => {
       expect(result).toEqual({ paidAt: paidAt.toISOString() });
       expect(cards.claimClosing).toHaveBeenCalledWith('req1', expect.any(Date));
       expect(orders.setPaidAt).toHaveBeenCalledWith([10, 11], paidAt);
+      expect(requisites.fillPaidAt).toHaveBeenCalledWith([10, 11], paidAt);
       const [chat, message, html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
       expect([chat, message, buttons]).toEqual([555n, 77, [ATTACH]]);
       expect(html).toContain('✅ Оформлено: № 0000-070217, 0000-070218');
@@ -1326,14 +1336,20 @@ describe('RequestCompletionService', () => {
     });
 
     it.each<RequestKind>(['card', 'minus'])(
-      'should answer 409 no-paid-step for %s',
+      'should stamp the orders and payments of %s without closing it again',
       async (kind) => {
+        cards.byRequestId.mockResolvedValue({ ...done, closedAt: new Date() });
         view(kind);
+        sender.miniAppUrl = 'https://cab.example.ua/tg/request';
 
-        const error = await failure(service.markPaid(manager, 'req1', when));
+        await service.markPaid(manager, 'req1', when);
 
-        expect(error).toMatchObject({ status: HttpStatus.CONFLICT, code: 'no-paid-step' });
         expect(cards.claimClosing).not.toHaveBeenCalled();
+        expect(orders.setPaidAt).toHaveBeenCalledWith([10, 11], paidAt);
+        expect(requisites.fillPaidAt).toHaveBeenCalledWith([10, 11], paidAt);
+        const [, , html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
+        expect(html).toContain('✅ Оплачено 04.11.2026 14:30');
+        expect(buttons).toEqual([ATTACH]);
       },
     );
 

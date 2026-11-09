@@ -54,9 +54,9 @@ export class RequestSyncService {
         ? {
             orderNumbers: await this.orders.numbersByIds(card.orderIds),
             closed: card.closedAt != null,
-            // a closed our_fop or foreign_fop card shows when the client paid
+            // shows when the client paid: a closed our_fop or foreign_fop card, or any other kind once dated
             paidAt:
-              card.closedAt && paysAfterConfirm(view.kind)
+              card.closedAt || !paysAfterConfirm(view.kind)
                 ? await this.orders.latestPaidAt(card.orderIds)
                 : null,
           }

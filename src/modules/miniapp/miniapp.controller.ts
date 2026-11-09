@@ -28,7 +28,11 @@ import { RequestCardsRepository } from '../finance-sync/request-cards.repository
 import { RequestCreateService } from '../finance-sync/request-create.service';
 import { RequestSyncService } from '../finance-sync/request-sync.service';
 import { storedPayments } from '../finance-sync/stored-payments';
-import { type DirectOrdersResult, DirectOrdersService } from './direct-orders.service';
+import {
+  type DirectOrdersResult,
+  type DirectOrderView,
+  DirectOrdersService,
+} from './direct-orders.service';
 import { MiniappManager, MiniappAuthGuard } from './miniapp-auth.guard';
 import {
   CompleteMiniappRequestDto,
@@ -106,6 +110,24 @@ export class MiniappController {
     @Body() dto: CreateMiniappOrderDto,
   ): Promise<DirectOrdersResult> {
     return this.directOrders.create(manager, toOrderPlan(dto));
+  }
+
+  @Get('orders/:number')
+  order(
+    @MiniappManager() manager: Manager,
+    @Param('number') number: string,
+  ): Promise<DirectOrderView> {
+    return this.directOrders.view(manager, number);
+  }
+
+  @Post('orders/:number/paid')
+  @HttpCode(HttpStatus.OK)
+  orderPaid(
+    @MiniappManager() manager: Manager,
+    @Param('number') number: string,
+    @Body() dto: PaidMiniappRequestDto,
+  ): Promise<{ paidAt: string }> {
+    return this.directOrders.markPaid(manager, number, dto);
   }
 
   @Get('requests/:id')

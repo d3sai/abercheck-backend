@@ -147,7 +147,7 @@ export class ForeignDraftService {
     this.drafts.disarm(manager.telegramId);
 
     await this.announce(manager, plan, exists, created, this.pendingFiles.take(manager.telegramId));
-    return foreignCreatedReply(plan);
+    return foreignCreatedReply(plan, this.sender.miniAppUrl);
   }
 
   pendingUserIds(now: number): bigint[] {

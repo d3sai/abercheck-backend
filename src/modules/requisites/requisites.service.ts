@@ -39,6 +39,14 @@ export class RequisitesService {
     return created;
   }
 
+  /** The client paid: stamps the date on the payments of `orderIds` that have none yet. */
+  async fillPaidAt(orderIds: number[], paidAt: Date): Promise<void> {
+    await this.prisma.orderRequisite.updateMany({
+      where: { orderId: { in: orderIds }, paidAt: null },
+      data: { paidAt },
+    });
+  }
+
   list(orderId: number): Promise<OrderRequisite[]> {
     return this.prisma.orderRequisite.findMany({
       where: { orderId },

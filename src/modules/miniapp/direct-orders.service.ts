@@ -2,13 +2,17 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Manager } from '../../generated/prisma/client';
 import { ApiError } from '../../common/api-error';
 import { OrderNumberTakenError } from '../orders/orders.errors';
+import { OrdersService } from '../orders/orders.service';
+import { TelegramSender } from '../telegram/core/telegram-sender';
 import { CashDraftService } from '../telegram/order-draft/cash-draft.service';
 import type { CashPlan } from '../telegram/order-draft/cash.parser';
 import { ForeignDraftService } from '../telegram/order-draft/foreign-draft.service';
 import type { ForeignPlan } from '../telegram/order-draft/foreign.parser';
 import { KitDraftService } from '../telegram/order-draft/kit-draft.service';
 import type { KitPlan } from '../telegram/order-draft/kit.parser';
-import type { OrderPlan } from './miniapp.dto';
+import { foreignCreatedReply } from '../telegram/order-draft/foreign.messages';
+import { type OrderPlan, type PaidMiniappRequestDto, toPaidAt } from './miniapp.dto';
+import { notFound } from './miniapp.errors';
 
 export interface DirectOrdersResult {
   /** Numbers created as new orders. */
@@ -16,6 +20,15 @@ export interface DirectOrdersResult {
   /** Numbers the system already had: the payment was only recorded or the notice sent. */
   skipped: string[];
   note?: string;
+}
+
+/** What «💰 Оплачено» shows of an order made without a request. */
+export interface DirectOrderView {
+  orderNumber: string;
+  clientName: string;
+  amount: string;
+  currency: string;
+  paidAt: string | null;
 }
 
 const conflict = (code: string, message: string): ApiError =>
@@ -28,7 +41,39 @@ export class DirectOrdersService {
     private readonly kit: KitDraftService,
     private readonly cash: CashDraftService,
     private readonly foreign: ForeignDraftService,
+    private readonly orders: OrdersService,
+    private readonly sender: TelegramSender,
   ) {}
+
+  /** The manager's own order; another manager's looks exactly like a missing one. */
+  private async ownOrder(manager: Manager, orderNumber: string) {
+    const found = await this.orders.findWithBalance(orderNumber);
+    if (found?.order.managerId !== manager.id) throw notFound();
+    return found.order;
+  }
+
+  async view(manager: Manager, orderNumber: string): Promise<DirectOrderView> {
+    const order = await this.ownOrder(manager, orderNumber);
+    return {
+      orderNumber: order.orderNumber,
+      clientName: order.clientName,
+      amount: order.amountDue.toFixed(2),
+      currency: order.currency,
+      paidAt: order.paidAt?.toISOString() ?? null,
+    };
+  }
+
+  /** «💰 Оплачено» of an order made without a request: the date and time the client paid. */
+  async markPaid(
+    manager: Manager,
+    orderNumber: string,
+    body: PaidMiniappRequestDto,
+  ): Promise<{ paidAt: string }> {
+    const order = await this.ownOrder(manager, orderNumber);
+    const paidAt = toPaidAt(body);
+    await this.orders.setPaidAt([order.id], paidAt);
+    return { paidAt: paidAt.toISOString() };
+  }
 
   async create(manager: Manager, order: OrderPlan): Promise<DirectOrdersResult> {
     try {
@@ -88,6 +133,11 @@ export class DirectOrdersService {
     const exists = await this.foreign.exists(plan);
     const created = await this.foreign.createOrder(manager, plan, exists);
     await this.foreign.announce(manager, plan, exists, created);
+    // a form has no bot reply to carry the button, so the bot writes to the manager
+    if (created && !plan.paidAt) {
+      const { html, buttons } = foreignCreatedReply(plan, this.sender.miniAppUrl);
+      if (buttons) await this.sender.send(manager.telegramId, html, buttons);
+    }
     return exists
       ? {
           orderNumbers: [],

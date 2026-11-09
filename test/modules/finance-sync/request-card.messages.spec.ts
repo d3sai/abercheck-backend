@@ -334,15 +334,31 @@ describe('managerCard with the Mini App', () => {
     expect(new URL(url).searchParams.get('mode')).toBe('complete');
   });
 
-  it('completed: the «Оформлено» line and no button for a kind that closes with the completion', () => {
+  it('completed card: the «Оформлено» line and «Оплачено» until the client has paid', () => {
     const reply = managerCard(view({ ...accepted(), kind: 'card' }), {
       miniAppUrl,
       completed: { orderNumbers: ['0000-1', '0000-2'], closed: true },
     });
 
-    expect(all(reply)).toEqual([[ATTACH]]);
+    expect(all(reply)).toEqual([
+      [{ text: '💰 Оплачено', web_app: { url: `${miniAppUrl}?mode=paid&id=${ID}` } }, ATTACH],
+    ]);
     expect(reply.html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
     expect(reply.html).toContain('📎 Квитанція: просто надішліть фото чи файл у цей чат.');
+  });
+
+  it('completed minus with the payment date: the date line and no «Оплачено»', () => {
+    const reply = managerCard(view({ ...accepted(), kind: 'minus' }), {
+      miniAppUrl,
+      completed: {
+        orderNumbers: ['0000-1'],
+        closed: true,
+        paidAt: new Date('2026-11-04T12:30:00.000Z'),
+      },
+    });
+
+    expect(all(reply)).toEqual([[ATTACH]]);
+    expect(reply.html).toContain('✅ Оплачено 04.11.2026 14:30');
   });
 
   it('completed our_fop: «Оплачено» opens the paid form', () => {
@@ -395,7 +411,7 @@ describe('managerCard with the Mini App', () => {
   it('completed never shows edit or cancel, even for a pending view', () => {
     const reply = managerCard(view({ kind: 'card' }), {
       miniAppUrl,
-      completed: { orderNumbers: [] },
+      completed: { orderNumbers: [], paidAt: new Date('2026-11-04T12:30:00.000Z') },
     });
 
     expect(all(reply)).toEqual([[ATTACH]]);

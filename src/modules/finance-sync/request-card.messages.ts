@@ -189,7 +189,7 @@ export interface ManagerCardOptions {
   completed?: { orderNumbers: string[]; closed?: boolean; paidAt?: Date | null } | false;
 }
 
-const webApp = (text: string, miniAppUrl: string, mode: string, id: string) => {
+export const webApp = (text: string, miniAppUrl: string, mode: string, id: string) => {
   const url = new URL(miniAppUrl);
   url.searchParams.set('mode', mode);
   url.searchParams.set('id', id);
@@ -252,10 +252,11 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
         completed.paidAt ? `✅ Оплачено ${dateTime(completed.paidAt)} · закрито` : '✅ Закрито',
       );
     }
+    // card and minus close with the completion, but still wait for the date of payment
+    if (!paysLater && completed.paidAt) lines.push(`✅ Оплачено ${dateTime(completed.paidAt)}`);
+    const awaitsPayment = paysLater ? !completed.closed : !completed.paidAt;
     const paid =
-      miniAppUrl && paysLater && !completed.closed
-        ? [webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)]
-        : [];
+      miniAppUrl && awaitsPayment ? [webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)] : [];
     return { html: lines.join('\n'), buttons: [[...paid, attachButton(view.id)]] };
   }
   // no editing: a manager accepts or cancels; a change is a new request

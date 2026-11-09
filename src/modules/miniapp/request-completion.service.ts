@@ -178,7 +178,10 @@ export class RequestCompletionService {
     });
   }
 
-  /** «💰 Оплачено» of our_fop and foreign_fop: the client paid, the date goes to the orders and the task closes. */
+  /**
+   * «💰 Оплачено»: the client paid, the date goes to the orders and their payments. our_fop and
+   * foreign_fop close with it; card and minus were closed at completion.
+   */
   async markPaid(
     manager: Manager,
     requestId: string,
@@ -196,25 +199,23 @@ export class RequestCompletionService {
     } catch (error) {
       throw financeError(error);
     }
-    if (!paysAfterConfirm(view.kind)) {
-      throw apiError(
-        HttpStatus.CONFLICT,
-        'no-paid-step',
-        'Оплату відмічають лише для «Наш ФОП» і «Чужий ФОП»',
-      );
-    }
-    // after the kind check: a closed card or minus must hear «no paid step», not «already closed»
-    if (card.closedAt) {
-      throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
-    }
-    // atomic: two parallel presses close it once
-    if (!(await this.cards.claimClosing(requestId, new Date()))) {
-      throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
+    const closesHere = paysAfterConfirm(view.kind);
+    if (closesHere) {
+      if (card.closedAt) {
+        throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
+      }
+      // atomic: two parallel presses close it once
+      if (!(await this.cards.claimClosing(requestId, new Date()))) {
+        throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
+      }
     }
     try {
       await this.orders.setPaidAt(card.orderIds, paidAt);
+      await this.requisites.fillPaidAt(card.orderIds, paidAt);
     } catch (error) {
-      await this.safely(requestId, 'closing release', () => this.cards.releaseClosing(requestId));
+      if (closesHere) {
+        await this.safely(requestId, 'closing release', () => this.cards.releaseClosing(requestId));
+      }
       throw error;
     }
     await this.safely(requestId, 'manager card', async () => {
