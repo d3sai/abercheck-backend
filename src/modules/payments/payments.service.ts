@@ -186,6 +186,14 @@ export class PaymentsService {
     payment: Payment,
     parts: Order[],
   ): Promise<PaymentRecorded> {
+    // an order entered without the time of payment gets it from the first payment that arrives
+    const ids = parts.map((part) => part.id);
+    const when = { paidAt: payment.paidAt };
+    await tx.order.updateMany({ where: { id: { in: ids }, paidAt: null }, data: when });
+    await tx.orderRequisite.updateMany({
+      where: { orderId: { in: ids }, paidAt: null },
+      data: when,
+    });
     const amountPaid = await groupNetPaid(tx, pickAnchor(parts).baseNumber);
     const previousStatus = pickAnchor(parts).status;
     const synced = await syncGroupStatus(tx, parts, amountPaid);

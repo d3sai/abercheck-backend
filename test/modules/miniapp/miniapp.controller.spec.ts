@@ -159,6 +159,22 @@ describe('MiniappController', () => {
       });
     });
 
+    it('should keep the payment time unknown when the manager gives no date', async () => {
+      await create({
+        kind: 'minus',
+        sum: '100',
+        clientLabel: 'Іван',
+        payments: [{ amount: '100' }],
+      });
+
+      expect(requests.create).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          payments: [{ payerName: null, account: null, amount: '100.00', paidAt: null }],
+        }),
+      );
+    });
+
     it('should treat null optional fields as absent on create', async () => {
       await create({
         kind: 'card',
@@ -283,8 +299,8 @@ describe('MiniappController', () => {
         { kind: 'card', orders: [order], payments: [{ ...paid, payerName: ' ' }] },
       ],
       [
-        'card without a time',
-        { kind: 'card', orders: [order], payments: [{ ...paid, time: undefined }] },
+        'card with a time but no date',
+        { kind: 'card', orders: [order], payments: [{ ...paid, date: undefined }] },
       ],
       [
         'card with eleven payments',
@@ -306,15 +322,6 @@ describe('MiniappController', () => {
           sum: '100',
           clientLabel: 'A',
           payments: Array(2).fill({ amount: '50', date: '2026-11-04', time: '09:05' }),
-        },
-      ],
-      [
-        'minus without a time',
-        {
-          kind: 'minus',
-          sum: '100',
-          clientLabel: 'A',
-          payments: [{ amount: '100', date: '2026-11-04' }],
         },
       ],
       [

@@ -128,9 +128,11 @@ export class PaymentRowDto {
   @MaxLength(32)
   amount!: string;
 
+  /** Empty while the manager does not know when the client paid: the payment fills it in. */
+  @IsOptional()
   @IsString()
   @MaxLength(10)
-  date!: string;
+  date?: string;
 
   @IsOptional()
   @IsString()
@@ -291,7 +293,7 @@ export interface Payment {
   payerName: string | null;
   account: string | null;
   amount: string;
-  paidAt: Date;
+  paidAt: Date | null;
 }
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -329,8 +331,9 @@ const notInFuture = (paid: Date, now: Date): Date => {
 };
 
 /**
- * Date and time are required for every kind except our_fop and foreign_fop, which may have no payment
- * at all (the client has not paid yet); several rows only for card. Never in the future.
+ * Date and time are optional, as the manager may not know them yet: the payment fills them in. our_fop
+ * and foreign_fop may have no payment at all (the client has not paid yet); several rows only for
+ * card. Never in the future.
  */
 export function toPayments(kind: RequestKind, rows: PaymentRowDto[], now = new Date()): Payment[] {
   const withPayers = kind === 'card';
@@ -340,15 +343,15 @@ export function toPayments(kind: RequestKind, rows: PaymentRowDto[], now = new D
   }
   if (!withPayers && rows.length > 1) throw invalid('Для цього запиту потрібна одна дата оплати.');
   return rows.map((row) => {
-    const time = text(row.time);
-    if (!payLater && time === null) throw invalid('Вкажіть дату й час оплати.');
+    const date = text(row.date);
+    if (date === null && text(row.time) !== null) throw invalid('Вкажіть дату оплати.');
     const payerName = text(row.payerName);
     if (withPayers && payerName === null) throw invalid('Вкажіть, хто платив.');
     return {
       payerName,
       account: text(row.account),
       amount: money(row.amount),
-      paidAt: notInFuture(paidAt(row.date, time), now),
+      paidAt: date === null ? null : notInFuture(paidAt(date, text(row.time)), now),
     };
   });
 }
@@ -358,12 +361,15 @@ const storable = (payments: Payment[]): StoredPayment[] =>
     payerName: payment.payerName,
     account: payment.account,
     amount: new Prisma.Decimal(payment.amount).toFixed(2),
-    paidAt: payment.paidAt.toISOString(),
+    paidAt: payment.paidAt?.toISOString() ?? null,
   }));
 
 /** The card keeps payments validated at creation, so they come back without another look. */
 export const fromStored = (payments: StoredPayment[]): Payment[] =>
-  payments.map((payment) => ({ ...payment, paidAt: new Date(payment.paidAt) }));
+  payments.map((payment) => ({
+    ...payment,
+    paidAt: payment.paidAt === null ? null : new Date(payment.paidAt),
+  }));
 
 /** The orders' own amounts and rates by number; the numbers must be exactly the request's. */
 export function toOrderOverrides(
@@ -467,9 +473,11 @@ export class CreateMiniappOrderDto {
   @IsBoolean()
   withPercent?: boolean;
 
+  /** Required for kit and cash; foreign leaves it empty until the payment arrives. */
+  @IsOptional()
   @IsString()
   @MaxLength(10)
-  date!: string;
+  date?: string;
 
   @IsOptional()
   @IsString()
@@ -516,9 +524,15 @@ function currencyOf(value: Currency | undefined, allowed: readonly Currency[]): 
 
 /** Builds the same plan the text parsers build, from the form's fields; the date is a past Kyiv date. */
 export function toOrderPlan(dto: CreateMiniappOrderDto, now = new Date()): OrderPlan {
+  const date = text(dto.date);
   const time = text(dto.time);
-  if (dto.kind !== 'foreign' && time === null) throw invalid('Вкажіть дату й час оплати.');
-  const paid = notInFuture(paidAt(dto.date, time), now);
+  if (date === null && time !== null) throw invalid('Вкажіть дату оплати.');
+  const paid = date === null ? null : notInFuture(paidAt(date, time), now);
+  // kit and cash are paid when entered; only foreign may wait for its payment
+  const required = (): Date => {
+    if (paid === null || time === null) throw invalid('Вкажіть дату й час оплати.');
+    return paid;
+  };
   const comment = text(dto.comment);
 
   if (dto.kind === 'kit') {
@@ -539,7 +553,7 @@ export function toOrderPlan(dto: CreateMiniappOrderDto, now = new Date()): Order
         accessCode: requiredText(dto.accessCode, 'Вкажіть код доступу.'),
         total: items.reduce((total, item) => total.plus(item.amount), new Prisma.Decimal(0)),
         items,
-        paidAt: paid,
+        paidAt: required(),
         comment,
         warnings: [],
       },
@@ -557,7 +571,7 @@ export function toOrderPlan(dto: CreateMiniappOrderDto, now = new Date()): Order
         amount,
         currency: currencyOf(dto.currency, [Currency.UAH, Currency.USD]),
         rate,
-        paidAt: paid,
+        paidAt: required(),
         handedBy: requiredText(dto.handedBy, 'Вкажіть, ким передано.'),
         withPercent: dto.withPercent ?? null,
         comment,

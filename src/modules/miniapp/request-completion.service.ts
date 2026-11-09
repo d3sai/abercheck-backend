@@ -406,7 +406,7 @@ export class RequestCompletionService {
       exchangeRate: view.exchangeRate ?? undefined,
       comment: view.comment ?? undefined,
       // the client may not have paid yet: no date until «💰 Оплачено»
-      paidAt: payment?.paidAt,
+      paidAt: payment?.paidAt ?? undefined,
     };
     const orders =
       items.length === 1

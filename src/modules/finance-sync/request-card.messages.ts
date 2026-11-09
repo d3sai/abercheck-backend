@@ -222,7 +222,7 @@ function paymentLine(payment: StoredPayment): string {
     payment.payerName && clip(payment.payerName),
     payment.account && clip(payment.account),
     money(payment.amount),
-    dateTime(new Date(payment.paidAt)),
+    payment.paidAt && dateTime(new Date(payment.paidAt)),
   ].filter((part): part is string => Boolean(part));
   return `• ${parts.map(escapeHtml).join(' · ')}`;
 }

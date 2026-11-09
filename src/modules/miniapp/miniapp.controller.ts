@@ -54,8 +54,8 @@ interface RequestResponse {
     payerName: string | null;
     account: string | null;
     amount: string;
-    date: string;
-    time: string;
+    date: string | null;
+    time: string | null;
   }[];
 }
 
@@ -195,15 +195,15 @@ export class MiniappController {
       closed:
         card.closedAt != null || (card.completedAt != null && !paysAfterConfirm(request.kind)),
       payments: storedPayments(card.payments).map((payment) => {
-        const paidAt = new Date(payment.paidAt);
-        const { hour, minute } = kyivParts(paidAt);
-        return {
+        const base = {
           payerName: payment.payerName,
           account: payment.account,
           amount: payment.amount,
-          date: kyivDate(paidAt),
-          time: `${hour}:${minute}`,
         };
+        if (payment.paidAt === null) return { ...base, date: null, time: null };
+        const paidAt = new Date(payment.paidAt);
+        const { hour, minute } = kyivParts(paidAt);
+        return { ...base, date: kyivDate(paidAt), time: `${hour}:${minute}` };
       }),
     };
   }

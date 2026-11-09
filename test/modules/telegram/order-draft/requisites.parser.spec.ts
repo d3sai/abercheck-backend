@@ -282,7 +282,7 @@ describe('parseRequisites', () => {
         'ФОП Берчатов М.М||59438.85',
         'ФОП Берчатова Л.О||59371.79',
       ]);
-      expect(plan.requisiteLines[0]!.paidAt.toISOString()).toBe('2026-09-19T07:50:00.000Z');
+      expect(plan.requisiteLines[0]!.paidAt?.toISOString()).toBe('2026-09-19T07:50:00.000Z');
     });
 
     it('should read amounts written with a dot and an amount followed by a time', () => {
@@ -488,7 +488,7 @@ describe('parseRequisites', () => {
         'ФОП Носенко Роман||4527.00',
         'Андріанов Олександр|4441 1110 6964 5962|2140.00',
       ]);
-      expect(plan.requisiteLines.map((r) => r.paidAt.toISOString())).toEqual([
+      expect(plan.requisiteLines.map((r) => r.paidAt?.toISOString())).toEqual([
         '2026-09-07T11:57:00.000Z',
         '2026-09-07T11:57:00.000Z',
       ]);
@@ -515,7 +515,7 @@ describe('parseRequisites', () => {
         'Хабурський Ігор|4149439025213368|600.00',
         'Івченко Євгеній|4149439025213368|364.00',
       ]);
-      expect(plan.requisiteLines.map((r) => r.paidAt.toISOString())).toEqual([
+      expect(plan.requisiteLines.map((r) => r.paidAt?.toISOString())).toEqual([
         '2026-10-23T09:23:00.000Z',
         '2026-10-23T09:30:00.000Z',
       ]);
@@ -632,16 +632,19 @@ describe('parseRequisites', () => {
     });
   });
 
-  describe('a message without a name or a date with time', () => {
-    it.each([
-      ['0000-068641 100 грн\n07.09.2026 14:57', 'Не знайшов ФОП'],
-      ['0000-068641 100 грн\nГук Іван', 'Не вказано дату й час'],
-      ['0000-068641 100 грн\nГук Іван\n07.09.2026', 'Не вказано дату й час'],
-      ['0000-064572 68 грн\n\n0000-070442 11 534 грн\nadmin\n50\ntest', 'Не вказано дату й час'],
-    ])('should refuse «%s»', (text, error) => {
-      const result = parseRequisites(text);
+  describe('a message without a name', () => {
+    it('should refuse «0000-068641 100 грн\\n07.09.2026 14:57»', () => {
+      const result = parseRequisites('0000-068641 100 грн\n07.09.2026 14:57');
 
-      expect(!result.ok && result.errors.join(' ')).toContain(error);
+      expect(!result.ok && result.errors.join(' ')).toContain('Не знайшов ФОП');
+    });
+  });
+
+  describe('a message without a date', () => {
+    it('should keep the payment time unknown: the payment fills it in', () => {
+      const plan = planOf('0000-068641 100 грн\nГук Іван 4149439025213368');
+
+      expect(plan.requisiteLines.map((r) => r.paidAt)).toEqual([null]);
     });
   });
 

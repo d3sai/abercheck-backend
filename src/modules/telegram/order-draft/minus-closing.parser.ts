@@ -61,7 +61,6 @@ const BANK_NOISE = /\d(?![\d.,]*\s*%)|призначення|iban|ібан|єд�
 const PERIOD = /\s+(за\s+(?:підрахунком|період|\d).*)$/iu;
 const URL_PATTERN = /https?:\/\/\S+/iu;
 const NUMBER_ONLY = /^[№#]?\s*(\d{4}-\d{6})$/u;
-const TIME_IN_DATE = /\d:\d{2}$/u;
 const FOP_PREFIX = /^фоп\s+/iu;
 const COMPANY_PREFIX = /^тов\s+/iu;
 const ON_CARD = /^(?:на\s+)?(?:карт[ауиі]|картку|рахунок)\s+/iu;
@@ -284,7 +283,7 @@ export function parseMinusClosing(raw: string): MinusResult {
       payerName: holder !== '' && !BANK_NOISE.test(holder) ? holder : 'Не вказано',
       account: (CARD.exec(line) ?? IBAN.exec(line))![0],
       amount: found.total.toFixed(2),
-      paidAt: paidAt ?? new Date(),
+      paidAt,
     });
   }
   const errors: string[] = [];
@@ -308,9 +307,8 @@ export function parseMinusClosing(raw: string): MinusResult {
   } else if (!MONEY_PATTERN.test(stated.toFixed(2))) {
     errors.push('Сума має бути додатною й не більшою за 12 цифр до коми.');
   }
-  if (!found.date || !TIME_IN_DATE.test(found.date)) {
-    errors.push(`Не вказано дату й час оплати. Напишіть ${DATE_TIME_HINT}.`);
-  } else if (!paidAt) {
+  // the date is optional: it is filled when the payment arrives
+  if (found.date && !paidAt) {
     errors.push(`Такої дати немає: «${found.date}». Напишіть ${DATE_TIME_HINT}.`);
   }
   if (found.ourFop === null && requisiteLines.length === 0) {

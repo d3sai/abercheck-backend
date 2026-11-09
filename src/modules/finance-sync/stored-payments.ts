@@ -3,7 +3,8 @@ export interface StoredPayment {
   payerName: string | null;
   account: string | null;
   amount: string;
-  paidAt: string;
+  /** Null when the manager did not know the time: it is filled when the payment arrives. */
+  paidAt: string | null;
 }
 
 /** The column is only ever written by us; a malformed value counts as no payments. */
@@ -14,7 +15,8 @@ export function storedPayments(value: unknown): StoredPayment[] {
       typeof row === 'object' &&
       row !== null &&
       typeof (row as StoredPayment).amount === 'string' &&
-      typeof (row as StoredPayment).paidAt === 'string' &&
-      !Number.isNaN(new Date((row as StoredPayment).paidAt).getTime()),
+      ((row as StoredPayment).paidAt === null ||
+        (typeof (row as StoredPayment).paidAt === 'string' &&
+          !Number.isNaN(new Date((row as StoredPayment).paidAt!).getTime()))),
   );
 }

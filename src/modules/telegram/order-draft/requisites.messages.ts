@@ -23,13 +23,13 @@ export function requisiteBlock(
   account: string | null,
   amount: Prisma.Decimal,
   currency: Currency,
-  paidAt: Date,
+  paidAt: Date | null,
 ): string {
   const fields = [
     payerName,
     ...(account ? [account] : []),
     money(amount, currency),
-    formatKyivDateTime(paidAt),
+    ...(paidAt ? [formatKyivDateTime(paidAt)] : []),
   ];
   return `<pre>${fields.map(escapeHtml).join('\n')}</pre>`;
 }
@@ -51,9 +51,9 @@ export function requisitesHint(): BotReply {
       "Надішліть одним повідомленням, кожен пункт з нового рядка (* — обов'язково):",
       '• Номер і сума* — кожен номер окремим рядком',
       '• Загальна сума — «сума: 6 667 грн»',
-      '• Реквізити* — ФОП, ТОВ чи картка з іменем, сумою і часом оплати; кілька — кожні з нового рядка',
+      '• Реквізити* — ФОП, ТОВ чи картка з іменем і сумою; кілька — кожні з нового рядка',
       '• Курс',
-      '• Дата*',
+      '• Дата й час оплати — якщо ще не знаєте, не пишіть: підставиться, коли надійде оплата',
       '',
       `<pre>${example}</pre>`,
       '',

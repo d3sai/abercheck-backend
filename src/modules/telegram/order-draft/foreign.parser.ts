@@ -122,9 +122,8 @@ export function parseForeign(raw: string): ForeignResult {
   }
 
   const paidAt = fields.date ? parseDateTime(numericDates(fields.date)) : null;
-  if (!fields.date || !/\d:\d{2}/.test(fields.date)) {
-    errors.push(`Не вказано дату й час. Напишіть ${DATE_TIME_HINT}.`);
-  } else if (!paidAt) {
+  // the date is optional: it is filled when the payment arrives
+  if (fields.date && !paidAt) {
     errors.push(`Не розібрав дату «${fields.date}». Напишіть ${DATE_TIME_HINT}.`);
   }
 

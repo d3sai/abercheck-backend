@@ -402,7 +402,7 @@ function buildComment(rest: RestLine[], comments: string[]): string | null {
 export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): RequisiteInput[] {
   const lines = [...rest];
   const records: RequisiteInput[] = [];
-  const seen: { nameWord: string; amount: string; paidAt: Date }[] = [];
+  const seen: { nameWord: string; amount: string; paidAt: Date | null }[] = [];
   let currentDateText: string | null =
     lines.find((line) => line.kind === 'date')?.text.trim() ?? null;
 
@@ -441,7 +441,7 @@ export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): Requisi
     const dateText =
       ownDate ?? (ownTime ? currentDateText?.replace(TIME, '').trim() : currentDateText);
     const whenText = [dateText, ownTime].filter(Boolean).join(' ');
-    const paidAt = (whenText ? parseDateTime(whenText) : null) ?? fallback ?? new Date();
+    const paidAt = (whenText ? parseDateTime(whenText) : null) ?? fallback ?? null;
 
     const account = findAccount(index);
     const cleaned = cleanName(trimmed);
@@ -454,7 +454,7 @@ export function deriveRequisiteLines(rest: RestLine[], fallback?: Date): Requisi
     const isRestatement = seen.some(
       (s) =>
         s.amount === amountKey &&
-        s.paidAt.getTime() === paidAt.getTime() &&
+        s.paidAt?.getTime() === paidAt?.getTime() &&
         (payerName.toLowerCase().includes(s.nameWord) || s.nameWord === nameWord),
     );
     if (isRestatement) {
@@ -665,7 +665,7 @@ export function parseRequisites(raw: string): RequisitesResult {
       payerName: cleanName(loneAccount) || 'Не вказано',
       account: (CARD.exec(loneAccount) ?? IBAN.exec(loneAccount))![0],
       amount: total.toFixed(2),
-      paidAt: (dateLine ? parseDateTime(dateLine.text) : null) ?? new Date(),
+      paidAt: dateLine ? parseDateTime(dateLine.text) : null,
     });
   }
 
@@ -687,10 +687,6 @@ export function parseRequisites(raw: string): RequisitesResult {
     errors.push(
       'Не знайшов ФОП, ТОВ чи картки з іменем. Додайте рядок «ФОП Прізвище Ім’я», «ТОВ Назва» або «4441 1110 6964 5962 Прізвище Ім’я».',
     );
-  }
-  const dated = numericDates(text);
-  if (!new RegExp(DATE.source, 'u').test(dated) || !new RegExp(TIME.source, 'u').test(dated)) {
-    errors.push(`Не вказано дату й час оплати. Напишіть ${DATE_TIME_HINT}.`);
   }
   if (errors.length > 0 || total === null) {
     return { ok: false, errors };

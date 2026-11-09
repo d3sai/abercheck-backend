@@ -539,20 +539,21 @@ describe('RequestCompletionService', () => {
       expect(orders.createGroup).not.toHaveBeenCalled();
     });
 
-    it('should answer 400 without a time and release the claim', async () => {
+    it('should keep the payment time unknown when the manager gives no date', async () => {
       view('card', { orders: [orderRow('0000-070217', '1000')] });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
 
-      const error = await failure(
-        service.complete(
-          manager,
-          'req1',
-          body([{ payerName: 'Петренко Іван', amount: '1000', date: '2026-11-04' }]),
-        ),
+      await service.complete(
+        manager,
+        'req1',
+        body([{ payerName: 'Петренко Іван', amount: '1000' }]),
       );
 
-      expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'invalid-request' });
-      expect(cards.claimCompletion).not.toHaveBeenCalled();
-      expect(orders.create).not.toHaveBeenCalled();
+      expect(requisites.addMany).toHaveBeenCalledWith(
+        10,
+        [expect.objectContaining({ payerName: 'Петренко Іван', paidAt: null })],
+        expect.anything(),
+      );
     });
 
     it('should answer 400 without a payer name', async () => {
@@ -606,15 +607,17 @@ describe('RequestCompletionService', () => {
       expect(result).toEqual({ orderNumbers: ['MC-1'], skipped: [] });
     });
 
-    it('should answer 400 without a time', async () => {
+    it('should keep the payment time unknown when the manager gives no date', async () => {
       view('minus', { clientLabel: 'Гук Руслан' });
+      orders.create.mockResolvedValue(order(10, 'MC-1', { orderType: OrderType.MINUS_CLOSING }));
 
-      const error = await failure(
-        service.complete(manager, 'req1', body([{ amount: '1000', date: '2026-11-04' }])),
+      await service.complete(manager, 'req1', body([{ amount: '1000' }]));
+
+      expect(orders.create).toHaveBeenCalledWith(
+        4,
+        expect.objectContaining({ paidAt: undefined }),
+        { notify: false },
       );
-
-      expect(error.status).toBe(HttpStatus.BAD_REQUEST);
-      expect(orders.create).not.toHaveBeenCalled();
     });
 
     it('should answer 400 for more than one payment row', async () => {

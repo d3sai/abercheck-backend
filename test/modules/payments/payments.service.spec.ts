@@ -39,7 +39,8 @@ describe('PaymentsService', () => {
 
   const tx = {
     $queryRaw: jest.fn(),
-    order: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+    order: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    orderRequisite: { updateMany: jest.fn() },
     payment: { create: jest.fn(), aggregate: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     refund: { aggregate: jest.fn() },
   };
@@ -107,6 +108,22 @@ describe('PaymentsService', () => {
       }) as unknown,
     });
     expect(events.emit).toHaveBeenCalledWith(PaymentEvents.Recorded, result);
+  });
+
+  it('should fill the time of payment of an order entered without it, keeping a known one', async () => {
+    paidSoFar('3614.32');
+
+    await service.ingest(dto);
+
+    const when = { paidAt: new Date('2026-09-03T12:00:00Z') };
+    expect(tx.order.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [order.id] }, paidAt: null },
+      data: when,
+    });
+    expect(tx.orderRequisite.updateMany).toHaveBeenCalledWith({
+      where: { orderId: { in: [order.id] }, paidAt: null },
+      data: when,
+    });
   });
 
   it('should mark the order paid when the second transfer covers the rest', async () => {

@@ -7,7 +7,8 @@ export interface RequisiteInput {
   payerName: string;
   account: string | null;
   amount: string;
-  paidAt: Date;
+  /** Null until the payment arrives. */
+  paidAt: Date | null;
 }
 
 @Injectable()

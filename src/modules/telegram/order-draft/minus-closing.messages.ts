@@ -24,7 +24,12 @@ interface ClosingView {
   currency: Currency;
   total: Prisma.Decimal;
   ourFop: string | null;
-  requisites: { payerName: string; account: string | null; amount: Prisma.Decimal; paidAt: Date }[];
+  requisites: {
+    payerName: string;
+    account: string | null;
+    amount: Prisma.Decimal;
+    paidAt: Date | null;
+  }[];
   comment: string | null;
   rate: Prisma.Decimal | null;
   sheetUrl: string | null;
@@ -72,6 +77,7 @@ export function minusHint(): BotReply {
       'Оплата на картку чи чужий ФОП/ТОВ: кожен платіж окремим рядком, наприклад:',
       '',
       `<pre>${escapeHtml(example)}</pre>`,
+      '«Дата» можна не писати: вона підставиться, коли надійде оплата.',
       'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
       '',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
