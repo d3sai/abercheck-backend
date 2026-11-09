@@ -49,7 +49,7 @@ function closingLines(view: ClosingView): string[] {
     '➖ <b>Закриття заборгованості клієнта</b>',
     ...(view.orderNumber ? [`№ <b>${escapeHtml(view.orderNumber)}</b>`] : []),
     `Клієнт: <b>${escapeHtml(view.clientName)}</b>${period}`,
-    `Дата: ${view.paidAt ? formatKyivDateTime(view.paidAt) : '—'}`,
+    ...(view.paidAt ? [`Дата: ${formatKyivDateTime(view.paidAt)}`] : []),
     `Загальна сума: <b>${money(view.total, view.currency)}</b>`,
     `Оплату отримано на:${received.length > 0 ? '' : ' —'}`,
     ...received.flatMap((line) => ['', line]),
@@ -63,7 +63,6 @@ function closingLines(view: ClosingView): string[] {
 export function minusHint(): BotReply {
   const example = [
     'Клієнт: Гук Руслан за підрахунком 31.08.2026',
-    'Дата: 05.09.2026 12:36',
     'Сума: 27 409 грн',
     'Отримано на: ФОП Берчатов М. М.',
     'Коментар: з урахуванням 1%',
@@ -77,7 +76,6 @@ export function minusHint(): BotReply {
       'Оплата на картку чи чужий ФОП/ТОВ: кожен платіж окремим рядком, наприклад:',
       '',
       `<pre>${escapeHtml(example)}</pre>`,
-      '«Дата» можна не писати: вона підставиться, коли надійде оплата.',
       'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
       '',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,

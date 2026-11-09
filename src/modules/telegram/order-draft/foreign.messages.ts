@@ -15,7 +15,7 @@ function foreignLines(plan: ForeignPlan, exists: boolean): string[] {
     `На кого: ${plan.recipient ? escapeHtml(plan.recipient) : '—'}`,
     `Замовлення: № <b>${escapeHtml(plan.number)}</b>${exists ? ' (уже є в системі)' : ''}`,
     `Сума: <b>${formatMoneyIn(plan.amount, plan.currency)}</b>`,
-    `Дата: ${plan.paidAt ? formatKyivDateTime(plan.paidAt) : '—'}`,
+    ...(plan.paidAt ? [`Дата: ${formatKyivDateTime(plan.paidAt)}`] : []),
     ...(plan.rate ? [`Курс: ${escapeHtml(plan.rate.replace('.', ','))}`] : []),
     ...(plan.comment ? [`Коментар: ${escapeHtml(plan.comment)}`] : []),
   ];
@@ -27,7 +27,6 @@ export function foreignHint(): BotReply {
     '№ 0000-066498',
     'Сума: 100 EUR',
     'Валюта: EUR',
-    'Дата: 13.10.2026 15:20',
     'Курс: 44,9',
     'Коментар: за що оплата',
   ].join('\n');
@@ -37,7 +36,7 @@ export function foreignHint(): BotReply {
       'Надішліть одним повідомленням, кожне поле з нового рядка:',
       '',
       `<pre>${escapeHtml(example)}</pre>`,
-      'Валюта: UAH, USD або EUR. «Дата», «Курс» і «Коментар» можна не писати: дата підставиться, коли надійде оплата.',
+      'Валюта: UAH, USD або EUR. «Курс» і «Коментар» можна не писати.',
       '',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
     ].join('\n'),
