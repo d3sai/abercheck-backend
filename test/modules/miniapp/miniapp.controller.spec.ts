@@ -102,8 +102,21 @@ describe('MiniappController', () => {
         orders: [{ orderNumber: '0000-070217', amount: '4972', exchangeRate: '45.7' }],
         comment: 'Терміново',
         officialDocs: true,
+        withPercent: null,
       });
     });
+
+    it.each([true, false])(
+      'should pass the answer «з урахуванням %» (%s) of an order kind',
+      async (answer) => {
+        await create({ kind: 'card', orders: [order], withPercent: answer });
+
+        expect(requests.create).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({ withPercent: answer }),
+        );
+      },
+    );
 
     it('should keep two foreign_fop orders with a rate per row', async () => {
       await create({

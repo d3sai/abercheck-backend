@@ -230,6 +230,8 @@ export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): C
     comment: text(dto.comment),
     // official documents are a choice only for «Наш ФОП»; the other kinds go without them
     officialDocs: dto.kind === 'our_fop' ? dto.officialDocs : false,
+    // optional for every kind: «з урахуванням %» is answered yes, no or left out
+    withPercent: dto.withPercent ?? null,
   };
 
   if (ORDER_KINDS.includes(dto.kind)) {
@@ -274,7 +276,6 @@ export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): C
     sum,
     clientLabel,
     sheetUrl: text(dto.sheetUrl),
-    withPercent: dto.kind === 'minus' ? (dto.withPercent ?? null) : null,
     payments: storable(payments),
   };
 }

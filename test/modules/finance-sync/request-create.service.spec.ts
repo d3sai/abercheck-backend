@@ -221,6 +221,23 @@ describe('RequestCreateService', () => {
           officialDocs: false,
         },
       ],
+      [
+        'our_fop with the answer «з урахуванням %»',
+        {
+          kind: 'our_fop',
+          orders: [{ orderNumber: '0000-070217', amount: '4972', exchangeRate: null }],
+          withPercent: false,
+          comment: null,
+          officialDocs: true,
+        },
+        {
+          kind: 'our_fop',
+          orders: [{ orderNumber: '0000-070217', amount: 4972, exchangeRate: null }],
+          withPercent: false,
+          comment: null,
+          officialDocs: true,
+        },
+      ],
     ])('should map %s to the finance body', async (_, kindInput, expected) => {
       await service.create(manager, kindInput);
 

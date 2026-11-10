@@ -109,6 +109,18 @@ describe('groupCard', () => {
     expect(groupCard(view({ kind: 'card' }), null).html).not.toContain('Офіційні документи');
   });
 
+  it.each([
+    [true, 'З урахуванням %: так'],
+    [false, 'З урахуванням %: ні'],
+  ])('shows the answer «з урахуванням %%» (%s) on any kind', (withPercent, line) => {
+    expect(groupCard(view({ kind: 'card', withPercent }), null).html).toContain(line);
+    expect(groupCard(view({ kind: 'our_fop', withPercent }), null).html).toContain(line);
+  });
+
+  it('shows no «з урахуванням %» line when it was not answered', () => {
+    expect(groupCard(view({ withPercent: null }), null).html).not.toContain('З урахуванням');
+  });
+
   it('kind labels', () => {
     expect(groupCard(view({ kind: 'foreign_fop' }), null).html).toContain('Чужий ФОП');
     expect(groupCard(view({ kind: 'minus', orders: [] }), null).html).toContain('Закриття мінусу');

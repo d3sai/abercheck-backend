@@ -995,6 +995,22 @@ describe('RequestCompletionService', () => {
       expect(callArg(orders.create, 1)).toMatchObject({ comment: undefined });
     });
 
+    it('should add the answer «з урахуванням %» to the order comment', async () => {
+      view('our_fop', {
+        orders: [orderRow('0000-070217', '1000', '45')],
+        withPercent: true,
+      });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.complete(manager, 'req1', {
+        payments: [{ amount: '1000', date: '2026-11-04' }],
+      });
+
+      expect(callArg(orders.create, 1)).toMatchObject({
+        comment: 'терміново · з урахуванням %: так',
+      });
+    });
+
     it('should keep the numbers of finance on the manager card', async () => {
       view('our_fop', { orders: [orderRow('0000-070217', '1000', '45')] });
       orders.create.mockResolvedValue(order(10, '0000-070217'));

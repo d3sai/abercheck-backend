@@ -124,7 +124,13 @@ function withOverrides(view: FinanceRequestView, input: Completion): FinanceRequ
     input.orders,
     view.orders.map((order) => order.orderNumber),
   );
-  const comment = input.comment == null ? view.comment : input.comment.trim() || null;
+  const typed = input.comment == null ? view.comment : input.comment.trim() || null;
+  // a minus adds the answer to its own comment
+  const percent =
+    view.kind === 'minus' || view.withPercent === null
+      ? null
+      : `з урахуванням %: ${view.withPercent ? 'так' : 'ні'}`;
+  const comment = [typed, percent].filter(Boolean).join(' · ') || null;
   return {
     ...view,
     comment,

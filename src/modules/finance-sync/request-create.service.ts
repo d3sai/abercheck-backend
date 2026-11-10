@@ -205,7 +205,7 @@ function financeBody(
       sum: Number(input.sum),
       clientLabel: input.clientLabel,
       sheetUrl: input.sheetUrl,
-      withPercent: input.withPercent,
     }),
+    ...(input.withPercent !== undefined && { withPercent: input.withPercent }),
   };
 }

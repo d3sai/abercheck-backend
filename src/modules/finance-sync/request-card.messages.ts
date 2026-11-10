@@ -112,6 +112,9 @@ function body(
   if (view.kind === 'our_fop' && view.officialDocs !== null) {
     lines.push(`Офіційні документи: ${view.officialDocs ? 'так' : 'ні'}`);
   }
+  if (view.withPercent !== null) {
+    lines.push(`З урахуванням %: ${view.withPercent ? 'так' : 'ні'}`);
+  }
   if (view.comment) {
     const chars = [...view.comment];
     const comment =
