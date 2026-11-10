@@ -3,7 +3,7 @@ import type { Context } from 'telegraf';
 import type { Message } from 'telegraf/types';
 import type { FinanceRequestCard } from '../../generated/prisma/client';
 import { escapeHtml } from '../telegram/core/format';
-import type { MatchContext } from '../telegram/core/telegram-context';
+import { fullName, type MatchContext } from '../telegram/core/telegram-context';
 import { TelegramSender } from '../telegram/core/telegram-sender';
 import { CARD, IBAN } from '../telegram/order-draft/requisites.parser';
 import { FinanceClient } from './finance.client';
@@ -38,6 +38,7 @@ export class FinancierActionsService {
       try {
         view = await this.finance.accept(card.requestId, {
           responderTelegramId: ctx.from.id,
+          responderName: fullName(ctx),
           fopId: Number(ctx.match[2]),
         });
       } catch (error) {
@@ -109,6 +110,7 @@ export class FinancierActionsService {
     try {
       view = await this.finance.accept(card.requestId, {
         responderTelegramId: ctx.from!.id,
+        responderName: fullName(ctx),
         ...answer,
       });
     } catch (error) {

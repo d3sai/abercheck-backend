@@ -62,6 +62,8 @@ export class FinanceClient {
     id: string,
     body: {
       responderTelegramId: number;
+      /** The Telegram account's name, shown on the card instead of the financier's own. */
+      responderName?: string;
       fopId?: number;
       payoutsText?: string;
       fopName?: string;

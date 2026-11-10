@@ -49,7 +49,7 @@ describe('FinancierActionsService', () => {
 
   const press = (match: string[], chatId = ADMIN_CHAT) => ({
     chat: { id: chatId },
-    from: { id: FINANCIER_ID },
+    from: { id: FINANCIER_ID, first_name: 'Оксана', last_name: 'Павлів' },
     match,
     callbackQuery: { message: { message_id: 700, message_thread_id: 12 } },
     answerCbQuery: jest.fn(),
@@ -58,7 +58,7 @@ describe('FinancierActionsService', () => {
 
   const textCtx = (text: string, replyTo: object, chatId = ADMIN_CHAT) => ({
     chat: { id: chatId },
-    from: { id: FINANCIER_ID },
+    from: { id: FINANCIER_ID, first_name: 'Оксана', last_name: 'Павлів' },
     botInfo: { id: BOT_ID },
     text,
     message: { message_id: 800, message_thread_id: 12, text, reply_to_message: replyTo },
@@ -77,6 +77,7 @@ describe('FinancierActionsService', () => {
 
       expect(finance.accept).toHaveBeenCalledWith('req1', {
         responderTelegramId: FINANCIER_ID,
+        responderName: 'Оксана Павлів',
         fopId: 3,
       });
       expect(sync.renderGroup).toHaveBeenCalledWith(card, acceptedView);
@@ -227,6 +228,7 @@ describe('FinancierActionsService', () => {
 
       expect(finance.accept).toHaveBeenCalledWith('req1', {
         responderTelegramId: FINANCIER_ID,
+        responderName: 'Оксана Павлів',
         payoutsText: text,
       });
       expect(sync.renderGroup).toHaveBeenCalledWith(expect.anything(), acceptedView);
@@ -240,6 +242,7 @@ describe('FinancierActionsService', () => {
 
       expect(finance.accept).toHaveBeenCalledWith('req1', {
         responderTelegramId: FINANCIER_ID,
+        responderName: 'Оксана Павлів',
         fopName: 'Фоп Гук)',
       });
       expect(sync.renderGroup).toHaveBeenCalledWith(expect.anything(), acceptedView);
@@ -278,6 +281,7 @@ describe('FinancierActionsService', () => {
 
       expect(finance.accept).toHaveBeenCalledWith('req1', {
         responderTelegramId: FINANCIER_ID,
+        responderName: 'Оксана Павлів',
         fopName: name,
       });
     });
