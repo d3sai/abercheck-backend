@@ -1,6 +1,6 @@
 // Mirrors finance-backend src/modules/internal/internal-requests.dto.ts. Keep in step by hand.
 export type RequestKind = 'our_fop' | 'foreign_fop' | 'card' | 'minus';
-/** These kinds are paid after the manager confirms: the card stays open until «💰 Оплачено». */
+/** These kinds carry no payment rows: the client has not paid when the request is made, the date is given when the manager accepts. */
 const PAYS_AFTER_CONFIRM: readonly RequestKind[] = ['our_fop', 'foreign_fop'];
 export const paysAfterConfirm = (kind: RequestKind | null): boolean =>
   kind !== null && PAYS_AFTER_CONFIRM.includes(kind);

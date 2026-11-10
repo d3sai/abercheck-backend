@@ -132,6 +132,13 @@ function withOverrides(view: FinanceRequestView, input: Completion): FinanceRequ
   };
 }
 
+/** When the client paid: the latest date among the payments, if any has one. */
+const latest = (payments: Payment[]): Date | null =>
+  payments.reduce<Date | null>(
+    (best, { paidAt }) => (paidAt && (!best || paidAt > best) ? paidAt : best),
+    null,
+  );
+
 @Injectable()
 export class RequestCompletionService {
   private readonly logger = new Logger(RequestCompletionService.name);
@@ -165,10 +172,7 @@ export class RequestCompletionService {
     return this.finish(manager, requestId, {
       payments: (kind, card) => {
         const stored = storedPayments(card.payments);
-        if (
-          !paysAfterConfirm(kind) &&
-          (stored.length === 0 || stored.some((payment) => payment.paidAt === null))
-        ) {
+        if (stored.length === 0 || stored.some((payment) => payment.paidAt === null)) {
           throw apiError(
             HttpStatus.BAD_REQUEST,
             'invalid-request',
@@ -202,25 +206,8 @@ export class RequestCompletionService {
     } catch (error) {
       throw financeError(error);
     }
-    const closesHere = paysAfterConfirm(view.kind);
-    if (closesHere) {
-      if (card.closedAt) {
-        throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
-      }
-      // atomic: two parallel presses close it once
-      if (!(await this.cards.claimClosing(requestId, new Date()))) {
-        throw apiError(HttpStatus.CONFLICT, 'already-closed', 'Запит уже закрито');
-      }
-    }
-    try {
-      await this.orders.setPaidAt(card.orderIds, paidAt);
-      await this.requisites.fillPaidAt(card.orderIds, paidAt);
-    } catch (error) {
-      if (closesHere) {
-        await this.safely(requestId, 'closing release', () => this.cards.releaseClosing(requestId));
-      }
-      throw error;
-    }
+    await this.orders.setPaidAt(card.orderIds, paidAt);
+    await this.requisites.fillPaidAt(card.orderIds, paidAt);
     await this.safely(requestId, 'manager card', async () => {
       if (card.managerMessageId === null) return;
       const { html, buttons } = managerCard(view, {
@@ -280,7 +267,7 @@ export class RequestCompletionService {
     const live = view.kind === 'minus' ? null : await this.liveItems(view, input.addPart);
 
     // atomic: of two parallel completions only one may create orders
-    if (!(await this.cards.claimCompletion(requestId, new Date(), !paysAfterConfirm(view.kind)))) {
+    if (!(await this.cards.claimCompletion(requestId, new Date(), true))) {
       throw apiError(HttpStatus.CONFLICT, 'already-completed', 'Запит уже оформлено');
     }
 
@@ -355,7 +342,7 @@ export class RequestCompletionService {
     }
     if (!receiptsAttached) note = [note, RECEIPTS_NOTE].filter(Boolean).join(' ');
     await this.safely(requestId, 'manager card', () =>
-      this.markCompleted(card, requested, orderNumbers),
+      this.markCompleted(card, requested, orderNumbers, latest(payments)),
     );
     return { orderNumbers, skipped: made.skipped, ...(note && { note }) };
   }
@@ -541,11 +528,12 @@ export class RequestCompletionService {
     card: { managerChatId: bigint; managerMessageId: number | null },
     view: FinanceRequestView,
     orderNumbers: string[],
+    paidAt: Date | null,
   ): Promise<void> {
     if (card.managerMessageId === null) return;
     const { html, buttons } = managerCard(view, {
       miniAppUrl: this.sender.miniAppUrl,
-      completed: { orderNumbers, closed: !paysAfterConfirm(view.kind) },
+      completed: { orderNumbers, closed: true, paidAt },
     });
     await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
   }

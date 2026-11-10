@@ -54,6 +54,21 @@ describe('adminOrderCreatedMessage', () => {
     expect(message).not.toContain('Нове замовлення');
   });
 
+  it('should show the date of payment, and the day alone when the time is not known', () => {
+    const timed = adminOrderCreatedMessage(
+      order({ paidAt: new Date('2026-11-04T12:30:00.000Z') }),
+      manager,
+    );
+    const dayOnly = adminOrderCreatedMessage(
+      order({ paidAt: new Date('2026-11-03T22:00:00.000Z') }),
+      manager,
+    );
+
+    expect(timed).toContain('Дата оплати: 14:30 04.11.2026');
+    expect(dayOnly).toContain('Дата оплати: 04.11.2026');
+    expect(dayOnly).not.toContain('00:00');
+  });
+
   it('should show the essentials for a bare order', () => {
     const message = adminOrderCreatedMessage(order(), manager);
 

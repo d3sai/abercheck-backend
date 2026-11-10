@@ -336,8 +336,7 @@ const notInFuture = (paid: Date, now: Date): Date => {
 
 /**
  * The date is required, the time is not (the day then starts at Kyiv midnight); a new request carries
- * none (`dated` false): it is asked when the manager accepts. our_fop and foreign_fop
- * may have no payment at all (the client has not paid yet); several rows only for card. Never in the
+ * none (`dated` false): it is asked when the manager accepts. Several rows only for card. Never in the
  * future.
  */
 export function toPayments(
@@ -347,8 +346,7 @@ export function toPayments(
   dated = true,
 ): Payment[] {
   const withPayers = kind === 'card';
-  const payLater = paysAfterConfirm(kind);
-  if (rows.length < (payLater ? 0 : 1) || rows.length > MAX_PAYMENTS) {
+  if (rows.length < 1 || rows.length > MAX_PAYMENTS) {
     throw invalid(`Додайте від 1 до ${MAX_PAYMENTS} платежів.`);
   }
   if (!withPayers && rows.length > 1) throw invalid('Для цього запиту потрібна одна дата оплати.');

@@ -280,6 +280,13 @@ describe('warnings', () => {
   });
 });
 
+const dated = {
+  payerName: null,
+  account: null,
+  amount: '1.00',
+  paidAt: '2026-11-04T08:15:00.000Z',
+};
+
 describe('managerCard', () => {
   it('pending: cancel button; same body', () => {
     const reply = managerCard(view());
@@ -289,7 +296,9 @@ describe('managerCard', () => {
   });
 
   it('accepted: «Прийняти» without the Mini App, responder and fop', () => {
-    const reply = managerCard(view({ status: 'accepted', responderName: 'Фін', fopLabel: 'А' }));
+    const reply = managerCard(view({ status: 'accepted', responderName: 'Фін', fopLabel: 'А' }), {
+      payments: [dated],
+    });
     expect(flat(reply)).toEqual([
       { text: '✅ Прийняти', callback_data: `mo:${ID}` },
       { text: '✖ Скасувати', callback_data: `fc:${ID}` },
@@ -311,7 +320,7 @@ describe('managerCard with the Mini App', () => {
   });
 
   it('accepted and not completed: «Прийняти» next to «Скасувати»', () => {
-    const reply = managerCard(accepted(), { miniAppUrl, completed: false });
+    const reply = managerCard(accepted(), { miniAppUrl, completed: false, payments: [dated] });
 
     expect(all(reply)).toEqual([
       [
@@ -379,7 +388,7 @@ describe('managerCard with the Mini App', () => {
     expect(all(reply)).toEqual([[ATTACH]]);
   });
 
-  it('closed our_fop: the payment time in Kyiv time and no button', () => {
+  it('completed with a payment time: the time in Kyiv time and no button', () => {
     const reply = managerCard(accepted(), {
       miniAppUrl,
       completed: {
@@ -390,13 +399,7 @@ describe('managerCard with the Mini App', () => {
     });
 
     expect(all(reply)).toEqual([[ATTACH]]);
-    expect(reply.html.split('\n').at(-1)).toBe('✅ Оплачено 04.11.2026 14:30 · закрито');
-  });
-
-  it('closed our_fop without a payment time: just closed', () => {
-    const reply = managerCard(accepted(), { completed: { orderNumbers: [], closed: true } });
-
-    expect(reply.html.split('\n').at(-1)).toBe('✅ Закрито');
+    expect(reply.html.split('\n').at(-1)).toBe('✅ Оплачено 04.11.2026 14:30');
   });
 
   it('completed: one order has no count; no orders has no number', () => {
@@ -425,7 +428,7 @@ describe('managerCard with the Mini App', () => {
     expect(flat(managerCard(view(), {}))).toEqual([
       { text: '✖ Скасувати запит', callback_data: `fc:${ID}` },
     ]);
-    expect(flat(managerCard(accepted(), { completed: false }))).toEqual([
+    expect(flat(managerCard(accepted(), { completed: false, payments: [dated] }))).toEqual([
       { text: '✅ Прийняти', callback_data: `mo:${ID}` },
       { text: '✖ Скасувати', callback_data: `fc:${ID}` },
       ATTACH,
@@ -487,10 +490,10 @@ describe('managerCard with the Mini App', () => {
       expect(html).not.toContain('<b>&Co');
     });
 
-    it('says our_fop has no payment yet, and offers «Прийняти» without any', () => {
+    it('offers «Прийняти» (the form with the date) to an our_fop without payments', () => {
       const reply = managerCard(accepted(), { miniAppUrl, payments: [] });
 
-      expect(reply.html).toContain('Платіж: клієнт ще не оплатив');
+      expect(reply.html).not.toContain('Платіж');
       expect(flat(reply).map((b) => b.text)).toEqual([
         '✅ Прийняти',
         '✖ Скасувати',
@@ -549,7 +552,7 @@ describe('callback data', () => {
     const all = [
       ...flat(groupCard(view(), fops())),
       ...flat(managerCard(view())),
-      ...flat(managerCard(accepted)),
+      ...flat(managerCard(accepted, { payments: [dated] })),
     ].map((b) => b.callback_data);
     expect(all).toHaveLength(7);
     for (const data of all) {

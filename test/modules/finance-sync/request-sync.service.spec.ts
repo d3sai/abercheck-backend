@@ -223,7 +223,7 @@ describe('RequestSyncService', () => {
       ).toEqual(['💰 Оплачено', '📎 Прикріпити файли']);
     });
 
-    it('should show when a closed our_fop was paid', async () => {
+    it('should show when a completed our_fop was paid', async () => {
       orders.numbersByIds.mockResolvedValue(['0000-1']);
       orders.latestPaidAt.mockResolvedValue(new Date('2026-11-04T12:30:00.000Z'));
 
@@ -233,7 +233,7 @@ describe('RequestSyncService', () => {
       );
 
       expect(orders.latestPaidAt).toHaveBeenCalledWith([10]);
-      expect(edit()[2]).toContain('✅ Оплачено 04.11.2026 14:30 · закрито');
+      expect(edit()[2]).toContain('✅ Оплачено 04.11.2026 14:30');
       expect(edit()[3]).toEqual([[{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }]]);
     });
 
@@ -320,6 +320,13 @@ describe('RequestSyncService', () => {
     });
 
     it('should redraw both cards from the re-read view, not from the event snapshot, then notify', async () => {
+      // the payments carry their date, so «Прийняти» is a plain button
+      cards.byRequestId.mockResolvedValue({
+        ...card,
+        payments: [
+          { payerName: null, account: null, amount: '1.00', paidAt: '2026-11-04T08:15:00Z' },
+        ],
+      });
       await service.handle(event({ type: 'accepted' }));
 
       expect(finance.get).toHaveBeenCalledWith('req1');

@@ -5,12 +5,7 @@ import { OrdersService } from '../orders/orders.service';
 import { escapeHtml } from '../telegram/core/format';
 import { TelegramSender } from '../telegram/core/telegram-sender';
 import { FinanceClient } from './finance.client';
-import {
-  type FinanceEvent,
-  type FinanceFops,
-  type FinanceRequestView,
-  paysAfterConfirm,
-} from './finance.types';
+import { type FinanceEvent, type FinanceFops, type FinanceRequestView } from './finance.types';
 import { groupCard, managerCard } from './request-card.messages';
 import { RequestCardsRepository } from './request-cards.repository';
 import { storedPayments } from './stored-payments';
@@ -54,11 +49,7 @@ export class RequestSyncService {
         ? {
             orderNumbers: await this.orders.numbersByIds(card.orderIds),
             closed: card.closedAt != null,
-            // shows when the client paid: a closed our_fop or foreign_fop card, or any other kind once dated
-            paidAt:
-              card.closedAt || !paysAfterConfirm(view.kind)
-                ? await this.orders.latestPaidAt(card.orderIds)
-                : null,
+            paidAt: await this.orders.latestPaidAt(card.orderIds),
           }
         : false,
     });

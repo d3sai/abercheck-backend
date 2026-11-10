@@ -8,7 +8,6 @@ import {
   type FinancePayoutView,
   type FinanceFops,
   type FinanceRequestView,
-  paysAfterConfirm,
   type RequestKind,
   type RequestWarning,
 } from './finance.types';
@@ -229,7 +228,7 @@ function paymentLine(payment: StoredPayment): string {
 
 /** The payments the orders will get; whole lines within the budget, «…» for the rest. */
 function paymentLines(kind: RequestKind | null, payments: StoredPayment[]): string[] {
-  if (payments.length === 0) return paysAfterConfirm(kind) ? ['Платіж: клієнт ще не оплатив'] : [];
+  if (payments.length === 0) return [];
   const lines = ['<b>Платежі:</b>'];
   let used = lines[0]!.length;
   for (const payment of payments) {
@@ -246,17 +245,10 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   if (completed) {
     const lines = [...body(view), '', completedLine(completed.orderNumbers)];
     lines.push(ATTACH_HINT);
-    const paysLater = paysAfterConfirm(view.kind);
-    if (paysLater && completed.closed) {
-      lines.push(
-        completed.paidAt ? `✅ Оплачено ${dateTime(completed.paidAt)} · закрито` : '✅ Закрито',
-      );
-    }
-    // card and minus close with the completion, but still wait for the date of payment
-    if (!paysLater && completed.paidAt) lines.push(`✅ Оплачено ${dateTime(completed.paidAt)}`);
-    const awaitsPayment = paysLater ? !completed.closed : !completed.paidAt;
+    if (completed.paidAt) lines.push(`✅ Оплачено ${dateTime(completed.paidAt)}`);
+    // the date is given in the completion form; «Оплачено» is left for what was completed without one
     const paid =
-      miniAppUrl && awaitsPayment ? [webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)] : [];
+      miniAppUrl && !completed.paidAt ? [webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)] : [];
     return { html: lines.join('\n'), buttons: [[...paid, attachButton(view.id)]] };
   }
   // no editing: a manager accepts or cancels; a change is a new request
@@ -268,11 +260,9 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   }
   if (view.status !== 'accepted') return { html: body(view).join('\n') };
 
-  // accepted: the ready text. A request whose payments carry no date cannot be accepted as it stands
-  // (the date is asked in the form), except our_fop and foreign_fop, whose client has not paid yet.
-  const ready =
-    paysAfterConfirm(view.kind) ||
-    (payments.length > 0 && payments.every((payment) => payment.paidAt !== null));
+  // accepted: the ready text. A request whose payments carry no date cannot be accepted as it stands:
+  // the date is asked in the form.
+  const ready = payments.length > 0 && payments.every((payment) => payment.paidAt !== null);
   const html = [
     ...body(view, { extra: paymentLines(view.kind, payments), allRates: true }),
     '',

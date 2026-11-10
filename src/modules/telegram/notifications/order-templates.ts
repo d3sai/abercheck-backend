@@ -1,5 +1,5 @@
 import { type Manager, type Order, OrderType, type Prisma } from '../../../generated/prisma/client';
-import { escapeHtml, formatKyivDateTime, formatMoneyIn } from '../core/format';
+import { escapeHtml, formatKyivDateTime, formatKyivPaidAt, formatMoneyIn } from '../core/format';
 
 export function formatRate(value: Prisma.Decimal): string {
   return value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
@@ -18,6 +18,7 @@ export function adminOrderCreatedMessage(order: Order, manager: Manager): string
     `№ ${escapeHtml(order.orderNumber)}`,
     `Сума: ${formatMoneyIn(order.amountDue, order.currency)}`,
     ...(order.exchangeRate ? [`Курс: ${formatRate(order.exchangeRate)}`] : []),
+    ...(order.paidAt ? [`Дата оплати: ${formatKyivPaidAt(order.paidAt)}`] : []),
     ...(order.comment ? [`Коментар: ${escapeHtml(order.comment)}`] : []),
     '',
     `Менеджер: ${escapeHtml(manager.name)}`,
