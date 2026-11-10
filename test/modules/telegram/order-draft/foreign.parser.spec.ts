@@ -44,21 +44,22 @@ describe('parseForeign', () => {
     expect(result.plan.warnings).toEqual(['Не вказано, на кого.']);
   });
 
-  it('asks for the number, the amount and the currency', () => {
+  it('asks for the number, the amount, the currency and the date', () => {
     const errors = errorsOf('На кого: Абертайм ТОВ\nКурс: 44,9');
 
     expect(errors).toEqual([
       expect.stringContaining('Не знайшов номер замовлення'),
       expect.stringContaining('Не знайшов суму'),
       expect.stringContaining('Не вказано валюту'),
+      expect.stringContaining('Не вказано дату оплати'),
     ]);
   });
 
-  it('takes a missing date as unknown: the payment fills it in', () => {
-    const result = parseForeign(TEMPLATE.replace('Дата : 13.10.2026 15:20', 'Дата :'));
+  it('takes a date without a time: the day starts at Kyiv midnight', () => {
+    const result = parseForeign(TEMPLATE.replace('15:20', ''));
 
     if (!result.ok) throw new Error(result.errors.join('; '));
-    expect(result.plan.paidAt).toBeNull();
+    expect(result.plan.paidAt?.toISOString()).toBe('2026-10-12T21:00:00.000Z');
   });
 
   it('refuses a number that is not in the 1C format', () => {

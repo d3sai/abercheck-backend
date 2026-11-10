@@ -632,19 +632,23 @@ describe('parseRequisites', () => {
     });
   });
 
-  describe('a message without a name', () => {
-    it('should refuse «0000-068641 100 грн\\n07.09.2026 14:57»', () => {
-      const result = parseRequisites('0000-068641 100 грн\n07.09.2026 14:57');
+  describe('a message without a name or a date', () => {
+    it.each([
+      ['0000-068641 100 грн\n07.09.2026 14:57', 'Не знайшов ФОП'],
+      ['0000-068641 100 грн\nГук Іван', 'Не вказано дату оплати'],
+      ['0000-064572 68 грн\n\n0000-070442 11 534 грн\nadmin\n50\ntest', 'Не вказано дату оплати'],
+    ])('should refuse «%s»', (text, error) => {
+      const result = parseRequisites(text);
 
-      expect(!result.ok && result.errors.join(' ')).toContain('Не знайшов ФОП');
+      expect(!result.ok && result.errors.join(' ')).toContain(error);
     });
-  });
 
-  describe('a message without a date', () => {
-    it('should keep the payment time unknown: the payment fills it in', () => {
-      const plan = planOf('0000-068641 100 грн\nГук Іван 4149439025213368');
+    it('should take a date without a time: the day starts at Kyiv midnight', () => {
+      const plan = planOf('0000-068641 100 грн\nГук Іван 4149439025213368\n07.09.2026');
 
-      expect(plan.requisiteLines.map((r) => r.paidAt)).toEqual([null]);
+      expect(plan.requisiteLines.map((r) => r.paidAt?.toISOString())).toEqual([
+        '2026-09-06T21:00:00.000Z',
+      ]);
     });
   });
 

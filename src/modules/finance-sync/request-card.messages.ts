@@ -268,9 +268,11 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   }
   if (view.status !== 'accepted') return { html: body(view).join('\n') };
 
-  // accepted: the ready text. A request without stored payments (older cards) cannot be accepted
-  // as it stands, except our_fop and foreign_fop, whose client has not paid yet.
-  const ready = paysAfterConfirm(view.kind) || payments.length > 0;
+  // accepted: the ready text. A request whose payments carry no date cannot be accepted as it stands
+  // (the date is asked in the form), except our_fop and foreign_fop, whose client has not paid yet.
+  const ready =
+    paysAfterConfirm(view.kind) ||
+    (payments.length > 0 && payments.every((payment) => payment.paidAt !== null));
   const html = [
     ...body(view, { extra: paymentLines(view.kind, payments), allRates: true }),
     '',
@@ -280,7 +282,7 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
     ...(ready
       ? [button('✅ Прийняти', `mo:${view.id}`)]
       : miniAppUrl
-        ? [webApp('📎 Додати дату', miniAppUrl, 'complete', view.id)]
+        ? [webApp('✅ Прийняти', miniAppUrl, 'complete', view.id)]
         : []),
     button('✖ Скасувати', `fc:${view.id}`),
   ];

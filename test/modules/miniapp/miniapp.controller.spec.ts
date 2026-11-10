@@ -80,7 +80,8 @@ describe('MiniappController', () => {
       payerName: 'Петренко Іван',
       account: null,
       amount: '4972.00',
-      paidAt: '2026-11-04T08:15:00.000Z',
+      // the date is asked after the financier accepts
+      paidAt: null,
     };
     // a payment row goes with card and minus; our_fop and foreign_fop pay after confirming
     const base = { officialDocs: true, payments: [paid] };
@@ -153,13 +154,11 @@ describe('MiniappController', () => {
         withPercent: true,
         comment: null,
         officialDocs: false,
-        payments: [
-          { payerName: null, account: null, amount: '1500.50', paidAt: '2026-11-04T07:05:00.000Z' },
-        ],
+        payments: [{ payerName: null, account: null, amount: '1500.50', paidAt: null }],
       });
     });
 
-    it('should keep the payment time unknown when the manager gives no date', async () => {
+    it('should send a request without a date: it is asked after the financier accepts', async () => {
       await create({
         kind: 'minus',
         sum: '100',
@@ -299,16 +298,8 @@ describe('MiniappController', () => {
         { kind: 'card', orders: [order], payments: [{ ...paid, payerName: ' ' }] },
       ],
       [
-        'card with a time but no date',
-        { kind: 'card', orders: [order], payments: [{ ...paid, date: undefined }] },
-      ],
-      [
         'card with eleven payments',
         { kind: 'card', orders: [order], payments: Array(11).fill(paid) },
-      ],
-      [
-        'card with a payment in the future',
-        { kind: 'card', orders: [order], payments: [{ ...paid, date: '2999-01-01' }] },
       ],
       [
         'card with a bad amount',

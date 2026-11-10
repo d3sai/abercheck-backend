@@ -6,7 +6,12 @@ import {
 } from '../../../generated/prisma/client';
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
-import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
+import {
+  escapeHtml,
+  formatKyivDateTime,
+  formatKyivPaidAt,
+  formatMoneyIn as money,
+} from '../core/format';
 import { formatRate } from '../notifications/order-templates';
 import type { MinusPlan } from './minus-closing.parser';
 import { requisiteBlock } from './requisites.messages';
@@ -49,7 +54,7 @@ function closingLines(view: ClosingView): string[] {
     '➖ <b>Закриття заборгованості клієнта</b>',
     ...(view.orderNumber ? [`№ <b>${escapeHtml(view.orderNumber)}</b>`] : []),
     `Клієнт: <b>${escapeHtml(view.clientName)}</b>${period}`,
-    ...(view.paidAt ? [`Дата: ${formatKyivDateTime(view.paidAt)}`] : []),
+    `Дата: ${view.paidAt ? formatKyivPaidAt(view.paidAt) : '—'}`,
     `Загальна сума: <b>${money(view.total, view.currency)}</b>`,
     `Оплату отримано на:${received.length > 0 ? '' : ' —'}`,
     ...received.flatMap((line) => ['', line]),
@@ -63,6 +68,7 @@ function closingLines(view: ClosingView): string[] {
 export function minusHint(): BotReply {
   const example = [
     'Клієнт: Гук Руслан за підрахунком 31.08.2026',
+    'Дата: 05.09.2026 12:36',
     'Сума: 27 409 грн',
     'Отримано на: ФОП Берчатов М. М.',
     'Коментар: з урахуванням 1%',
@@ -76,6 +82,7 @@ export function minusHint(): BotReply {
       'Оплата на картку чи чужий ФОП/ТОВ: кожен платіж окремим рядком, наприклад:',
       '',
       `<pre>${escapeHtml(example)}</pre>`,
+      'Час у даті — якщо відомий.',
       'Суми в доларах пишіть зі знаком $ — усі суми в повідомленні в одній валюті.',
       '',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,

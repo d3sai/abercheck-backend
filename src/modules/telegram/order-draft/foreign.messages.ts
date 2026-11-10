@@ -1,7 +1,7 @@
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { webApp } from '../../finance-sync/request-card.messages';
 import { type BotReply, button } from '../core/bot-reply';
-import { escapeHtml, formatKyivDateTime, formatMoneyIn } from '../core/format';
+import { escapeHtml, formatKyivDateTime, formatKyivPaidAt, formatMoneyIn } from '../core/format';
 import { NEW_REQUEST_LABEL } from '../core/menu';
 import type { ForeignPlan } from './foreign.parser';
 
@@ -16,7 +16,7 @@ function foreignLines(plan: ForeignPlan, exists: boolean): string[] {
     `На кого: ${plan.recipient ? escapeHtml(plan.recipient) : '—'}`,
     `Замовлення: № <b>${escapeHtml(plan.number)}</b>${exists ? ' (уже є в системі)' : ''}`,
     `Сума: <b>${formatMoneyIn(plan.amount, plan.currency)}</b>`,
-    ...(plan.paidAt ? [`Дата: ${formatKyivDateTime(plan.paidAt)}`] : []),
+    `Дата: ${plan.paidAt ? formatKyivPaidAt(plan.paidAt) : '—'}`,
     ...(plan.rate ? [`Курс: ${escapeHtml(plan.rate.replace('.', ','))}`] : []),
     ...(plan.comment ? [`Коментар: ${escapeHtml(plan.comment)}`] : []),
   ];
@@ -28,6 +28,7 @@ export function foreignHint(): BotReply {
     '№ 0000-066498',
     'Сума: 100 EUR',
     'Валюта: EUR',
+    'Дата: 13.10.2026 15:20',
     'Курс: 44,9',
     'Коментар: за що оплата',
   ].join('\n');
@@ -37,7 +38,7 @@ export function foreignHint(): BotReply {
       'Надішліть одним повідомленням, кожне поле з нового рядка:',
       '',
       `<pre>${escapeHtml(example)}</pre>`,
-      'Валюта: UAH, USD або EUR. «Курс» і «Коментар» можна не писати.',
+      'Валюта: UAH, USD або EUR. «Курс» і «Коментар» можна не писати; час у даті — якщо відомий.',
       '',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
     ].join('\n'),

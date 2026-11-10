@@ -6,6 +6,7 @@ import { parseExchangeRate } from './order-draft.parsers';
 import {
   AMOUNT_SRC,
   CARD,
+  DATE_HINT,
   DATE_TIME_HINT,
   IBAN,
   REQUISITES_MAX_LENGTH,
@@ -307,8 +308,9 @@ export function parseMinusClosing(raw: string): MinusResult {
   } else if (!MONEY_PATTERN.test(stated.toFixed(2))) {
     errors.push('Сума має бути додатною й не більшою за 12 цифр до коми.');
   }
-  // the date is optional: it is filled when the payment arrives
-  if (found.date && !paidAt) {
+  if (!found.date) {
+    errors.push(`Не вказано дату оплати. Напишіть ${DATE_HINT}.`);
+  } else if (!paidAt) {
     errors.push(`Такої дати немає: «${found.date}». Напишіть ${DATE_TIME_HINT}.`);
   }
   if (found.ourFop === null && requisiteLines.length === 0) {

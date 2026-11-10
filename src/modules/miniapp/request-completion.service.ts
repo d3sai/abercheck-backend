@@ -165,11 +165,14 @@ export class RequestCompletionService {
     return this.finish(manager, requestId, {
       payments: (kind, card) => {
         const stored = storedPayments(card.payments);
-        if (!paysAfterConfirm(kind) && stored.length === 0) {
+        if (
+          !paysAfterConfirm(kind) &&
+          (stored.length === 0 || stored.some((payment) => payment.paidAt === null))
+        ) {
           throw apiError(
             HttpStatus.BAD_REQUEST,
             'invalid-request',
-            'Платежів немає — відкрийте «✏️ Змінити» й додайте дату.',
+            'Дати оплати немає — відкрийте «✅ Прийняти» у картці й вкажіть її.',
           );
         }
         return fromStored(stored);

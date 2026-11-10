@@ -498,13 +498,15 @@ describe('managerCard with the Mini App', () => {
       ]);
     });
 
-    it('offers «Додати дату» instead of «Прийняти» for a card without stored payments', () => {
-      const reply = managerCard(card(), { miniAppUrl, payments: [] });
+    it.each([
+      ['without stored payments', []],
+      ['with payments that have no date yet', [payment({ paidAt: null })]],
+    ])('opens the form with «Прийняти» for a card %s', (_, payments) => {
+      const reply = managerCard(card(), { miniAppUrl, payments });
 
-      expect(reply.html).not.toContain('Платіж');
       expect(all(reply)).toEqual([
         [
-          { text: '📎 Додати дату', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } },
+          { text: '✅ Прийняти', web_app: { url: `${miniAppUrl}?mode=complete&id=${ID}` } },
           { text: '✖ Скасувати', callback_data: `fc:${ID}` },
         ],
         [ATTACH],

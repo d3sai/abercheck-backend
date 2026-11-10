@@ -1424,8 +1424,9 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       );
     });
 
-    it('should refuse clashing currencies instead of creating the order', async () => {
+    it('should refuse clashing currencies and a missing date instead of creating the order', async () => {
       expect((await begin(TEMPLATE.replace('100 EUR', '100 грн')))?.html).toContain('різні валюти');
+      expect((await begin(TEMPLATE.replace(/Дата.*\n/, '')))?.html).toContain('Не вказано дату');
       expect(orders.createGroup).not.toHaveBeenCalled();
     });
   });

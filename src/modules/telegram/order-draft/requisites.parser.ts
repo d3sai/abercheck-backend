@@ -354,6 +354,7 @@ export function cleanName(line: string): string {
     .replace(/^[\s\-–—:,.;()]+|[\s\-–—:,;()]+$/g, '');
 }
 
+export const DATE_HINT = 'дату у форматі ДД.ММ.РРРР (час ГГ:ХХ — якщо відомий)';
 export const DATE_TIME_HINT = 'дату й час саме цього замовлення, у форматі ДД.ММ.РРРР ГГ:ХХ';
 
 function fopOf(note: string | null): string | null {
@@ -687,6 +688,10 @@ export function parseRequisites(raw: string): RequisitesResult {
     errors.push(
       'Не знайшов ФОП, ТОВ чи картки з іменем. Додайте рядок «ФОП Прізвище Ім’я», «ТОВ Назва» або «4441 1110 6964 5962 Прізвище Ім’я».',
     );
+  }
+  const dated = numericDates(text);
+  if (!new RegExp(DATE.source, 'u').test(dated)) {
+    errors.push(`Не вказано дату оплати. Напишіть ${DATE_HINT}.`);
   }
   if (errors.length > 0 || total === null) {
     return { ok: false, errors };

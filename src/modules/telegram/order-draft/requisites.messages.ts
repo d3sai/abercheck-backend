@@ -6,7 +6,12 @@ import {
 } from '../../../generated/prisma/client';
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
-import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
+import {
+  escapeHtml,
+  formatKyivDateTime,
+  formatKyivPaidAt,
+  formatMoneyIn as money,
+} from '../core/format';
 import { NEW_REQUEST_LABEL } from '../core/menu';
 import { formatRate } from '../notifications/order-templates';
 import type { NumberCheck } from './draft-orders';
@@ -29,7 +34,7 @@ export function requisiteBlock(
     payerName,
     ...(account ? [account] : []),
     money(amount, currency),
-    ...(paidAt ? [formatKyivDateTime(paidAt)] : []),
+    ...(paidAt ? [formatKyivPaidAt(paidAt)] : []),
   ];
   return `<pre>${fields.map(escapeHtml).join('\n')}</pre>`;
 }
@@ -40,9 +45,10 @@ export function requisitesHint(): BotReply {
     '0000-066093 2 500 грн',
     '0000-066094 1 167 грн',
     'сума: 6 667 грн',
-    'ФОП Носенко Роман 4 527 грн',
-    '4441 1110 6964 5962 Андріанов Олександр 2 140 грн',
+    'ФОП Носенко Роман 4 527 грн 14:57',
+    '4441 1110 6964 5962 Андріанов Олександр 2 140 грн 14:59',
     '45',
+    '07.09.2026',
   ].join('\n');
   return {
     html: [
@@ -52,6 +58,7 @@ export function requisitesHint(): BotReply {
       '• Загальна сума — «сума: 6 667 грн»',
       '• Реквізити* — ФОП, ТОВ чи картка з іменем і сумою; кілька — кожні з нового рядка',
       '• Курс',
+      '• Дата* — час оплати за потреби, якщо відомий',
       '',
       `<pre>${example}</pre>`,
       '',

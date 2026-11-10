@@ -128,7 +128,7 @@ export class PaymentRowDto {
   @MaxLength(32)
   amount!: string;
 
-  /** Empty while the manager does not know when the client paid: the payment fills it in. */
+  /** Left out when a request is created; the completion form requires it. */
   @IsOptional()
   @IsString()
   @MaxLength(10)
@@ -255,13 +255,17 @@ export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): C
       }
       return { ...common, orders };
     }
-    return { ...common, orders, payments: storable(toPayments(dto.kind, dto.payments ?? [], now)) };
+    return {
+      ...common,
+      orders,
+      payments: storable(toPayments(dto.kind, dto.payments ?? [], now, false)),
+    };
   }
 
   const clientLabel = text(dto.clientLabel);
   if (!clientLabel) throw invalid('Вкажіть клієнта.');
   const sum = money(dto.sum);
-  const payments = toPayments('minus', dto.payments ?? [], now);
+  const payments = toPayments('minus', dto.payments ?? [], now, false);
   if (!new Prisma.Decimal(payments[0]!.amount).equals(sum)) {
     throw invalid('Сума платежу має дорівнювати сумі мінусу.');
   }
@@ -331,11 +335,17 @@ const notInFuture = (paid: Date, now: Date): Date => {
 };
 
 /**
- * Date and time are optional, as the manager may not know them yet: the payment fills them in. our_fop
- * and foreign_fop may have no payment at all (the client has not paid yet); several rows only for
- * card. Never in the future.
+ * The date is required, the time is not (the day then starts at Kyiv midnight); a new request carries
+ * none (`dated` false): it is asked when the manager accepts. our_fop and foreign_fop
+ * may have no payment at all (the client has not paid yet); several rows only for card. Never in the
+ * future.
  */
-export function toPayments(kind: RequestKind, rows: PaymentRowDto[], now = new Date()): Payment[] {
+export function toPayments(
+  kind: RequestKind,
+  rows: PaymentRowDto[],
+  now = new Date(),
+  dated = true,
+): Payment[] {
   const withPayers = kind === 'card';
   const payLater = paysAfterConfirm(kind);
   if (rows.length < (payLater ? 0 : 1) || rows.length > MAX_PAYMENTS) {
@@ -343,8 +353,9 @@ export function toPayments(kind: RequestKind, rows: PaymentRowDto[], now = new D
   }
   if (!withPayers && rows.length > 1) throw invalid('Для цього запиту потрібна одна дата оплати.');
   return rows.map((row) => {
-    const date = text(row.date);
-    if (date === null && text(row.time) !== null) throw invalid('Вкажіть дату оплати.');
+    // the date is asked after the financier accepts, in the completion form
+    const date = dated ? text(row.date) : null;
+    if (dated && date === null) throw invalid('Вкажіть дату оплати.');
     const payerName = text(row.payerName);
     if (withPayers && payerName === null) throw invalid('Вкажіть, хто платив.');
     return {
@@ -473,11 +484,9 @@ export class CreateMiniappOrderDto {
   @IsBoolean()
   withPercent?: boolean;
 
-  /** Required for kit and cash; foreign leaves it empty until the payment arrives. */
-  @IsOptional()
   @IsString()
   @MaxLength(10)
-  date?: string;
+  date!: string;
 
   @IsOptional()
   @IsString()
@@ -526,11 +535,11 @@ function currencyOf(value: Currency | undefined, allowed: readonly Currency[]): 
 export function toOrderPlan(dto: CreateMiniappOrderDto, now = new Date()): OrderPlan {
   const date = text(dto.date);
   const time = text(dto.time);
-  if (date === null && time !== null) throw invalid('Вкажіть дату оплати.');
-  const paid = date === null ? null : notInFuture(paidAt(date, time), now);
-  // kit and cash are paid when entered; only foreign may wait for its payment
+  if (date === null) throw invalid('Вкажіть дату оплати.');
+  const paid = notInFuture(paidAt(date, time), now);
+  // kit and cash need the time too; foreign takes just the day
   const required = (): Date => {
-    if (paid === null || time === null) throw invalid('Вкажіть дату й час оплати.');
+    if (time === null) throw invalid('Вкажіть дату й час оплати.');
     return paid;
   };
   const comment = text(dto.comment);
