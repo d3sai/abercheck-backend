@@ -8,13 +8,18 @@ import { optionalPositiveInt } from '../../common/config/optional-config';
 import type { Order, OrderAttachment } from '../../generated/prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Initiator } from '../refunds/refund.events';
-import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
+import {
+  escapeHtml,
+  formatKyivDateTime,
+  formatKyivPaidAt,
+  formatMoneyIn,
+} from '../telegram/core/format';
 import { formatRate } from '../telegram/notifications/order-templates';
 import { AttachmentNotFoundError, AttachmentStorageError } from './attachments.errors';
 
 type CaptionOrder = Pick<
   Order,
-  'orderNumber' | 'clientName' | 'amountDue' | 'currency' | 'exchangeRate' | 'comment'
+  'orderNumber' | 'clientName' | 'amountDue' | 'currency' | 'exchangeRate' | 'comment' | 'paidAt'
 >;
 
 export interface TelegramFileRef {
@@ -38,8 +43,9 @@ function caption(order: CaptionOrder, uploader: Initiator): string {
     `№ ${escapeHtml(order.orderNumber)}`,
     `Сума: ${formatMoneyIn(order.amountDue, order.currency)}`,
     ...(order.exchangeRate ? [`Курс: ${formatRate(order.exchangeRate)}`] : []),
+    ...(order.paidAt ? [`Дата оплати: ${formatKyivPaidAt(order.paidAt)}`] : []),
     ...(order.comment ? [`Коментар: ${escapeHtml(order.comment.slice(0, 300))}`] : []),
-    `Додав: ${escapeHtml(uploader.name)}`,
+    `Додав: ${escapeHtml(uploader.name)} · ${formatKyivDateTime(new Date())}`,
   ].join('\n');
 }
 

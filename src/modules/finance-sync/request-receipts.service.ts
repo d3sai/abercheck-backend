@@ -1,7 +1,7 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import type { Context } from 'telegraf';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import type { Manager, Order } from '../../generated/prisma/client';
+import type { Manager, Order, OrderRequisite } from '../../generated/prisma/client';
 import { AttachmentStorageError } from '../attachments/attachments.errors';
 import {
   ALLOWED_MIME_TYPES,
@@ -13,8 +13,9 @@ import { ManagersService } from '../managers/managers.service';
 import { NOT_A_MANAGER } from '../telegram/access/access.messages';
 import type { BotReply } from '../telegram/core/bot-reply';
 import { button } from '../telegram/core/bot-reply';
-import { type MatchContext, isPrivate, reply } from '../telegram/core/telegram-context';
+import { type MatchContext, edit, isPrivate, reply } from '../telegram/core/telegram-context';
 import { OrderDraftService } from '../telegram/order-draft/order-draft.service';
+import { paymentButtonLabel, receiptCaption } from './request-card.messages';
 import { RequestCardsRepository } from './request-cards.repository';
 
 type Next = () => Promise<void>;
@@ -28,11 +29,18 @@ interface Choice {
   expiresAt: number;
 }
 
+/** Files waiting for «До якого платежу?»: the request's order has several payments. */
+interface PaymentChoice {
+  requestId: string;
+  files: TelegramFileRef[];
+  expiresAt: number;
+}
+
 const NO_ORDER = 'Запит оформлено, але бот не знайшов замовлення — додайте квитанцію в кабінеті';
 
 /** Receipts a manager sends in the bot chat as a reply to their request. */
 /** `stored`: the receipt was kept; the text then only serves if the 👍 reaction fails. */
-type ReceiptAnswer = BotReply & { stored?: true };
+type ReceiptAnswer = BotReply & { stored?: true; queued?: true };
 
 @Injectable()
 export class RequestReceiptsService {
@@ -47,6 +55,7 @@ export class RequestReceiptsService {
   ) {}
 
   private readonly choices = new Map<bigint, Choice>();
+  private readonly paymentChoices = new Map<bigint, PaymentChoice>();
 
   /** Handles only files replied to a card or a relayed message of the sender's own request. */
   async onFile(ctx: Context, file: TelegramFileRef, next: Next): Promise<void> {
@@ -77,6 +86,8 @@ export class RequestReceiptsService {
   /** A stored receipt gets a 👍 on the file instead of one more message. */
   private async answer(ctx: Context, answer: ReceiptAnswer): Promise<void> {
     const messageId = ctx.message?.message_id;
+    // joined the question already asked for the files before it
+    if (answer.queued) return;
     if (answer.stored) {
       await ctx.react('👍').catch(() => reply(ctx, answer, messageId));
       return;
@@ -140,12 +151,62 @@ export class RequestReceiptsService {
     const answers = [];
     for (const file of pending.files)
       answers.push(await this.receive(manager, card.requestId, file));
-    const failed = answers.find((answer) => !answer.stored);
+    const question = answers.find((answer) => answer.buttons);
+    const failed = answers.find((answer) => !answer.stored && !answer.queued && !answer.buttons);
     await ctx.answerCbQuery(failed ? '' : '👍');
+    if (question) {
+      await edit(ctx, question).catch(() => undefined);
+      return;
+    }
     await ctx
       .editMessageText(
         failed ? failed.html : `📎 Додано до запиту #${card.number}: ${answers.length}`,
       )
+      .catch(() => undefined);
+  }
+
+  /** «Платник · сума» under the question: the waiting files get that payment's caption. */
+  async onPayment(ctx: MatchContext): Promise<void> {
+    if (!ctx.from || !isPrivate(ctx)) return;
+    const userId = BigInt(ctx.from.id);
+    const pending = this.paymentChoices.get(userId);
+    const manager = await this.managers.findActiveByTelegramId(userId);
+    const card = pending && (await this.cards.byRequestId(pending.requestId));
+    const order = card ? await this.orderById(card.orderIds[0]) : null;
+    const payment = order
+      ? await this.prisma.orderRequisite.findFirst({
+          where: { id: Number(ctx.match[1]), orderId: order.id },
+        })
+      : null;
+    if (
+      !pending ||
+      pending.expiresAt < Date.now() ||
+      !manager ||
+      card?.managerId !== manager.id ||
+      !order ||
+      !payment
+    ) {
+      this.paymentChoices.delete(userId);
+      await ctx.answerCbQuery('Надішліть файл ще раз', { show_alert: true });
+      await ctx.deleteMessage().catch(() => undefined);
+      return;
+    }
+    try {
+      await this.attach(
+        manager,
+        order,
+        pending.files,
+        receiptCaption(order.orderNumber, payment, manager.name),
+      );
+    } catch (error) {
+      if (!(error instanceof AttachmentStorageError)) throw error;
+      await ctx.answerCbQuery('Не вдалося зберегти, спробуйте ще раз', { show_alert: true });
+      return;
+    }
+    this.paymentChoices.delete(userId);
+    await ctx.answerCbQuery('👍');
+    await ctx
+      .editMessageText(`📎 Додано до № ${order.orderNumber}: ${payment.payerName}`)
       .catch(() => undefined);
   }
 
@@ -190,7 +251,36 @@ export class RequestReceiptsService {
       );
       return { html: NO_ORDER };
     }
-    return this.storing(order, () => this.attach(manager, order, [file]));
+    const payments = await this.prisma.orderRequisite.findMany({
+      where: { orderId: order.id },
+      orderBy: { id: 'asc' },
+    });
+    if (payments.length > 1) return this.askPayment(manager, requestId, payments, file);
+    const caption = payments[0] && receiptCaption(order.orderNumber, payments[0], manager.name);
+    return this.storing(order, () => this.attach(manager, order, [file], caption));
+  }
+
+  /** One question per burst of files; files sent while it waits join it. */
+  private askPayment(
+    manager: Manager,
+    requestId: string,
+    payments: OrderRequisite[],
+    file: TelegramFileRef,
+  ): ReceiptAnswer {
+    const pending = this.paymentChoices.get(manager.telegramId);
+    if (pending?.requestId === requestId && pending.expiresAt > Date.now()) {
+      pending.files.push(file);
+      return { html: '', queued: true };
+    }
+    this.paymentChoices.set(manager.telegramId, {
+      requestId,
+      files: [file],
+      expiresAt: Date.now() + CHOICE_TTL_MS,
+    });
+    return {
+      html: '📎 До якого платежу ця квитанція?',
+      buttons: payments.map((payment) => [button(paymentButtonLabel(payment), `mp:${payment.id}`)]),
+    };
   }
 
   private async storing(order: Order, store: () => Promise<unknown>): Promise<ReceiptAnswer> {

@@ -4,7 +4,9 @@ import type {
   FinanceRequestFile,
   Manager,
   Order,
+  OrderRequisite,
 } from '../../../src/generated/prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import type { PrismaService } from '../../../src/common/prisma/prisma.service';
 import { AttachmentStorageError } from '../../../src/modules/attachments/attachments.errors';
 import type {
@@ -49,7 +51,10 @@ describe('RequestReceiptsService', () => {
     deleteHeldFiles: jest.fn(),
     openOfManager: jest.fn(),
   };
-  const prisma = { order: { findUnique: jest.fn() } };
+  const prisma = {
+    order: { findUnique: jest.fn() },
+    orderRequisite: { findMany: jest.fn(), findFirst: jest.fn() },
+  };
   const attachments = { saveFromTelegram: jest.fn() };
   const managers = { findActiveByTelegramId: jest.fn() };
   const drafts = { isArmed: jest.fn().mockReturnValue(false) };
@@ -67,6 +72,7 @@ describe('RequestReceiptsService', () => {
     cards.byRequestId.mockResolvedValue(open);
     cards.heldFiles.mockResolvedValue([]);
     prisma.order.findUnique.mockResolvedValue(order);
+    prisma.orderRequisite.findMany.mockResolvedValue([]);
     attachments.saveFromTelegram.mockResolvedValue([]);
   });
   afterEach(() => {
@@ -425,6 +431,108 @@ describe('RequestReceiptsService', () => {
       expect(next).not.toHaveBeenCalled();
       expect(cards.holdFile).not.toHaveBeenCalled();
       expect(c.reply).toHaveBeenCalledWith(NOT_A_MANAGER, expect.anything());
+    });
+  });
+  describe('receipts of an order with payments', () => {
+    const payment = (id: number, payerName: string, amount: string) =>
+      ({
+        id,
+        orderId: 10,
+        payerName,
+        account: '4441111149020814',
+        amount: new Prisma.Decimal(amount),
+        paidAt: null,
+      }) as OrderRequisite;
+    const first = payment(1, 'Николаев Николай', '7020.8');
+    const second = payment(2, 'Костецький Віктор', '2673.96');
+    const ctx = (id: number) =>
+      ({
+        from: { id: 555 },
+        chat: { type: 'private', id: 555 },
+        match: ['', String(id)],
+        answerCbQuery: jest.fn(),
+        deleteMessage: jest.fn().mockResolvedValue(undefined),
+        editMessageText: jest.fn().mockResolvedValue(undefined),
+      }) as never;
+
+    beforeEach(() => {
+      // the service is shared, so a question left waiting by one test must not reach the next
+      (service as unknown as { paymentChoices: Map<bigint, unknown> }).paymentChoices.clear();
+      cards.byRequestId.mockResolvedValue(done);
+      managers.findActiveByTelegramId.mockResolvedValue(manager);
+    });
+
+    it('should caption the receipt with the only payment of the order', async () => {
+      prisma.orderRequisite.findMany.mockResolvedValue([first]);
+
+      await service.receive(manager, 'req1', photo);
+
+      const [, , , , caption] = attachments.saveFromTelegram.mock.calls[0] as [
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+        string,
+      ];
+      expect(caption).toContain('Николаев Николай');
+      expect(caption).toContain('7 020,80');
+      expect(caption).not.toContain('Костецький');
+    });
+
+    it('should ask which payment instead of storing when the order has several', async () => {
+      prisma.orderRequisite.findMany.mockResolvedValue([first, second]);
+
+      const answer = await service.receive(manager, 'req1', photo);
+
+      expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
+      expect(answer.buttons).toHaveLength(2);
+      expect(answer.buttons![1]![0]).toMatchObject({ callback_data: 'mp:2' });
+    });
+
+    it('should let a second file join the question already asked', async () => {
+      prisma.orderRequisite.findMany.mockResolvedValue([first, second]);
+      await service.receive(manager, 'req1', photo);
+
+      const answer = await service.receive(manager, 'req1', { ...photo, fileId: 'f2' });
+
+      expect(answer.queued).toBe(true);
+      expect(answer.buttons).toBeUndefined();
+    });
+
+    it('should store the waiting files with the chosen payment only', async () => {
+      prisma.orderRequisite.findMany.mockResolvedValue([first, second]);
+      prisma.orderRequisite.findFirst.mockResolvedValue(second);
+      await service.receive(manager, 'req1', photo);
+      await service.receive(manager, 'req1', { ...photo, fileId: 'f2' });
+
+      await service.onPayment(ctx(2));
+
+      expect(prisma.orderRequisite.findFirst).toHaveBeenCalledWith({
+        where: { id: 2, orderId: 10 },
+      });
+      const [, files, , , caption] = attachments.saveFromTelegram.mock.calls[0] as [
+        unknown,
+        TelegramFileRef[],
+        unknown,
+        unknown,
+        string,
+      ];
+      expect(files.map((file) => file.fileId)).toEqual(['f1', 'f2']);
+      expect(caption).toContain('Костецький Віктор');
+      expect(caption).toContain('2 673,96');
+      expect(caption).not.toContain('Николаев');
+    });
+
+    it('should refuse a payment press with no waiting files', async () => {
+      const press = ctx(2);
+
+      await service.onPayment(press);
+
+      expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
+      expect((press as unknown as { answerCbQuery: jest.Mock }).answerCbQuery).toHaveBeenCalledWith(
+        'Надішліть файл ще раз',
+        { show_alert: true },
+      );
     });
   });
 });

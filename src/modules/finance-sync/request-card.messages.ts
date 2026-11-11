@@ -1,5 +1,5 @@
 import { kyivParts } from '../../common/kyiv-time';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, type OrderRequisite } from '../../generated/prisma/client';
 import { type BotReply, button } from '../telegram/core/bot-reply';
 import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
 import { formatRate } from '../telegram/notifications/order-templates';
@@ -23,6 +23,8 @@ export const FinanceAction = {
   Attach: /^ma:([\w-]+)$/,
   /** «Запит #N» under «До якого запиту додати файл?» for a file sent straight into the chat. */
   Route: /^mr:([\w-]+)$/,
+  /** «Платник · сума» under «До якого платежу?»: the waiting receipts go with that payment. */
+  Payment: /^mp:(\d+)$/,
 } as const;
 
 const attachButton = (id: string) => button('📎 Прикріпити файли', `ma:${id}`);
@@ -227,6 +229,30 @@ function paymentLine(payment: StoredPayment): string {
     payment.paidAt && dateTime(new Date(payment.paidAt)),
   ].filter((part): part is string => Boolean(part));
   return `• ${parts.map(escapeHtml).join(' · ')}`;
+}
+
+type ReceiptPayment = Pick<OrderRequisite, 'payerName' | 'account' | 'amount' | 'paidAt'>;
+
+/** The label of a payment on a button, enough to tell it from the other payments of the order. */
+export function paymentButtonLabel(payment: ReceiptPayment): string {
+  const tail = payment.account ? ` (…${payment.account.slice(-4)})` : '';
+  return `${[...payment.payerName].slice(0, 30).join('')}${tail} · ${money(payment.amount.toFixed(2))}`;
+}
+
+/** The caption of a receipt that belongs to one payment: only that payment, so the file reads on its own. */
+export function receiptCaption(
+  orderNumber: string,
+  payment: ReceiptPayment,
+  uploaderName: string,
+): string {
+  return [
+    `📎 <b>№ ${escapeHtml(orderNumber)}</b>`,
+    escapeHtml(clip(payment.payerName)),
+    ...(payment.account ? [escapeHtml(clip(payment.account))] : []),
+    `Сума: ${money(payment.amount.toFixed(2))}`,
+    ...(payment.paidAt ? [`Дата оплати: ${dateTime(payment.paidAt)}`] : []),
+    `Додав: ${escapeHtml(uploaderName)} · ${dateTime(new Date())}`,
+  ].join('\n');
 }
 
 /** The payments the orders will get; whole lines within the budget, «…» for the rest. */

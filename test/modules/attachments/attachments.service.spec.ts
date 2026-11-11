@@ -30,6 +30,7 @@ describe('AttachmentsService.saveFromTelegram', () => {
     currency: Currency.UAH,
     exchangeRate: null,
     comment: null,
+    paidAt: new Date('2026-11-11T12:53:00Z'),
   };
   const uploader: Initiator = { telegramId: 5000000000n, name: 'Христина' };
 
@@ -99,6 +100,8 @@ describe('AttachmentsService.saveFromTelegram', () => {
     expect(media[0]!.caption).toBeUndefined();
     expect(media[1]!.caption).toContain('📎 <b>');
     expect(media[1]!.caption).toContain('№ 0000-066717');
+    expect(media[1]!.caption).toContain('Дата оплати: 14:53 11.11.2026');
+    expect(media[1]!.caption).toMatch(/Додав: Христина · \d\d:\d\d \d\d\.\d\d\.\d{4}/);
   });
 
   it('should send a single photo via sendPhoto, not sendDocument', async () => {
