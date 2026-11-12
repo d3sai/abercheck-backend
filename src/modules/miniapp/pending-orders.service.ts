@@ -92,12 +92,14 @@ export class PendingOrdersService {
       return;
     }
     try {
+      // the card text as it was sent, so it stays on screen after the order is made
+      const card = await this.directOrders.preview(order);
       const result = await this.directOrders.create(
         found.manager,
         order,
         storedFiles(claimed.files),
       );
-      await edit(ctx, acceptedCard(result.orderNumbers)).catch(() => undefined);
+      await edit(ctx, acceptedCard(card.html, result.orderNumbers)).catch(() => undefined);
       await (result.note
         ? ctx.answerCbQuery(...alert(result.note))
         : ctx.answerCbQuery('✅ Оформлено'));

@@ -15,11 +15,13 @@ export const pendingOrderButtons = (id: string) => [
 
 export const ATTACH_PROMPT = '📎 Надішліть фото або файл відповіддю на це повідомлення.';
 
-export const acceptedCard = (orderNumbers: string[]): BotReply => ({
-  html:
+/** The card as it was sent, now without buttons and with the outcome under it. */
+export const acceptedCard = (cardHtml: string, orderNumbers: string[]): BotReply => ({
+  html: `${cardHtml}\n\n${
     orderNumbers.length > 0
       ? `✅ Оформлено: № ${escapeHtml(orderNumbers.join(', '))}`
-      : '✅ Прийнято',
+      : '✅ Прийнято'
+  }`,
 });
 
 export const CANCELLED_CARD: BotReply = { html: '❌ Скасовано' };

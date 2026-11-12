@@ -537,6 +537,53 @@ describe('RequestReceiptsService', () => {
         );
       });
 
+      it('should ask once for an album sent at the same time, and keep every photo for the chosen request', async () => {
+        cards.openOfManager.mockImplementation(
+          () =>
+            new Promise((resolve) =>
+              setTimeout(() => resolve([card('req1', '42'), card('req2', '43')]), 0),
+            ),
+        );
+        const first = loose();
+        const second = loose();
+
+        await Promise.all([
+          service.onFile(first as never, photo, jest.fn()),
+          service.onFile(second as never, { ...photo, fileId: 'f2' }, jest.fn()),
+        ]);
+
+        expect(first.reply.mock.calls.length + second.reply.mock.calls.length).toBe(1);
+
+        cards.byRequestId.mockResolvedValue({ ...open, requestId: 'req2', number: '43' });
+        const cb = {
+          from: { id: 555 },
+          chat: { id: 555, type: 'private' },
+          match: ['mr:req2', 'req2'],
+          answerCbQuery: jest.fn(),
+          editMessageText: jest.fn().mockResolvedValue(true),
+          deleteMessage: jest.fn(),
+        };
+        await service.onChoice(cb as never);
+
+        expect(cards.holdFile).toHaveBeenCalledTimes(2);
+      });
+
+      it('should keep every file of an album sent at the same time to the only open request', async () => {
+        cards.openOfManager.mockImplementation(
+          () => new Promise((resolve) => setTimeout(() => resolve([card('req1', '42')]), 0)),
+        );
+        const first = loose();
+        const second = loose();
+
+        await Promise.all([
+          service.onFile(first as never, photo, jest.fn()),
+          service.onFile(second as never, { ...photo, fileId: 'f2' }, jest.fn()),
+        ]);
+
+        expect(cards.holdFile).toHaveBeenCalledTimes(2);
+        expect(first.reply).toHaveBeenCalledWith('📎 Збережено файлів: 2', expect.anything());
+      });
+
       it('should ask which request with «mr:» buttons, then attach the waiting files to the chosen one', async () => {
         cards.openOfManager.mockResolvedValue([card('req1', '42'), card('req2', '43')]);
         const c = loose();

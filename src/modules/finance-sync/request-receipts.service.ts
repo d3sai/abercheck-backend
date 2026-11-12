@@ -180,11 +180,14 @@ export class RequestReceiptsService {
       await reply(ctx, { html: NOT_A_MANAGER }, ctx.message?.message_id);
       return;
     }
-    const pending = this.choices.get(userId);
-    if (pending && pending.expiresAt > Date.now()) {
-      pending.files.push(file);
+    const waiting = this.choices.get(userId);
+    if (waiting && waiting.expiresAt > Date.now()) {
+      waiting.files.push(file);
       return;
     }
+    // set before the lookups: the other files of an album arrive meanwhile and must join, not ask again
+    const choice: Choice = { files: [file], expiresAt: Date.now() + CHOICE_TTL_MS };
+    this.choices.set(userId, choice);
     const [open, drafts] = await Promise.all([
       this.cards.openOfManager(manager.id, new Date(Date.now() - OPEN_WINDOW_MS)),
       this.pending.openOfManager(manager.id),
@@ -200,32 +203,41 @@ export class RequestReceiptsService {
         };
       }),
     ];
+    const messageId = ctx.message?.message_id;
     if (targets.length === 0) {
+      this.choices.delete(userId);
       await reply(
         ctx,
         { html: 'Немає відкритого запиту чи замовлення, до якого можна додати файл.' },
-        ctx.message?.message_id,
+        messageId,
       );
       return;
     }
     if (targets.length === 1) {
+      this.choices.delete(userId);
       const [only] = targets;
-      await this.answer(
-        ctx,
-        only!.draft
-          ? await this.holdOnDraft(only!.id, file)
-          : await this.receive(manager, only!.id, file),
-      );
+      const answers: ReceiptAnswer[] = [];
+      for (const held of choice.files) {
+        answers.push(
+          only!.draft
+            ? await this.holdOnDraft(only!.id, held)
+            : await this.receive(manager, only!.id, held),
+        );
+      }
+      if (answers.length === 1) return this.answer(ctx, answers[0]!);
+      const notable =
+        answers.find((answer) => answer.buttons) ??
+        answers.find((answer) => !answer.stored && !answer.queued);
+      await reply(ctx, notable ?? { html: `📎 Збережено файлів: ${answers.length}` }, messageId);
       return;
     }
-    this.choices.set(userId, { files: [file], expiresAt: Date.now() + CHOICE_TTL_MS });
     await reply(
       ctx,
       {
         html: '📎 До якого запиту чи замовлення додати файл?',
         buttons: targets.map((target) => [button(target.label, `mr:${target.id}`)]),
       },
-      ctx.message?.message_id,
+      messageId,
     );
   }
 

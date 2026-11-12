@@ -141,10 +141,9 @@ describe('PendingOrdersService', () => {
         expect.objectContaining({ kind: 'foreign' }),
         [receipt],
       );
-      expect(c.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('0000-066498'),
-        expect.anything(),
-      );
+      const [text] = c.editMessageText.mock.calls[0] as [string];
+      expect(text).toContain('card text');
+      expect(text).toContain('✅ Оформлено: № 0000-066498');
       expect(c.answerCbQuery).toHaveBeenCalledWith('✅ Оформлено');
     });
 
@@ -182,6 +181,18 @@ describe('PendingOrdersService', () => {
       expect(c.answerCbQuery).toHaveBeenCalledWith('Не вдалося, спробуйте ще раз', {
         show_alert: true,
       });
+    });
+
+    it('should keep the draft when the checks before creating refuse it', async () => {
+      directOrders.preview.mockRejectedValue(
+        new ApiError(HttpStatus.CONFLICT, 'already-recorded', 'Цю оплату вже зареєстровано.'),
+      );
+      const c = press();
+
+      await service.accept(c as never);
+
+      expect(directOrders.create).not.toHaveBeenCalled();
+      expect(repo.restore).toHaveBeenCalledWith(row);
     });
 
     it('should not touch a draft of another chat', async () => {
