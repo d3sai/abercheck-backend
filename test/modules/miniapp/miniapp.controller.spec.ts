@@ -217,6 +217,13 @@ describe('MiniappController', () => {
       },
     );
 
+    it('should accept a card request without payments and store none', async () => {
+      await create({ kind: 'card', orders: [order], payments: undefined });
+
+      const [, input] = requests.create.mock.calls[0] as [unknown, { payments?: unknown }];
+      expect(input.payments).toBeUndefined();
+    });
+
     it('should not require a rate for minus', async () => {
       await create({
         kind: 'minus',
@@ -305,7 +312,6 @@ describe('MiniappController', () => {
     it.each([
       ['our_fop with a payment', { kind: 'our_fop', orders: [order] }],
       ['foreign_fop with a payment', { kind: 'foreign_fop', orders: [order] }],
-      ['card without payments', { kind: 'card', orders: [order], payments: undefined }],
       [
         'card without a payer name',
         { kind: 'card', orders: [order], payments: [{ ...paid, payerName: ' ' }] },

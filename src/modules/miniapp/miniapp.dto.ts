@@ -257,6 +257,8 @@ export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): C
       }
       return { ...common, orders };
     }
+    // a card request may come without payments: the payers are asked when the manager accepts it
+    if (dto.kind === 'card' && (dto.payments ?? []).length === 0) return { ...common, orders };
     return {
       ...common,
       orders,
