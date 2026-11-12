@@ -16,6 +16,15 @@ export function storedFiles(value: unknown): TelegramFileRef[] {
     : [];
 }
 
+/** The order numbers of a stored plan, read as the JSON it is: Kit has several, cash and foreign one. */
+export function draftNumbers(value: unknown): string[] {
+  const plan = (value as { plan?: { number?: unknown; items?: { number?: unknown }[] } } | null)
+    ?.plan;
+  if (!plan) return [];
+  const numbers = plan.items ? plan.items.map((item) => item.number) : [plan.number];
+  return numbers.filter((number): number is string => typeof number === 'string');
+}
+
 /** Drafts of Kit, cash and foreign orders waiting in a manager's chat for files and «Прийняти». */
 @Injectable()
 export class PendingOrdersRepository {
@@ -27,6 +36,15 @@ export class PendingOrdersRepository {
     plan: Prisma.InputJsonValue;
   }): Promise<PendingOrder> {
     return this.prisma.pendingOrder.create({ data });
+  }
+
+  /** A manager's drafts a loose file can still go to. */
+  openOfManager(managerId: number): Promise<PendingOrder[]> {
+    return this.prisma.pendingOrder.findMany({
+      where: { managerId },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+    });
   }
 
   byId(id: string): Promise<PendingOrder | null> {

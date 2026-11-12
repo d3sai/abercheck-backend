@@ -180,6 +180,18 @@ describe('ManagerActionsService', () => {
       expect(finance.postMessage).toHaveBeenCalledWith('req9', expect.anything());
     });
 
+    it('should leave a reply to a draft attach prompt alone: its id is no request', async () => {
+      cards.byManagerMessage.mockResolvedValue(null);
+      cards.requestOfChatMessage.mockResolvedValue('draft1');
+      cards.byRequestId.mockResolvedValue(null);
+      const next = jest.fn();
+
+      await service.onText(textCtx('привіт', { message_id: 40, from: { id: 1 } }) as never, next);
+
+      expect(finance.postMessage).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalledTimes(1);
+    });
+
     it('should fall back to a reply when reactions are not available', async () => {
       cards.byManagerMessage.mockResolvedValue(card);
       const c = textCtx('ок', toCard);

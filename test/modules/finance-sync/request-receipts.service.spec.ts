@@ -59,7 +59,12 @@ describe('RequestReceiptsService', () => {
   const attachments = { saveFromTelegram: jest.fn() };
   const managers = { findActiveByTelegramId: jest.fn() };
   const drafts = { isArmed: jest.fn().mockReturnValue(false) };
-  const pending = { idOfMessage: jest.fn(), byId: jest.fn(), addFile: jest.fn() };
+  const pending = {
+    idOfMessage: jest.fn(),
+    byId: jest.fn(),
+    addFile: jest.fn(),
+    openOfManager: jest.fn(),
+  };
   const service = new RequestReceiptsService(
     cards as unknown as RequestCardsRepository,
     prisma as unknown as PrismaService,
@@ -268,6 +273,8 @@ describe('RequestReceiptsService', () => {
     });
 
     beforeEach(() => {
+      (service as unknown as { heldNotified: Map<number, number> }).heldNotified.clear();
+      pending.openOfManager.mockResolvedValue([]);
       managers.findActiveByTelegramId.mockResolvedValue(manager);
       cards.byManagerMessage.mockResolvedValue(open);
     });
@@ -281,8 +288,21 @@ describe('RequestReceiptsService', () => {
       expect(cards.byManagerMessage).toHaveBeenCalledWith(555n, 31);
       expect(cards.holdFile).toHaveBeenCalledWith('req1', photo);
       expect(c.react).toHaveBeenCalledWith('👍');
-      expect(c.reply).not.toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith(
+        '📎 Квитанцію збережено — додамо до замовлення після оформлення',
+        expect.anything(),
+      );
       expect(next).not.toHaveBeenCalled();
+    });
+
+    it('should say that a held file waits only once for a burst of files', async () => {
+      const c = ctx();
+
+      await service.onFile(c as never, photo, jest.fn());
+      await service.onFile(c as never, { ...photo, fileId: 'f2' }, jest.fn());
+
+      expect(c.react).toHaveBeenCalledTimes(2);
+      expect(c.reply).toHaveBeenCalledTimes(1);
     });
 
     it('should fall back to the text when the reaction fails', async () => {
@@ -328,6 +348,20 @@ describe('RequestReceiptsService', () => {
         await service.onFile(c as never, photo, next);
 
         expect(pending.idOfMessage).toHaveBeenCalledWith(555n, 31);
+        expect(pending.addFile).toHaveBeenCalledWith('p1', photo, 10);
+        expect(c.react).toHaveBeenCalledWith('👍');
+        expect(next).not.toHaveBeenCalled();
+      });
+
+      it('should hold the file on the draft when the reply is to its remembered attach prompt', async () => {
+        // the prompt is remembered in the request-chat table, so it resolves to the draft id as a "request id"
+        cards.requestOfChatMessage.mockResolvedValue('p1');
+        cards.byRequestId.mockResolvedValue(null);
+        const c = ctx();
+        const next = jest.fn();
+
+        await service.onFile(c as never, photo, next);
+
         expect(pending.addFile).toHaveBeenCalledWith('p1', photo, 10);
         expect(c.react).toHaveBeenCalledWith('👍');
         expect(next).not.toHaveBeenCalled();
@@ -444,10 +478,63 @@ describe('RequestReceiptsService', () => {
         await service.onFile(c as never, photo, jest.fn());
 
         expect(c.reply).toHaveBeenCalledWith(
-          'Немає відкритого запиту, до якого можна додати файл.',
+          'Немає відкритого запиту чи замовлення, до якого можна додати файл.',
           expect.anything(),
         );
         expect(cards.holdFile).not.toHaveBeenCalled();
+      });
+
+      it('should hold a loose file on the only draft', async () => {
+        cards.openOfManager.mockResolvedValue([]);
+        pending.openOfManager.mockResolvedValue([
+          { id: 'p1', managerId: 4, plan: { kind: 'foreign', plan: { number: '0000-066498' } } },
+        ]);
+        pending.addFile.mockResolvedValue('added');
+        const c = loose();
+
+        await service.onFile(c as never, photo, jest.fn());
+
+        expect(pending.addFile).toHaveBeenCalledWith('p1', photo, 10);
+        expect(c.react).toHaveBeenCalledWith('👍');
+      });
+
+      it('should offer requests and drafts together and give the files to the chosen draft', async () => {
+        cards.openOfManager.mockResolvedValue([card('req1', '42')]);
+        pending.openOfManager.mockResolvedValue([
+          { id: 'p1', managerId: 4, plan: { kind: 'foreign', plan: { number: '0000-066498' } } },
+        ]);
+        pending.addFile.mockResolvedValue('added');
+        const c = loose();
+
+        await service.onFile(c as never, photo, jest.fn());
+        await service.onFile(loose() as never, { ...photo, fileId: 'f2' }, jest.fn());
+
+        const question = JSON.stringify(c.reply.mock.calls[0]);
+        expect(question).toContain('mr:req1');
+        expect(question).toContain('mr:p1');
+        expect(question).toContain('Замовлення № 0000-066498');
+
+        cards.byRequestId.mockResolvedValue(null);
+        pending.byId.mockResolvedValue({
+          id: 'p1',
+          managerId: 4,
+          plan: { kind: 'foreign', plan: { number: '0000-066498' } },
+        });
+        const cb = {
+          from: { id: 555 },
+          chat: { id: 555, type: 'private' },
+          match: ['mr:p1', 'p1'],
+          answerCbQuery: jest.fn(),
+          editMessageText: jest.fn().mockResolvedValue(true),
+          deleteMessage: jest.fn(),
+        };
+        await service.onChoice(cb as never);
+
+        expect(pending.addFile).toHaveBeenCalledTimes(2);
+        expect(pending.addFile).toHaveBeenCalledWith('p1', { ...photo, fileId: 'f2' }, 10);
+        expect(cb.editMessageText).toHaveBeenCalledWith(
+          '📎 Збережено до замовлення № 0000-066498: 2. У «Оплати» піде після «Прийняти».',
+        );
       });
 
       it('should ask which request with «mr:» buttons, then attach the waiting files to the chosen one', async () => {
@@ -476,7 +563,9 @@ describe('RequestReceiptsService', () => {
 
         expect(cards.holdFile).toHaveBeenCalledTimes(2);
         expect(cards.holdFile).toHaveBeenCalledWith('req2', photo);
-        expect(cb.editMessageText).toHaveBeenCalledWith('📎 Додано до запиту #43: 2');
+        expect(cb.editMessageText).toHaveBeenCalledWith(
+          '📎 Збережено до запиту #43: 2. У «Оплати» піде після «Прийняти».',
+        );
       });
     });
 

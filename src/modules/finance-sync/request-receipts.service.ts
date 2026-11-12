@@ -16,13 +16,15 @@ import { button } from '../telegram/core/bot-reply';
 import { type MatchContext, edit, isPrivate, reply } from '../telegram/core/telegram-context';
 import { OrderDraftService } from '../telegram/order-draft/order-draft.service';
 import { paymentButtonLabel, receiptCaption } from './request-card.messages';
-import { PendingOrdersRepository } from './pending-orders.repository';
+import { draftNumbers, PendingOrdersRepository } from './pending-orders.repository';
 import { RequestCardsRepository } from './request-cards.repository';
 
 type Next = () => Promise<void>;
 
 const OPEN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const CHOICE_TTL_MS = 10 * 60 * 1000;
+// a burst of held files gets one line of explanation, not one per file
+const HELD_NOTICE_MS = 60 * 1000;
 
 /** Files sent loose while the manager has several open requests, waiting for «До якого запиту?». */
 interface Choice {
@@ -48,7 +50,15 @@ const NO_ORDER = 'Запит оформлено, але бот не знайшо
 
 /** Receipts a manager sends in the bot chat as a reply to their request. */
 /** `stored`: the receipt was kept; the text then only serves if the 👍 reaction fails. */
-type ReceiptAnswer = BotReply & { stored?: true; queued?: true };
+/** `held`: stored, but it reaches «Оплати» only after «Прийняти». */
+type ReceiptAnswer = BotReply & { stored?: true; queued?: true; held?: true };
+
+/** A request or a draft order a loose file can go to. */
+interface Target {
+  id: string;
+  label: string;
+  draft: boolean;
+}
 
 @Injectable()
 export class RequestReceiptsService {
@@ -65,6 +75,7 @@ export class RequestReceiptsService {
 
   private readonly choices = new Map<bigint, Choice>();
   private readonly paymentChoices = new Map<bigint, PaymentChoice>();
+  private readonly heldNotified = new Map<number, number>();
 
   /** Handles only files replied to a card or a relayed message of the sender's own request. */
   async onFile(ctx: Context, file: TelegramFileRef, next: Next): Promise<void> {
@@ -81,14 +92,16 @@ export class RequestReceiptsService {
     const requestId =
       (await this.cards.byManagerMessage(chatId, target.message_id))?.requestId ??
       (await this.cards.requestOfChatMessage(chatId, target.message_id));
-    if (!requestId) return this.onDraftFile(ctx, chatId, target.message_id, file, next);
+    // an attach prompt of a draft is remembered in the same table as a request's, so its id is no request
+    const card = requestId ? await this.cards.byRequestId(requestId) : null;
+    if (!requestId || !card) return this.onDraftFile(ctx, chatId, target.message_id, file, next);
 
     const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from.id));
     if (!manager) {
       await reply(ctx, { html: NOT_A_MANAGER }, message!.message_id);
       return;
     }
-    if ((await this.cards.byRequestId(requestId))?.managerId !== manager.id) return next();
+    if (card.managerId !== manager.id) return next();
     await this.answer(ctx, await this.receive(manager, requestId, file));
   }
 
@@ -108,23 +121,27 @@ export class RequestReceiptsService {
       return;
     }
     if ((await this.pending.byId(draftId))?.managerId !== manager.id) return next();
+    await this.answer(ctx, await this.holdOnDraft(draftId, file));
+  }
+
+  /** Holds the file on a draft; it goes with the order after «Прийняти». */
+  private async holdOnDraft(draftId: string, file: TelegramFileRef): Promise<ReceiptAnswer> {
     const refusal = fileRefusal(file);
-    if (refusal) return this.answer(ctx, { html: refusal });
+    if (refusal) return { html: refusal };
     const outcome = await this.pending.addFile(draftId, file, MAX_FILES_PER_UPLOAD);
-    await this.answer(
-      ctx,
-      outcome === 'added'
-        ? {
-            html: '📎 Квитанцію збережено — вона піде з замовленням після «Прийняти»',
-            stored: true,
-          }
-        : {
-            html:
-              outcome === 'full'
-                ? `⚠️ Максимум ${MAX_FILES_PER_UPLOAD} файлів на замовлення.`
-                : 'Запит не знайдено',
-          },
-    );
+    if (outcome === 'added') {
+      return {
+        html: '📎 Квитанцію збережено — вона піде з замовленням після «Прийняти»',
+        stored: true,
+        held: true,
+      };
+    }
+    return {
+      html:
+        outcome === 'full'
+          ? `⚠️ Максимум ${MAX_FILES_PER_UPLOAD} файлів на замовлення.`
+          : 'Запит не знайдено',
+    };
   }
 
   /** A stored receipt gets a 👍 on the file instead of one more message. */
@@ -133,10 +150,23 @@ export class RequestReceiptsService {
     // joined the question already asked for the files before it
     if (answer.queued) return;
     if (answer.stored) {
-      await ctx.react('👍').catch(() => reply(ctx, answer, messageId));
+      const reacted = await ctx.react('👍').then(
+        () => true,
+        () => false,
+      );
+      if (!reacted || (answer.held && this.firstHeldNotice(ctx)))
+        await reply(ctx, answer, messageId);
       return;
     }
     await reply(ctx, answer, messageId);
+  }
+
+  private firstHeldNotice(ctx: Context): boolean {
+    const chatId = ctx.chat!.id;
+    const last = this.heldNotified.get(chatId);
+    if (last !== undefined && Date.now() - last < HELD_NOTICE_MS) return false;
+    this.heldNotified.set(chatId, Date.now());
+    return true;
   }
 
   /**
@@ -155,46 +185,74 @@ export class RequestReceiptsService {
       pending.files.push(file);
       return;
     }
-    const open = await this.cards.openOfManager(manager.id, new Date(Date.now() - OPEN_WINDOW_MS));
-    if (open.length === 0) {
+    const [open, drafts] = await Promise.all([
+      this.cards.openOfManager(manager.id, new Date(Date.now() - OPEN_WINDOW_MS)),
+      this.pending.openOfManager(manager.id),
+    ]);
+    const targets: Target[] = [
+      ...open.map((card) => ({ id: card.requestId, label: `Запит #${card.number}`, draft: false })),
+      ...drafts.map((draft) => {
+        const numbers = draftNumbers(draft.plan).join(', ');
+        return {
+          id: draft.id,
+          label: numbers ? `Замовлення № ${numbers}` : 'Замовлення',
+          draft: true,
+        };
+      }),
+    ];
+    if (targets.length === 0) {
       await reply(
         ctx,
-        { html: 'Немає відкритого запиту, до якого можна додати файл.' },
+        { html: 'Немає відкритого запиту чи замовлення, до якого можна додати файл.' },
         ctx.message?.message_id,
       );
       return;
     }
-    if (open.length === 1) {
-      await this.answer(ctx, await this.receive(manager, open[0]!.requestId, file));
+    if (targets.length === 1) {
+      const [only] = targets;
+      await this.answer(
+        ctx,
+        only!.draft
+          ? await this.holdOnDraft(only!.id, file)
+          : await this.receive(manager, only!.id, file),
+      );
       return;
     }
     this.choices.set(userId, { files: [file], expiresAt: Date.now() + CHOICE_TTL_MS });
     await reply(
       ctx,
       {
-        html: '📎 До якого запиту додати файл?',
-        buttons: open.map((card) => [button(`Запит #${card.number}`, `mr:${card.requestId}`)]),
+        html: '📎 До якого запиту чи замовлення додати файл?',
+        buttons: targets.map((target) => [button(target.label, `mr:${target.id}`)]),
       },
       ctx.message?.message_id,
     );
   }
 
-  /** «Запит #N» under the question: the waiting files go to that request. */
+  /** A request or order under the question: the waiting files go there. */
   async onChoice(ctx: MatchContext): Promise<void> {
     if (!ctx.from || !isPrivate(ctx)) return;
     const userId = BigInt(ctx.from.id);
     const pending = this.choices.get(userId);
     this.choices.delete(userId);
     const manager = await this.managers.findActiveByTelegramId(userId);
-    const card = await this.cards.byRequestId(ctx.match[1]!);
-    if (!pending || pending.expiresAt < Date.now() || !manager || card?.managerId !== manager.id) {
+    const id = ctx.match[1]!;
+    const card = await this.cards.byRequestId(id);
+    const draft = card ? null : await this.pending.byId(id);
+    const owner = card ?? draft;
+    if (!pending || pending.expiresAt < Date.now() || !manager || owner?.managerId !== manager.id) {
       await ctx.answerCbQuery('Надішліть файл ще раз', { show_alert: true });
       await ctx.deleteMessage().catch(() => undefined);
       return;
     }
     const answers = [];
-    for (const file of pending.files)
-      answers.push(await this.receive(manager, card.requestId, file));
+    for (const file of pending.files) {
+      answers.push(
+        draft
+          ? await this.holdOnDraft(draft.id, file)
+          : await this.receive(manager, card!.requestId, file),
+      );
+    }
     const question = answers.find((answer) => answer.buttons);
     const failed = answers.find((answer) => !answer.stored && !answer.queued && !answer.buttons);
     await ctx.answerCbQuery(failed ? '' : '👍');
@@ -202,11 +260,15 @@ export class RequestReceiptsService {
       await edit(ctx, question).catch(() => undefined);
       return;
     }
-    await ctx
-      .editMessageText(
-        failed ? failed.html : `📎 Додано до запиту #${card.number}: ${answers.length}`,
-      )
-      .catch(() => undefined);
+    const waits = ' У «Оплати» піде після «Прийняти».';
+    const text = failed
+      ? failed.html
+      : draft
+        ? `📎 Збережено до замовлення № ${draftNumbers(draft.plan).join(', ')}: ${answers.length}.${waits}`
+        : answers.every((answer) => answer.held)
+          ? `📎 Збережено до запиту #${card!.number}: ${answers.length}.${waits}`
+          : `📎 Додано до запиту #${card!.number}: ${answers.length}`;
+    await ctx.editMessageText(text).catch(() => undefined);
   }
 
   /** «Платник · сума» under the question: the waiting files get that payment's caption. */
@@ -277,6 +339,7 @@ export class RequestReceiptsService {
         return {
           html: '📎 Квитанцію збережено — додамо до замовлення після оформлення',
           stored: true,
+          held: true,
         };
       }
       // shortcut: a parallel completion attaching the same held rows can attach this file twice; rare, upgrade to a claim on the rows if it shows up

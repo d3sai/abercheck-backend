@@ -87,7 +87,8 @@ export class ManagerActionsService {
     const requestId =
       (await this.cards.byManagerMessage(chatId, target.message_id))?.requestId ??
       (await this.cards.requestOfChatMessage(chatId, target.message_id));
-    if (!requestId) return next();
+    // the attach prompt of a draft is remembered like a request's: its id is no request, so it is not ours
+    if (!requestId || !(await this.cards.byRequestId(requestId))) return next();
 
     if (!(await this.managers.findActiveByTelegramId(BigInt(ctx.from.id)))) {
       await reply(ctx, { html: NOT_A_MANAGER }, message!.message_id);

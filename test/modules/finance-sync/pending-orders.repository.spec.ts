@@ -1,7 +1,10 @@
 import type { PrismaService } from '../../../src/common/prisma/prisma.service';
 import { Prisma, type PendingOrder } from '../../../src/generated/prisma/client';
 import type { TelegramFileRef } from '../../../src/modules/attachments/attachments.service';
-import { PendingOrdersRepository } from '../../../src/modules/finance-sync/pending-orders.repository';
+import {
+  draftNumbers,
+  PendingOrdersRepository,
+} from '../../../src/modules/finance-sync/pending-orders.repository';
 
 const file: TelegramFileRef = {
   fileId: 'f1',
@@ -20,6 +23,7 @@ describe('PendingOrdersRepository', () => {
       create: jest.fn(),
       findUnique: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
     },
@@ -91,6 +95,33 @@ describe('PendingOrdersRepository', () => {
       prisma.pendingOrder.findUnique.mockResolvedValue(null);
 
       expect(await repo.idOfMessage(555n, 90)).toBeNull();
+    });
+  });
+  describe('openOfManager', () => {
+    it('should list the newest drafts of the manager, a few of them', async () => {
+      prisma.pendingOrder.findMany.mockResolvedValue([row]);
+
+      expect(await repo.openOfManager(4)).toEqual([row]);
+      expect(prisma.pendingOrder.findMany).toHaveBeenCalledWith({
+        where: { managerId: 4 },
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+      });
+    });
+  });
+
+  describe('draftNumbers', () => {
+    it.each([
+      [{ kind: 'foreign', plan: { number: '0000-1' } }, ['0000-1']],
+      [{ kind: 'cash', plan: { number: '0000-2' } }, ['0000-2']],
+      [
+        { kind: 'kit', plan: { items: [{ number: '0000-3' }, { number: '0000-4' }] } },
+        ['0000-3', '0000-4'],
+      ],
+      [null, []],
+      [{ kind: 'kit' }, []],
+    ])('should read the numbers of %j', (plan, numbers) => {
+      expect(draftNumbers(plan)).toEqual(numbers);
     });
   });
 });
