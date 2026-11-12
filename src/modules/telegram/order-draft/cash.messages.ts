@@ -1,5 +1,6 @@
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
 import type { CashPlan } from './cash.parser';
 
@@ -47,8 +48,8 @@ export function cashPreview(plan: CashPlan, exists: boolean, files: number): Bot
     ...cashLines(plan, exists),
     '',
     exists
-      ? 'Запишу оплату до цього замовлення.'
-      : 'Створю це замовлення й одразу запишу на нього оплату.',
+      ? 'Замовлення вже є в системі. Надішлю шаблон адмінам.'
+      : 'Створю замовлення й надішлю шаблон адмінам. Оплату не записую.',
     ...(files > 0 ? ['', `Файлів: ${files}`] : []),
     ...(plan.warnings.length > 0 ? ['', ...plan.warnings.map((w) => `⚠️ ${escapeHtml(w)}`)] : []),
   ];
@@ -58,8 +59,26 @@ export function cashPreview(plan: CashPlan, exists: boolean, files: number): Bot
   };
 }
 
-export function cashCreatedReply(plan: CashPlan): BotReply {
+export function cashCreatedReply(plan: CashPlan, orderNumber?: string): BotReply {
   return {
-    html: `💰 Оплату готівкою записано: № <b>${escapeHtml(plan.number)}</b> · ${money(plan.amount, plan.currency)}`,
+    html: [
+      `✅ «Оплата готівкою» надіслано адмінам · ${money(plan.amount, plan.currency)}`,
+      `Замовлення: № <b>${escapeHtml(plan.number)}</b>`,
+    ].join('\n'),
+    ...(orderNumber && { buttons: [[attachOrderButton(orderNumber)]] }),
   };
+}
+
+export function adminCashMessage(
+  plan: CashPlan,
+  exists: boolean,
+  managerName: string,
+  now = new Date(),
+): string {
+  return [
+    ...cashLines(plan, exists),
+    '',
+    `Менеджер: ${escapeHtml(managerName)}`,
+    `Створено: ${formatKyivDateTime(now)}`,
+  ].join('\n');
 }

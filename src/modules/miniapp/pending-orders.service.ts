@@ -100,6 +100,15 @@ export class PendingOrdersService {
         storedFiles(claimed.files),
       );
       await edit(ctx, acceptedCard(card.html, result.orderNumbers)).catch(() => undefined);
+      // a reply to the accepted card brings files to the first order, as on a request's card
+      const first = result.orderNumbers[0];
+      if (first && claimed.managerMessageId !== null) {
+        await this.drafts.remember(
+          claimed.managerChatId,
+          claimed.managerMessageId,
+          `order:${first}`,
+        );
+      }
       await (result.note
         ? ctx.answerCbQuery(...alert(result.note))
         : ctx.answerCbQuery('✅ Оформлено'));

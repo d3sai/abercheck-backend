@@ -12,7 +12,6 @@ import {
   CashDraftService,
   CashDraftStore,
 } from '../../../../src/modules/telegram/order-draft/cash-draft.service';
-import { ReportedPaymentService } from '../../../../src/modules/telegram/order-draft/reported-payment.service';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
 import {
   ForeignDraftService,
@@ -117,14 +116,16 @@ describe('OrderDraftService', () => {
         CashDraftStore,
         ForeignDraftService,
         ForeignDraftStore,
-        ReportedPaymentService,
         DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
         { provide: RequisitesService, useValue: requisites },
         { provide: PaymentsService, useValue: payments },
         { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
-        { provide: PrismaService, useValue: { order: { update: jest.fn() } } },
+        {
+          provide: PrismaService,
+          useValue: { order: { update: jest.fn(), updateMany: jest.fn() } },
+        },
       ],
     }).compile();
 
@@ -256,6 +257,7 @@ describe('OrderDraftService', () => {
       const reply = await service.handleText(MANAGER, template());
 
       expect(reply?.buttons).toEqual([
+        [{ text: '📎 Прикріпити файли', callback_data: 'oa:0000-066717' }],
         [{ text: '🗑 Скасувати замовлення', callback_data: 'del:0000-066717' }],
       ]);
     });
@@ -1205,6 +1207,9 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
       const reply = await service.confirmKit(MANAGER);
 
+      expect(
+        (reply.buttons ?? []).flat().map((b) => ('callback_data' in b ? b.callback_data : b.text)),
+      ).toEqual(['oa:0000-062265']);
       expect(orders.createGroup).toHaveBeenCalledWith(
         MANAGER.id,
         [
@@ -1246,16 +1251,12 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       return service.handleText(MANAGER, text);
     };
 
-    beforeEach(() => {
-      payments.findByExternalId.mockResolvedValue(null);
-      payments.ingest.mockResolvedValue({ kind: 'recorded', order: createdOrder() });
-    });
-
-    it('should create a new number and record the cash on it', async () => {
+    it('should create the order unpaid, record no payment and tell the admins', async () => {
       orders.createGroup.mockResolvedValue([createdOrder({ orderNumber: '0000-066498' })]);
 
       const preview = await begin();
-      expect(preview?.html).toContain('Створю це замовлення');
+      expect(preview?.html).toContain('Створю замовлення');
+      expect(preview?.html).toContain('Оплату не записую');
 
       const reply = await service.confirmCash(MANAGER);
 
@@ -1268,17 +1269,12 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
           exchangeRate: '44.9',
         }),
       );
-      expect(payments.ingest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          external_transaction_id: 'cash:0000-066498:2026-09-01T12:20:00.000Z:4260.00',
-          order_number: '0000-066498',
-          amount: '4260.00',
-          currency: 'UAH',
-          payer_name: 'Христина Павлів передала готівку Христині Вихопень ( Саджениці)',
-        }),
-      );
-      expect(reply.html).toContain('Оплату готівкою записано');
-      expect(sender.sendToAdmins).not.toHaveBeenCalled();
+      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('0000-066498'));
+      expect(reply.html).toContain('«Оплата готівкою» надіслано адмінам');
+      expect(
+        (reply.buttons ?? []).flat().map((b) => ('callback_data' in b ? b.callback_data : b.text)),
+      ).toEqual(['oa:0000-066498']);
     });
 
     it('should put «з відсотком» into the comment', async () => {
@@ -1295,7 +1291,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(options.comment).toContain('з урахуванням %: ні');
     });
 
-    it('should only record dollars on an existing dollar number', async () => {
+    it('should only tell the admins when a dollar number already exists', async () => {
       orders.findWithBalance.mockResolvedValue({
         order: createdOrder({ orderNumber: '0000-066498', currency: 'USD' }),
         amountPaid: new Prisma.Decimal(0),
@@ -1307,20 +1303,17 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       await service.confirmCash(MANAGER);
 
       expect(orders.createGroup).not.toHaveBeenCalled();
-      expect(payments.ingest).toHaveBeenCalledWith(
-        expect.objectContaining({ amount: '150.00', currency: 'USD' }),
-      );
+      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('0000-066498'));
     });
 
-    it('should refuse hryvnias on a dollar number, and the same cash twice', async () => {
+    it('should refuse hryvnias on a dollar number', async () => {
       orders.findWithBalance.mockResolvedValue({
         order: createdOrder({ orderNumber: '0000-066498', currency: 'USD' }),
         amountPaid: new Prisma.Decimal(0),
       });
-      expect((await begin())?.html).toContain('у доларах, а оплата в гривнях');
 
-      payments.findByExternalId.mockResolvedValue({ id: 1 });
-      expect((await begin())?.html).toContain('Цю оплату вже зареєстровано');
+      expect((await begin())?.html).toContain('у доларах, а оплата в гривнях');
     });
 
     it('should name a euro number in the currency mismatch', async () => {
@@ -1380,6 +1373,9 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(payments.ingest).not.toHaveBeenCalled();
       expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('0000-066498'));
       expect(reply.html).toContain('«Оплата закордонного замовлення» надіслано адмінам · 100 €');
+      expect(
+        (reply.buttons ?? []).flat().map((b) => ('callback_data' in b ? b.callback_data : b.text)),
+      ).toEqual(['oa:0000-066498']);
     });
 
     it('should only tell the admins when the number already exists', async () => {

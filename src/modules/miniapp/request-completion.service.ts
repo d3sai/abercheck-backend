@@ -325,9 +325,7 @@ export class RequestCompletionService {
       made.orders[0] !== undefined &&
       (await this.cards.heldFiles(requestId)).length > 0;
     if (!merged) {
-      await this.safely(requestId, 'admin notice', async () => {
-        if (made.notice) await this.sender.sendToAdmins(made.notice);
-      });
+      await this.safely(requestId, 'admin notice', () => this.sendNotice(made));
     }
     // a receipt held before this point is found here; one sent after the ids is attached at once
     const receiptsAttached = await this.safely(requestId, 'held receipts', async () => {
@@ -342,15 +340,25 @@ export class RequestCompletionService {
     });
     // the files did not go: the notice must not get lost with them
     if (merged && !receiptsAttached) {
-      await this.safely(requestId, 'admin notice', async () => {
-        if (made.notice) await this.sender.sendToAdmins(made.notice);
-      });
+      await this.safely(requestId, 'admin notice', () => this.sendNotice(made));
     }
     if (!receiptsAttached) note = [note, RECEIPTS_NOTE].filter(Boolean).join(' ');
     await this.safely(requestId, 'manager card', () =>
       this.markCompleted(card, requested, orderNumbers, latest(payments)),
     );
     return { orderNumbers, skipped: made.skipped, ...(note && { note }) };
+  }
+
+  /** The notice goes to «Оплати»; its message id stays on the orders so deleting one can remove it. */
+  private async sendNotice(made: Made): Promise<void> {
+    if (!made.notice) return;
+    const messageId = await this.sender.sendToAdmins(made.notice);
+    if (messageId !== null && made.orders.length > 0) {
+      await this.orders.setAdminMessageId(
+        made.orders.map((order) => order.id),
+        messageId,
+      );
+    }
   }
 
   private async acceptedView(requestId: string): Promise<FinanceRequestView> {

@@ -14,7 +14,10 @@ interface MediaGroupItem {
 
 describe('AttachmentsService.saveFromTelegram', () => {
   const ADMIN_CHAT_ID = -1001234567890;
-  const prisma = { orderAttachment: { create: jest.fn() } };
+  const prisma = {
+    orderAttachment: { create: jest.fn() },
+    order: { findUnique: jest.fn() },
+  };
   const bot = {
     telegram: { sendDocument: jest.fn(), sendPhoto: jest.fn(), sendMediaGroup: jest.fn() },
   };
@@ -44,6 +47,7 @@ describe('AttachmentsService.saveFromTelegram', () => {
 
   beforeEach(() => {
     config.get.mockReturnValue(ADMIN_CHAT_ID);
+    prisma.order.findUnique.mockResolvedValue(null);
     service = new AttachmentsService(prisma as never, bot as never, config as never);
     prisma.orderAttachment.create.mockImplementation(({ data }: { data: object }) =>
       Promise.resolve({ id: Math.random(), ...data }),
@@ -159,6 +163,78 @@ describe('AttachmentsService.saveFromTelegram', () => {
       expect.objectContaining({ caption: 'Custom caption' }),
     );
     expect(attachments.map((a) => a.telegramFileId)).toEqual(['f1', 'f2']);
+  });
+
+  describe('a file added after the order notice is in the chat', () => {
+    const sendOptions = () =>
+      (
+        bot.telegram.sendDocument.mock.calls[0] as [
+          unknown,
+          unknown,
+          {
+            caption: string;
+            reply_parameters?: { message_id: number; allow_sending_without_reply: boolean };
+          },
+        ]
+      )[2];
+
+    beforeEach(() => {
+      bot.telegram.sendDocument.mockResolvedValue({ document: { file_id: 'f1' }, message_id: 10 });
+    });
+
+    it('should reply to the notice with a short caption instead of repeating the order', async () => {
+      prisma.order.findUnique.mockResolvedValue({ adminMessageId: 500, attachments: [] });
+
+      await service.saveFromTelegram(order, [file('f1')], uploader, true);
+
+      const options = sendOptions();
+      expect(options.reply_parameters).toEqual({
+        message_id: 500,
+        allow_sending_without_reply: true,
+      });
+      expect(options.caption).toContain('№ 0000-066717');
+      expect(options.caption).toContain('Христина');
+      expect(options.caption).not.toContain('Сума:');
+    });
+
+    it('should reply to the first file when the notice was merged into it', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        adminMessageId: null,
+        attachments: [{ telegramMessageId: 321 }],
+      });
+
+      await service.saveFromTelegram(order, [file('f1')], uploader, true);
+
+      expect(sendOptions().reply_parameters?.message_id).toBe(321);
+    });
+
+    it('should keep the full caption when there is nothing to reply to', async () => {
+      await service.saveFromTelegram(order, [file('f1')], uploader, true);
+
+      expect(sendOptions().reply_parameters).toBeUndefined();
+      expect(sendOptions().caption).toContain('Сума:');
+    });
+
+    it('should not look for a notice when the caller gives the caption', async () => {
+      await service.saveFromTelegram(order, [file('f1')], uploader, true, 'Custom caption');
+
+      expect(prisma.order.findUnique).not.toHaveBeenCalled();
+      expect(sendOptions().reply_parameters).toBeUndefined();
+    });
+
+    it('should reply to the notice for a file uploaded from the cabinet too', async () => {
+      prisma.order.findUnique.mockResolvedValue({ adminMessageId: 500, attachments: [] });
+      const upload = {
+        originalname: 'a.png',
+        mimetype: 'image/png',
+        size: 5,
+        buffer: Buffer.from('x'),
+      };
+
+      await service.save(order, [upload as Express.Multer.File], uploader, true);
+
+      expect(sendOptions().reply_parameters?.message_id).toBe(500);
+    });
   });
 });
 

@@ -3,6 +3,7 @@ import { webApp } from '../../finance-sync/request-card.messages';
 import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatKyivPaidAt, formatMoneyIn } from '../core/format';
 import { NEW_REQUEST_LABEL } from '../core/menu';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import type { ForeignPlan } from './foreign.parser';
 
 export const ForeignAction = {
@@ -73,14 +74,23 @@ export function foreignPreview(plan: ForeignPlan, exists: boolean, files: number
 }
 
 /** `miniAppUrl` adds «💰 Оплачено», where the manager gives the date and time the client paid. */
-export function foreignCreatedReply(plan: ForeignPlan, miniAppUrl?: string): BotReply {
+export function foreignCreatedReply(
+  plan: ForeignPlan,
+  miniAppUrl?: string,
+  orderNumber?: string,
+): BotReply {
+  const rows = [
+    ...(miniAppUrl && !plan.paidAt
+      ? [[webApp('💰 Оплачено', miniAppUrl, 'orderpaid', plan.number)]]
+      : []),
+    ...(orderNumber ? [[attachOrderButton(orderNumber)]] : []),
+  ];
   return {
     html: [
       `✅ «Оплата закордонного замовлення» надіслано адмінам · ${formatMoneyIn(plan.amount, plan.currency)}`,
       `Замовлення: № <b>${escapeHtml(plan.number)}</b>`,
     ].join('\n'),
-    ...(miniAppUrl &&
-      !plan.paidAt && { buttons: [[webApp('💰 Оплачено', miniAppUrl, 'orderpaid', plan.number)]] }),
+    ...(rows.length > 0 && { buttons: rows }),
   };
 }
 

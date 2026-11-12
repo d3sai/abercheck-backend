@@ -6,7 +6,6 @@ import { OrdersService } from '../orders/orders.service';
 import type { TelegramFileRef } from '../attachments/attachments.service';
 import type { BotReply } from '../telegram/core/bot-reply';
 import { TelegramSender } from '../telegram/core/telegram-sender';
-import { DraftAttachmentNotifier } from '../telegram/order-draft/draft-attachment-notifier';
 import { CashDraftService } from '../telegram/order-draft/cash-draft.service';
 import type { CashPlan } from '../telegram/order-draft/cash.parser';
 import { ForeignDraftService } from '../telegram/order-draft/foreign-draft.service';
@@ -48,7 +47,6 @@ export class DirectOrdersService {
     private readonly foreign: ForeignDraftService,
     private readonly orders: OrdersService,
     private readonly sender: TelegramSender,
-    private readonly notifier: DraftAttachmentNotifier,
   ) {}
 
   /** The manager's own order; another manager's looks exactly like a missing one. */
@@ -88,7 +86,7 @@ export class DirectOrdersService {
         return kitPreview(order.plan, await this.kit.existingNumbers(order.plan), 0);
       case 'cash': {
         const check = await this.cashCheck(order.plan);
-        return cashPreview(order.plan, check.existing.length > 0, 0);
+        return cashPreview(order.plan, check.exists, 0);
       }
       case 'foreign':
         return foreignPreview(order.plan, await this.foreign.exists(order.plan), 0);
@@ -145,27 +143,21 @@ export class DirectOrdersService {
     plan: CashPlan,
     files: TelegramFileRef[],
   ): Promise<DirectOrdersResult> {
-    const check = await this.cashCheck(plan);
-    const exists = check.existing.length > 0;
-    const fileOrder = await this.cash.record(manager, plan, exists);
-    // cash never goes to the financiers: receipts only land in the storage chat
-    if (files.length > 0 && fileOrder) await this.notifier.store(fileOrder, manager, files);
+    const { exists } = await this.cashCheck(plan);
+    const created = await this.cash.createOrder(manager, plan, exists);
+    await this.cash.announce(manager, plan, exists, created, files);
     return exists
       ? {
           orderNumbers: [],
           skipped: [plan.number],
-          note: 'Замовлення вже є в системі, оплату записано до нього.',
+          note: 'Замовлення вже є в системі, адмінам надіслано шаблон.',
         }
       : { orderNumbers: [plan.number], skipped: [] };
   }
 
   private async cashCheck(plan: CashPlan) {
     const check = await this.cash.check(plan);
-    if (!check.ok) {
-      throw check.alreadyRecorded
-        ? conflict('already-recorded', 'Цю оплату вже зареєстровано.')
-        : conflict('order-conflict', check.errors.join(' '));
-    }
+    if (!check.ok) throw conflict('order-conflict', check.errors.join(' '));
     return check;
   }
 

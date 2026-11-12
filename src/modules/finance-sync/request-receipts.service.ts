@@ -10,6 +10,7 @@ import {
 } from '../attachments/attachments.constants';
 import { AttachmentsService, type TelegramFileRef } from '../attachments/attachments.service';
 import { ManagersService } from '../managers/managers.service';
+import { normalizePartNumber } from '../orders/order-number';
 import { NOT_A_MANAGER } from '../telegram/access/access.messages';
 import type { BotReply } from '../telegram/core/bot-reply';
 import { button } from '../telegram/core/bot-reply';
@@ -22,6 +23,8 @@ import { RequestCardsRepository } from './request-cards.repository';
 type Next = () => Promise<void>;
 
 const OPEN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+// a prompt asking for the files of an accepted order is remembered as «order:<number>» next to the request ids
+const ORDER_PROMPT = 'order:';
 const CHOICE_TTL_MS = 10 * 60 * 1000;
 // a burst of held files gets one line of explanation, not one per file
 const HELD_NOTICE_MS = 60 * 1000;
@@ -92,6 +95,9 @@ export class RequestReceiptsService {
     const requestId =
       (await this.cards.byManagerMessage(chatId, target.message_id))?.requestId ??
       (await this.cards.requestOfChatMessage(chatId, target.message_id));
+    if (requestId?.startsWith(ORDER_PROMPT)) {
+      return this.onOrderFile(ctx, requestId.slice(ORDER_PROMPT.length), file);
+    }
     // an attach prompt of a draft is remembered in the same table as a request's, so its id is no request
     const card = requestId ? await this.cards.byRequestId(requestId) : null;
     if (!requestId || !card) return this.onDraftFile(ctx, chatId, target.message_id, file, next);
@@ -103,6 +109,57 @@ export class RequestReceiptsService {
     }
     if (card.managerId !== manager.id) return next();
     await this.answer(ctx, await this.receive(manager, requestId, file));
+  }
+
+  /** The manager's own order by its number; another manager's looks exactly like a missing one. */
+  private async ownOrder(manager: Manager, number: string): Promise<Order | null> {
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber: normalizePartNumber(number) },
+    });
+    return order?.managerId === manager.id ? order : null;
+  }
+
+  /** «📎 Прикріпити файли» under an order's reply: a force-reply prompt, the files come back as replies to it. */
+  async askOrderFiles(ctx: MatchContext): Promise<void> {
+    if (!ctx.from || !isPrivate(ctx)) return;
+    const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from.id));
+    if (!manager) {
+      await ctx.answerCbQuery(NOT_A_MANAGER, { show_alert: true });
+      return;
+    }
+    const order = await this.ownOrder(manager, ctx.match[1]!);
+    if (!order) {
+      await ctx.answerCbQuery('Замовлення не знайдено', { show_alert: true });
+      return;
+    }
+    await ctx.answerCbQuery();
+    const prompt = await ctx.reply(
+      `📎 № ${order.orderNumber}: надішліть фото або файл відповіддю на це повідомлення.`,
+      { reply_markup: { force_reply: true, input_field_placeholder: 'Фото або файл квитанції' } },
+    );
+    await this.cards.rememberChatMessage(
+      BigInt(ctx.chat!.id),
+      prompt.message_id,
+      `${ORDER_PROMPT}${order.orderNumber}`,
+    );
+  }
+
+  /** A file replied to the prompt of an accepted order: it goes under the order's notice in «Оплати». */
+  private async onOrderFile(
+    ctx: Context,
+    orderNumber: string,
+    file: TelegramFileRef,
+  ): Promise<void> {
+    const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from!.id));
+    if (!manager) {
+      await reply(ctx, { html: NOT_A_MANAGER }, ctx.message!.message_id);
+      return;
+    }
+    const order = await this.ownOrder(manager, orderNumber);
+    if (!order) return this.answer(ctx, { html: 'Замовлення не знайдено' });
+    const refusal = fileRefusal(file);
+    if (refusal) return this.answer(ctx, { html: refusal });
+    await this.answer(ctx, await this.storing(order, () => this.attach(manager, order, [file])));
   }
 
   /** A file replied to the card of a Kit, cash or foreign order that waits for «Прийняти»: it is held on the draft. */

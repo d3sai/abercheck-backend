@@ -15,6 +15,7 @@ import { button } from '../core/bot-reply';
 import { NEW_REQUEST_LABEL } from '../core/menu';
 import { escapeHtml, formatMoneyIn } from '../core/format';
 import { adminOrderCreatedMessage } from '../notifications/order-templates';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
 import {
   detectCurrency,
@@ -221,7 +222,10 @@ export class OrderCreationFlowService {
         `${label} № <b>${escapeHtml(order.orderNumber)}</b> створено — повідомлю про оплату.`,
         `${escapeHtml(order.clientName)} · ${formatMoneyIn(order.amountDue, order.currency)}`,
       ].join('\n'),
-      buttons: [[button('🗑 Скасувати замовлення', `del:${order.orderNumber}`)]],
+      buttons: [
+        [attachOrderButton(order.orderNumber)],
+        [button('🗑 Скасувати замовлення', `del:${order.orderNumber}`)],
+      ],
     };
   }
 }

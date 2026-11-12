@@ -118,7 +118,7 @@ export class KitDraftService {
     if (fileOrder) {
       await this.notifier.notify(fileOrder, manager, files, notice);
     } else {
-      await this.sender.sendToAdmins(notice);
+      await this.notifier.notice(created, notice);
     }
   }
 
@@ -150,7 +150,7 @@ export class KitDraftService {
       created,
       this.pendingFiles.take(manager.telegramId),
     );
-    return kitCreatedReply(plan, created.length);
+    return kitCreatedReply(plan, created.length, created[0]?.orderNumber);
   }
 
   pendingUserIds(now: number): bigint[] {

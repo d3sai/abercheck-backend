@@ -1,18 +1,21 @@
 import { Injectable } from '@nestjs/common';
-import type { Manager, Order } from '../../../generated/prisma/client';
+import type { TelegramFileRef } from '../../attachments/attachments.service';
+import {
+  type Currency,
+  type Manager,
+  type Order,
+  OrderStatus,
+} from '../../../generated/prisma/client';
 import { OrderNumberTakenError } from '../../orders/orders.errors';
+import { OrdersService } from '../../orders/orders.service';
 import type { BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
-import { cashCreatedReply, cashHint, cashPreview } from './cash.messages';
-import { type CashPlan, cashPaymentId, parseCash } from './cash.parser';
+import { TelegramSender } from '../core/telegram-sender';
+import { adminCashMessage, cashCreatedReply, cashHint, cashPreview } from './cash.messages';
+import { type CashPlan, parseCash } from './cash.parser';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
 import { DraftModeStore } from './draft-mode.store';
 import { PendingFilesStore } from './pending-files.store';
-import {
-  type ReportCheck,
-  type ReportedItem,
-  ReportedPaymentService,
-} from './reported-payment.service';
 import { requisitesErrors } from './requisites.messages';
 
 export interface CashDraft {
@@ -30,14 +33,15 @@ const CASH_MODE_TTL_MS = 30 * 60_000;
 
 const CASH_LABEL = 'Оплата готівкою';
 
-const cashItems = (plan: CashPlan): ReportedItem[] => [
-  { number: plan.number, amount: plan.amount, paymentId: cashPaymentId(plan) },
-];
+const IN_CURRENCY: Record<Currency, string> = { UAH: 'гривнях', USD: 'доларах', EUR: 'євро' };
+
+export type CashCheck = { ok: true; exists: boolean } | { ok: false; errors: string[] };
 
 @Injectable()
 export class CashDraftService {
   constructor(
-    private readonly reported: ReportedPaymentService,
+    private readonly orders: OrdersService,
+    private readonly sender: TelegramSender,
     private readonly pendingFiles: PendingFilesStore,
     private readonly drafts: CashDraftStore,
     private readonly notifier: DraftAttachmentNotifier,
@@ -70,12 +74,8 @@ export class CashDraftService {
     }
     const { plan } = parsed;
     const check = await this.check(plan);
-    if (!check.ok) {
-      return check.alreadyRecorded
-        ? { html: '⚠️ Цю оплату вже зареєстровано.' }
-        : requisitesErrors(check.errors);
-    }
-    const exists = check.existing.length > 0;
+    if (!check.ok) return requisitesErrors(check.errors);
+    const { exists } = check;
     this.drafts.setDraft(manager.telegramId, {
       plan,
       exists,
@@ -84,35 +84,67 @@ export class CashDraftService {
     return cashPreview(plan, exists, this.pendingFiles.list(manager.telegramId).length);
   }
 
-  check(plan: CashPlan): Promise<ReportCheck> {
-    return this.reported.check(cashItems(plan), plan.currency);
+  /** A cancelled number or one in another currency cannot take the payment. */
+  async check(plan: CashPlan): Promise<CashCheck> {
+    const order = (await this.orders.findWithBalance(plan.number))?.order;
+    if (!order) return { ok: true, exists: false };
+    if (order.status === OrderStatus.CANCELLED) {
+      return { ok: false, errors: [`№ ${plan.number} скасовано, оплату до нього не додати.`] };
+    }
+    if (order.currency !== plan.currency) {
+      return {
+        ok: false,
+        errors: [
+          `№ ${plan.number} у ${IN_CURRENCY[order.currency]}, а оплата в ${IN_CURRENCY[plan.currency]}.`,
+        ],
+      };
+    }
+    return { ok: true, exists: true };
   }
 
-  /**
-   * Creates the order unless it exists and records the payment; returns the order the files belong to.
-   * Throws OrderNumberTakenError if the number just appeared.
-   */
-  record(manager: Manager, plan: CashPlan, exists: boolean): Promise<Order | undefined> {
-    const details = [
-      CASH_LABEL,
-      ...(plan.handedBy ? [plan.handedBy] : []),
-      ...(plan.rate ? [`курс ${plan.rate.replace('.', ',')}`] : []),
-      ...(plan.withPercent === null ? [] : [`з урахуванням %: ${plan.withPercent ? 'так' : 'ні'}`]),
-      ...(plan.comment ? [plan.comment] : []),
-    ].join(' · ');
+  /** Creates the order unless it exists; throws OrderNumberTakenError if it just appeared. */
+  async createOrder(manager: Manager, plan: CashPlan, exists: boolean): Promise<Order | undefined> {
+    if (exists) return undefined;
+    const [created] = await this.orders.createGroup(
+      manager.id,
+      [{ orderNumber: plan.number, amountDue: plan.amount.toFixed(2) }],
+      {
+        clientName: CASH_LABEL,
+        currency: plan.currency,
+        exchangeRate: plan.rate ?? undefined,
+        paidAt: plan.paidAt ?? undefined,
+        comment: [
+          CASH_LABEL,
+          plan.handedBy,
+          plan.rate && `курс ${plan.rate.replace('.', ',')}`,
+          plan.withPercent === null ? null : `з урахуванням %: ${plan.withPercent ? 'так' : 'ні'}`,
+          plan.comment,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      },
+    );
+    return created;
+  }
 
-    return this.reported.record(manager, {
-      label: CASH_LABEL,
-      currency: plan.currency,
-      items: cashItems(plan),
-      existing: exists ? [plan.number] : [],
-      paidAt: plan.paidAt,
-      payerName: plan.handedBy ?? CASH_LABEL,
-      receivingAccount: 'Готівка',
-      purpose: details,
-      comment: details,
-      exchangeRate: plan.rate ?? undefined,
-    });
+  /** Tells the admins; the files, if any, go with the notice on the order. The payment comes from the payments service. */
+  async announce(
+    manager: Manager,
+    plan: CashPlan,
+    exists: boolean,
+    created: Order | undefined,
+    files: TelegramFileRef[] = [],
+  ): Promise<void> {
+    const notice = adminCashMessage(plan, exists, manager.name);
+    const fileOrder =
+      files.length > 0
+        ? (created ?? (await this.orders.findWithBalance(plan.number))?.order)
+        : undefined;
+    if (fileOrder) {
+      await this.notifier.notify(fileOrder, manager, files, notice);
+    } else {
+      await this.notifier.notice(created ? [created] : [], notice);
+    }
   }
 
   async confirm(manager: Manager): Promise<BotReply> {
@@ -122,9 +154,9 @@ export class CashDraftService {
     }
     const { plan, exists } = draft;
 
-    let fileOrder: Order | undefined;
+    let created: Order | undefined;
     try {
-      fileOrder = await this.record(manager, plan, exists);
+      created = await this.createOrder(manager, plan, exists);
     } catch (error) {
       if (error instanceof OrderNumberTakenError) {
         this.drafts.arm(manager.telegramId, Date.now() + CASH_MODE_TTL_MS);
@@ -136,10 +168,8 @@ export class CashDraftService {
     }
     this.drafts.disarm(manager.telegramId);
 
-    // cash never goes to the financiers: receipts only land in the storage chat
-    const files = this.pendingFiles.take(manager.telegramId);
-    if (files.length > 0 && fileOrder) await this.notifier.store(fileOrder, manager, files);
-    return cashCreatedReply(plan);
+    await this.announce(manager, plan, exists, created, this.pendingFiles.take(manager.telegramId));
+    return cashCreatedReply(plan, created?.orderNumber);
   }
 
   pendingUserIds(now: number): bigint[] {

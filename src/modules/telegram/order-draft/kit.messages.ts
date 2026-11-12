@@ -1,5 +1,6 @@
 import { Currency, type Prisma } from '../../../generated/prisma/client';
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn } from '../core/format';
 import type { KitPlan } from './kit.parser';
@@ -64,13 +65,14 @@ export function kitPreview(plan: KitPlan, existing: string[], files: number): Bo
   };
 }
 
-export function kitCreatedReply(plan: KitPlan, created: number): BotReply {
+export function kitCreatedReply(plan: KitPlan, created: number, orderNumber?: string): BotReply {
   return {
     html: [
       `✅ «Оплата на Кит» надіслано адмінам · ${usd(plan.total)}`,
       `Код доступу: <b>${escapeHtml(plan.accessCode)}</b>`,
       ...(created > 0 ? [`Нових номерів: ${created}`] : []),
     ].join('\n'),
+    ...(orderNumber && { buttons: [[attachOrderButton(orderNumber)]] }),
   };
 }
 

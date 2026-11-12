@@ -26,7 +26,6 @@ import {
   KitDraftStore,
 } from '../../../src/modules/telegram/order-draft/kit-draft.service';
 import { PendingFilesStore } from '../../../src/modules/telegram/order-draft/pending-files.store';
-import { ReportedPaymentService } from '../../../src/modules/telegram/order-draft/reported-payment.service';
 
 const manager = { id: 7, telegramId: 5000000000n, name: 'Христина' } as Manager;
 const paidAt = new Date('2026-01-15T12:30:00.000Z');
@@ -105,6 +104,7 @@ describe('DirectOrdersService', () => {
   const orders = { findWithBalance: jest.fn(), createGroup: jest.fn(), setPaidAt: jest.fn() };
   const payments = { findByExternalId: jest.fn(), ingest: jest.fn() };
   const attachments = { saveFromTelegram: jest.fn() };
+  const prisma = { order: { updateMany: jest.fn() } };
   const sender = {
     sendToAdmins: jest.fn(),
     send: jest.fn(),
@@ -122,14 +122,13 @@ describe('DirectOrdersService', () => {
         CashDraftStore,
         ForeignDraftService,
         ForeignDraftStore,
-        ReportedPaymentService,
         PendingFilesStore,
         DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
         { provide: PaymentsService, useValue: payments },
         { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
-        { provide: PrismaService, useValue: {} },
+        { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
     service = moduleRef.get(DirectOrdersService);
@@ -207,7 +206,7 @@ describe('DirectOrdersService', () => {
   });
 
   describe('cash', () => {
-    it('should create the order and record the payment without telling the admins', async () => {
+    it('should create the order, record no payment and tell the admins', async () => {
       await expect(service.create(manager, cash)).resolves.toEqual({
         orderNumbers: ['0000-066498'],
         skipped: [],
@@ -224,26 +223,19 @@ describe('DirectOrdersService', () => {
             'Оплата готівкою · Христина Павлів · курс 44,9 · з урахуванням %: так · у конверті',
         }),
       );
-      expect(payments.ingest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          external_transaction_id: 'cash:0000-066498:2026-01-15T12:30:00.000Z:4260.00',
-          amount: '4260.00',
-          currency: 'UAH',
-          payer_name: 'Христина Павлів',
-          receiving_account: 'Готівка',
-        }),
-      );
-      expect(sender.sendToAdmins).not.toHaveBeenCalled();
+      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('0000-066498'));
     });
 
-    it('should only record the payment on an existing number of the same currency', async () => {
+    it('should only tell the admins on an existing number of the same currency', async () => {
       orders.findWithBalance.mockResolvedValue(stored('0000-066498', 'UAH'));
 
       const result = await service.create(manager, cash);
 
       expect(result).toMatchObject({ orderNumbers: [], skipped: ['0000-066498'] });
       expect(orders.createGroup).not.toHaveBeenCalled();
-      expect(payments.ingest).toHaveBeenCalledTimes(1);
+      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
     });
 
     it('should answer 409 for a currency mismatch', async () => {
@@ -254,7 +246,7 @@ describe('DirectOrdersService', () => {
         code: 'order-conflict',
         message: '№ 0000-066498 у доларах, а оплата в гривнях.',
       });
-      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).not.toHaveBeenCalled();
     });
 
     it('should answer 409 for a cancelled number', async () => {
@@ -266,17 +258,6 @@ describe('DirectOrdersService', () => {
       });
     });
 
-    it('should answer 409 when the same payment is already recorded', async () => {
-      payments.findByExternalId.mockResolvedValue({ id: 1 });
-
-      expect(await failure(service.create(manager, cash))).toMatchObject({
-        status: 409,
-        code: 'already-recorded',
-        message: 'Цю оплату вже зареєстровано.',
-      });
-      expect(orders.createGroup).not.toHaveBeenCalled();
-    });
-
     it('should answer 409 when the number appears while the order is created', async () => {
       orders.createGroup.mockRejectedValue(new OrderNumberTakenError('0000-066498'));
 
@@ -284,18 +265,22 @@ describe('DirectOrdersService', () => {
         status: 409,
         code: 'order-taken',
       });
-      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).not.toHaveBeenCalled();
     });
 
-    it('should keep the held files with the recorded order without telling the admins', async () => {
+    it('should send the held files with the notice as one message', async () => {
       await service.create(manager, cash, [receipt]);
 
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        { id: 1 },
-        [receipt],
-        { telegramId: manager.telegramId, name: manager.name },
-        true,
-      );
+      expect(attachments.saveFromTelegram).toHaveBeenCalledTimes(1);
+      const [, files, , , caption] = attachments.saveFromTelegram.mock.calls[0] as [
+        unknown,
+        TelegramFileRef[],
+        unknown,
+        unknown,
+        string,
+      ];
+      expect(files).toEqual([receipt]);
+      expect(caption).toContain('Христина Павлів');
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
     });
   });
@@ -400,12 +385,12 @@ describe('DirectOrdersService', () => {
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
     });
 
-    it('should refuse a cash payment that is already recorded', async () => {
-      payments.findByExternalId.mockResolvedValue({ id: 1 });
+    it('should refuse a cash payment on a number of another currency', async () => {
+      orders.findWithBalance.mockResolvedValue(stored('0000-066498', 'USD'));
 
       const error = await failure(service.preview(cash));
 
-      expect(error).toMatchObject({ status: 409, code: 'already-recorded' });
+      expect(error).toMatchObject({ status: 409, code: 'order-conflict' });
     });
 
     it('should show a foreign card for a number the system already has', async () => {
@@ -414,6 +399,36 @@ describe('DirectOrdersService', () => {
       const card = await service.preview(foreign);
 
       expect(card.html).toContain('0000-066498');
+    });
+  });
+
+  describe('the notice in «Оплати»', () => {
+    it.each([
+      ['kit', kit],
+      ['cash', cash],
+      ['foreign', foreign],
+    ] as [string, OrderPlan][])(
+      'should keep the id of the %s notice on the created order, so deleting it can remove the notice',
+      async (_, order) => {
+        sender.sendToAdmins.mockResolvedValue(77);
+        orders.createGroup.mockResolvedValue([{ id: 5 }]);
+
+        await service.create(manager, order);
+
+        expect(prisma.order.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: [5] } },
+          data: { adminMessageId: 77 },
+        });
+      },
+    );
+
+    it('should not touch an order that already existed', async () => {
+      sender.sendToAdmins.mockResolvedValue(77);
+      orders.findWithBalance.mockResolvedValue(stored('0000-066498', 'EUR'));
+
+      await service.create(manager, foreign);
+
+      expect(prisma.order.updateMany).not.toHaveBeenCalled();
     });
   });
 

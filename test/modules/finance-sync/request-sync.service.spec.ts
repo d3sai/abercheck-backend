@@ -186,7 +186,11 @@ describe('RequestSyncService', () => {
       expect(orders.numbersByIds).toHaveBeenCalledWith([10, 11]);
       const [, , html, buttons] = edit();
       expect(html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
-      expect(buttons).toEqual([[{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }]]);
+      expect(buttons).toEqual([
+        [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
+        [{ text: '🗑 Скасувати № 0000-1', callback_data: 'del:0000-1' }],
+        [{ text: '🗑 Скасувати № 0000-2', callback_data: 'del:0000-2' }],
+      ]);
       expect(html).toContain('✅ Оплачено 04.11.2026 14:30');
     });
 
@@ -204,7 +208,7 @@ describe('RequestSyncService', () => {
         edit()[3]!
           .flat()
           .map((b) => b.text),
-      ).toEqual(['💰 Оплачено', '📎 Прикріпити файли']);
+      ).toEqual(['💰 Оплачено', '📎 Прикріпити файли', '🗑 Скасувати № 0000-1']);
     });
 
     it('should offer «Оплачено» on a completed our_fop that is still open', async () => {
@@ -220,7 +224,7 @@ describe('RequestSyncService', () => {
         edit()[3]!
           .flat()
           .map((b) => b.text),
-      ).toEqual(['💰 Оплачено', '📎 Прикріпити файли']);
+      ).toEqual(['💰 Оплачено', '📎 Прикріпити файли', '🗑 Скасувати № 0000-1']);
     });
 
     it('should show when a completed our_fop was paid', async () => {
@@ -234,7 +238,10 @@ describe('RequestSyncService', () => {
 
       expect(orders.latestPaidAt).toHaveBeenCalledWith([10]);
       expect(edit()[2]).toContain('✅ Оплачено 04.11.2026 14:30');
-      expect(edit()[3]).toEqual([[{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }]]);
+      expect(edit()[3]).toEqual([
+        [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
+        [{ text: '🗑 Скасувати № 0000-1', callback_data: 'del:0000-1' }],
+      ]);
     });
 
     it('should draw a completed card with no orders without a number', async () => {

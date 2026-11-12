@@ -1,5 +1,6 @@
 import { type BotReply, button } from '../telegram/core/bot-reply';
 import { escapeHtml } from '../telegram/core/format';
+import { attachOrderButton, cancelOrderButton } from '../telegram/orders-list/orders-list.messages';
 
 export const PendingOrderAction = {
   Accept: /^po:a:([\w-]+)$/,
@@ -15,13 +16,17 @@ export const pendingOrderButtons = (id: string) => [
 
 export const ATTACH_PROMPT = '📎 Надішліть фото або файл відповіддю на це повідомлення.';
 
-/** The card as it was sent, now without buttons and with the outcome under it. */
+/** The card as it was sent, with the outcome under it and a way to cancel each order it made. */
 export const acceptedCard = (cardHtml: string, orderNumbers: string[]): BotReply => ({
   html: `${cardHtml}\n\n${
     orderNumbers.length > 0
       ? `✅ Оформлено: № ${escapeHtml(orderNumbers.join(', '))}`
       : '✅ Прийнято'
   }`,
+  buttons: [
+    ...(orderNumbers[0] ? [[attachOrderButton(orderNumbers[0])]] : []),
+    ...orderNumbers.map((number) => [cancelOrderButton(number)]),
+  ],
 });
 
 export const CANCELLED_CARD: BotReply = { html: '❌ Скасовано' };

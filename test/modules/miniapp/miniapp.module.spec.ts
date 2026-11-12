@@ -17,7 +17,6 @@ import { DirectOrdersService } from '../../../src/modules/miniapp/direct-orders.
 import { MiniappUpdate } from '../../../src/modules/miniapp/miniapp.update';
 import { PendingOrdersService } from '../../../src/modules/miniapp/pending-orders.service';
 import { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
-import { DraftAttachmentNotifier } from '../../../src/modules/telegram/order-draft/draft-attachment-notifier';
 import { CashDraftService } from '../../../src/modules/telegram/order-draft/cash-draft.service';
 import { ForeignDraftService } from '../../../src/modules/telegram/order-draft/foreign-draft.service';
 import { KitDraftService } from '../../../src/modules/telegram/order-draft/kit-draft.service';
@@ -48,7 +47,6 @@ class ManagersStub {}
     { provide: KitDraftService, useValue: {} },
     { provide: CashDraftService, useValue: {} },
     { provide: ForeignDraftService, useValue: {} },
-    { provide: DraftAttachmentNotifier, useValue: {} },
   ],
   exports: [
     TelegramSender,
@@ -56,7 +54,6 @@ class ManagersStub {}
     CashDraftService,
     ForeignDraftService,
     OrderDraftService,
-    DraftAttachmentNotifier,
   ],
 })
 class TelegramStub {}

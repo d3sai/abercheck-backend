@@ -58,6 +58,9 @@ const rows = (r: { buttons?: unknown[][] }) =>
   (r.buttons ?? []) as { text: string; callback_data: string }[][];
 const flat = (r: { buttons?: unknown[][] }) => rows(r).flat();
 const ATTACH = { text: '📎 Прикріпити файли', callback_data: `ma:${ID}` };
+const CANCEL = (number: string) => [
+  { text: `🗑 Скасувати № ${number}`, callback_data: `del:${number}` },
+];
 
 describe('groupCard', () => {
   it('pending our_fop: both rows, total, FOP buttons that fit the sum + rate + refresh', () => {
@@ -363,6 +366,8 @@ describe('managerCard with the Mini App', () => {
 
     expect(all(reply)).toEqual([
       [{ text: '💰 Оплачено', web_app: { url: `${miniAppUrl}?mode=paid&id=${ID}` } }, ATTACH],
+      CANCEL('0000-1'),
+      CANCEL('0000-2'),
     ]);
     expect(reply.html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
     expect(reply.html).toContain('📎 Квитанція: просто надішліть фото чи файл у цей чат.');
@@ -378,7 +383,7 @@ describe('managerCard with the Mini App', () => {
       },
     });
 
-    expect(all(reply)).toEqual([[ATTACH]]);
+    expect(all(reply)).toEqual([[ATTACH], CANCEL('0000-1')]);
     expect(reply.html).toContain('✅ Оплачено 04.11.2026 14:30');
   });
 
@@ -390,6 +395,7 @@ describe('managerCard with the Mini App', () => {
 
     expect(all(reply)).toEqual([
       [{ text: '💰 Оплачено', web_app: { url: `${miniAppUrl}?mode=paid&id=${ID}` } }, ATTACH],
+      CANCEL('0000-1'),
     ]);
     expect(reply.html).not.toContain('закрито');
   });
@@ -397,7 +403,7 @@ describe('managerCard with the Mini App', () => {
   it('completed our_fop without the URL: no button', () => {
     const reply = managerCard(accepted(), { completed: { orderNumbers: ['0000-1'] } });
 
-    expect(all(reply)).toEqual([[ATTACH]]);
+    expect(all(reply)).toEqual([[ATTACH], CANCEL('0000-1')]);
   });
 
   it('completed with a payment time: the time in Kyiv time and no button', () => {
@@ -410,7 +416,7 @@ describe('managerCard with the Mini App', () => {
       },
     });
 
-    expect(all(reply)).toEqual([[ATTACH]]);
+    expect(all(reply)).toEqual([[ATTACH], CANCEL('0000-1')]);
     expect(reply.html.split('\n').at(-1)).toBe('✅ Оплачено 04.11.2026 14:30');
   });
 

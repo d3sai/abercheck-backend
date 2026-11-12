@@ -121,7 +121,7 @@ export class ForeignDraftService {
     if (fileOrder) {
       await this.notifier.notify(fileOrder, manager, files, notice);
     } else {
-      await this.sender.sendToAdmins(notice);
+      await this.notifier.notice(created ? [created] : [], notice);
     }
   }
 
@@ -147,7 +147,7 @@ export class ForeignDraftService {
     this.drafts.disarm(manager.telegramId);
 
     await this.announce(manager, plan, exists, created, this.pendingFiles.take(manager.telegramId));
-    return foreignCreatedReply(plan, this.sender.miniAppUrl);
+    return foreignCreatedReply(plan, this.sender.miniAppUrl, created?.orderNumber);
   }
 
   pendingUserIds(now: number): bigint[] {

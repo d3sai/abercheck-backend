@@ -13,6 +13,7 @@ import {
   formatMoneyIn as money,
 } from '../core/format';
 import { formatRate } from '../notifications/order-templates';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import type { MinusPlan } from './minus-closing.parser';
 import { requisiteBlock } from './requisites.messages';
 
@@ -112,6 +113,7 @@ export function minusCreatedReply(order: Order): BotReply {
       `➖ Закриття мінусу № <b>${escapeHtml(order.orderNumber)}</b> створено · ${money(order.amountDue, order.currency)}`,
       escapeHtml(order.clientName),
     ].join('\n'),
+    buttons: [[attachOrderButton(order.orderNumber)]],
   };
 }
 

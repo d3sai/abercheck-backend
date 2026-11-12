@@ -28,7 +28,6 @@ import {
   CashDraftService,
   CashDraftStore,
 } from '../../../../src/modules/telegram/order-draft/cash-draft.service';
-import { ReportedPaymentService } from '../../../../src/modules/telegram/order-draft/reported-payment.service';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
 import {
   ForeignDraftService,
@@ -105,7 +104,6 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     CashDraftStore,
     ForeignDraftService,
     ForeignDraftStore,
-    ReportedPaymentService,
     DraftAttachmentNotifier,
     OrderListService,
     { provide: OrderDeleteService, useValue: {} },

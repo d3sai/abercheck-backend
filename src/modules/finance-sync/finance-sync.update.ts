@@ -3,6 +3,7 @@ import type { Context } from 'telegraf';
 import type { MatchContext } from '../telegram/core/telegram-context';
 import { FinancierActionsService } from './financier-actions.service';
 import { ManagerActionsService } from './manager-actions.service';
+import { OrderAttachAction } from '../telegram/orders-list/orders-list.messages';
 import { FinanceAction } from './request-card.messages';
 import { RequestReceiptsService } from './request-receipts.service';
 
@@ -37,6 +38,11 @@ export class FinanceSyncUpdate {
   @Action(FinanceAction.Attach)
   attach(@Ctx() ctx: MatchContext): Promise<void> {
     return this.managerActions.askFiles(ctx);
+  }
+
+  @Action(OrderAttachAction)
+  attachOrder(@Ctx() ctx: MatchContext): Promise<void> {
+    return this.receipts.askOrderFiles(ctx);
   }
 
   @Action(FinanceAction.Cancel)

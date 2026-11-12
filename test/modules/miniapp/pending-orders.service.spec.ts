@@ -141,9 +141,17 @@ describe('PendingOrdersService', () => {
         expect.objectContaining({ kind: 'foreign' }),
         [receipt],
       );
-      const [text] = c.editMessageText.mock.calls[0] as [string];
+      const [text, options] = c.editMessageText.mock.calls[0] as [
+        string,
+        { reply_markup: { inline_keyboard: { callback_data: string }[][] } },
+      ];
       expect(text).toContain('card text');
       expect(text).toContain('✅ Оформлено: № 0000-066498');
+      expect(options.reply_markup.inline_keyboard.flat().map((b) => b.callback_data)).toEqual([
+        'oa:0000-066498',
+        'del:0000-066498',
+      ]);
+      expect(repo.remember).toHaveBeenCalledWith(555n, 77, 'order:0000-066498');
       expect(c.answerCbQuery).toHaveBeenCalledWith('✅ Оформлено');
     });
 

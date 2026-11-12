@@ -50,6 +50,7 @@ describe('RequestReceiptsService', () => {
     holdFile: jest.fn(),
     heldFiles: jest.fn(),
     deleteHeldFiles: jest.fn(),
+    rememberChatMessage: jest.fn(),
     openOfManager: jest.fn(),
   };
   const prisma = {
@@ -748,6 +749,92 @@ describe('RequestReceiptsService', () => {
         'Надішліть файл ще раз',
         { show_alert: true },
       );
+    });
+  });
+  describe('files for an accepted order', () => {
+    const mine = { id: 10, orderNumber: '0000-070217', managerId: 4 };
+    const press = () => ({
+      chat: { id: 555, type: 'private' },
+      from: { id: 555 },
+      match: ['oa:0000-070217', '0000-070217'],
+      answerCbQuery: jest.fn(),
+      reply: jest.fn().mockResolvedValue({ message_id: 90 }),
+    });
+
+    beforeEach(() => {
+      managers.findActiveByTelegramId.mockResolvedValue(manager);
+      prisma.order.findUnique.mockResolvedValue(mine);
+      pending.openOfManager.mockResolvedValue([]);
+    });
+
+    it('should ask for the files as a reply and remember the prompt for the order', async () => {
+      const c = press();
+
+      await service.askOrderFiles(c as never);
+
+      expect(prisma.order.findUnique).toHaveBeenCalledWith({
+        where: { orderNumber: '0000-070217' },
+      });
+      const [text, options] = c.reply.mock.calls[0] as [
+        string,
+        { reply_markup: { force_reply: boolean } },
+      ];
+      expect(text).toContain('0000-070217');
+      expect(options.reply_markup.force_reply).toBe(true);
+      expect(cards.rememberChatMessage).toHaveBeenCalledWith(555n, 90, 'order:0000-070217');
+    });
+
+    it("should not ask for files of another manager's order", async () => {
+      prisma.order.findUnique.mockResolvedValue({ ...mine, managerId: 9 });
+      const c = press();
+
+      await service.askOrderFiles(c as never);
+
+      expect(c.reply).not.toHaveBeenCalled();
+      expect(c.answerCbQuery).toHaveBeenCalledWith('Замовлення не знайдено', { show_alert: true });
+    });
+
+    it('should attach a file replied to the prompt to the order and answer with a 👍', async () => {
+      cards.byManagerMessage.mockResolvedValue(null);
+      cards.requestOfChatMessage.mockResolvedValue('order:0000-070217');
+      const c = {
+        chat: { id: 555, type: 'private' },
+        from: { id: 555 },
+        message: { message_id: 90, reply_to_message: { message_id: 31 } },
+        reply: jest.fn(),
+        react: jest.fn().mockResolvedValue(true),
+      };
+      const next = jest.fn();
+
+      await service.onFile(c as never, photo, next);
+
+      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
+        mine,
+        [photo],
+        { telegramId: 555n, name: 'Уляна' },
+        true,
+        undefined,
+      );
+      expect(c.react).toHaveBeenCalledWith('👍');
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it("should not attach a file to another manager's order", async () => {
+      prisma.order.findUnique.mockResolvedValue({ ...mine, managerId: 9 });
+      cards.byManagerMessage.mockResolvedValue(null);
+      cards.requestOfChatMessage.mockResolvedValue('order:0000-070217');
+      const c = {
+        chat: { id: 555, type: 'private' },
+        from: { id: 555 },
+        message: { message_id: 90, reply_to_message: { message_id: 31 } },
+        reply: jest.fn(),
+        react: jest.fn(),
+      };
+
+      await service.onFile(c as never, photo, jest.fn());
+
+      expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith('Замовлення не знайдено', expect.anything());
     });
   });
 });

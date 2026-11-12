@@ -144,7 +144,3 @@ export function parseCash(raw: string): CashResult {
     },
   };
 }
-
-export function cashPaymentId(plan: CashPlan): string {
-  return `cash:${plan.number}:${plan.paidAt?.toISOString() ?? 'no-date'}:${plan.amount.toFixed(2)}`;
-}

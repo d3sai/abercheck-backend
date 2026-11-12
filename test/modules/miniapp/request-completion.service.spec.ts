@@ -84,6 +84,9 @@ const order = (id: number, orderNumber: string, patch: Record<string, unknown> =
 
 /** The only button a completed card keeps while nothing is left to confirm. */
 const ATTACH = [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }];
+const CANCEL = (number: string) => [
+  { text: `🗑 Скасувати № ${number}`, callback_data: `del:${number}` },
+];
 
 /** The `index`-th argument of the first call of a mock. */
 const callArg = (fn: jest.Mock, index: number): unknown => (fn.mock.calls[0] as unknown[])[index];
@@ -121,6 +124,7 @@ describe('RequestCompletionService', () => {
     create: jest.fn(),
     createGroup: jest.fn(),
     setPaidAt: jest.fn(),
+    setAdminMessageId: jest.fn(),
     numbersByIds: jest.fn(),
   };
   const requisites = { addMany: jest.fn(), fillPaidAt: jest.fn() };
@@ -253,7 +257,11 @@ describe('RequestCompletionService', () => {
 
       expect(sender.editMessage).toHaveBeenCalledTimes(1);
       const [chat, message, html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
-      expect([chat, message, buttons]).toEqual([555n, 77, [ATTACH]]);
+      expect([chat, message, buttons]).toEqual([
+        555n,
+        77,
+        [ATTACH, CANCEL('0000-070217'), CANCEL('0000-070218')],
+      ]);
       expect(html).toContain('✅ Оформлено: № 0000-070217, 0000-070218 (2 замовлення)');
     });
 
@@ -267,7 +275,7 @@ describe('RequestCompletionService', () => {
       const [, , html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
       expect(html).toContain('✅ Оформлено: № 0000-070217');
       expect(html).toContain('✅ Оплачено 04.11.2026 00:00');
-      expect(buttons).toEqual([ATTACH]);
+      expect(buttons).toEqual([ATTACH, CANCEL('0000-070217')]);
     });
 
     it('should refuse a form without a date, claiming nothing', async () => {
@@ -609,6 +617,23 @@ describe('RequestCompletionService', () => {
       expect(result).toEqual({ orderNumbers: ['MC-1'], skipped: [] });
     });
 
+    it('should keep the id of the notice on the orders, so deleting an order can remove it', async () => {
+      view('minus', {
+        clientLabel: 'Гук Руслан',
+        sheetUrl: 'https://sheet.example/1',
+        withPercent: true,
+        comment: null,
+      });
+      sender.sendToAdmins.mockResolvedValue(77);
+      orders.create.mockResolvedValue(
+        order(10, 'MC-1', { orderType: OrderType.MINUS_CLOSING, clientName: 'Гук Руслан' }),
+      );
+
+      await service.complete(manager, 'req1', body([row]));
+
+      expect(orders.setAdminMessageId).toHaveBeenCalledWith([10], 77);
+    });
+
     it('should start the day at Kyiv midnight when the manager gives no time', async () => {
       view('minus', { clientLabel: 'Гук Руслан' });
       orders.create.mockResolvedValue(order(10, 'MC-1', { orderType: OrderType.MINUS_CLOSING }));
@@ -902,7 +927,7 @@ describe('RequestCompletionService', () => {
         const [, , html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
         expect(html).toContain('✅ Оформлено: № 0000-070217');
         expect(html).toContain('✅ Оплачено 04.11.2026 10:00');
-        expect(buttons).toEqual([ATTACH]);
+        expect(buttons).toEqual([ATTACH, CANCEL('0000-070217')]);
       },
     );
 
@@ -1203,7 +1228,7 @@ describe('RequestCompletionService', () => {
       await service.accept(manager, 'req1');
 
       const [chat, message, html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
-      expect([chat, message, buttons]).toEqual([555n, 77, [ATTACH]]);
+      expect([chat, message, buttons]).toEqual([555n, 77, [ATTACH, CANCEL('0000-070217')]]);
       expect(html).toContain('✅ Оформлено: № 0000-070217');
     });
 
@@ -1289,7 +1314,11 @@ describe('RequestCompletionService', () => {
       expect(orders.setPaidAt).toHaveBeenCalledWith([10, 11], paidAt);
       expect(requisites.fillPaidAt).toHaveBeenCalledWith([10, 11], paidAt);
       const [chat, message, html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
-      expect([chat, message, buttons]).toEqual([555n, 77, [ATTACH]]);
+      expect([chat, message, buttons]).toEqual([
+        555n,
+        77,
+        [ATTACH, CANCEL('0000-070217'), CANCEL('0000-070218')],
+      ]);
       expect(html).toContain('✅ Оформлено: № 0000-070217, 0000-070218');
       expect(html).toContain('✅ Оплачено 04.11.2026 14:30');
     });
@@ -1340,7 +1369,7 @@ describe('RequestCompletionService', () => {
         expect(requisites.fillPaidAt).toHaveBeenCalledWith([10, 11], paidAt);
         const [, , html, buttons] = sender.editMessage.mock.calls[0] as unknown[];
         expect(html).toContain('✅ Оплачено 04.11.2026 14:30');
-        expect(buttons).toEqual([ATTACH]);
+        expect(buttons).toEqual([ATTACH, CANCEL('0000-070217'), CANCEL('0000-070218')]);
       },
     );
 

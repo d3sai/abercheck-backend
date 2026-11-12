@@ -1,4 +1,4 @@
-import { cashPaymentId, parseCash } from '../../../../src/modules/telegram/order-draft/cash.parser';
+import { parseCash } from '../../../../src/modules/telegram/order-draft/cash.parser';
 
 // The manager's sample, exactly as written.
 const SAMPLE = `0000-066498
@@ -26,7 +26,6 @@ describe('parseCash', () => {
     expect(plan.rate).toBe('44.9');
     expect(plan.handedBy).toBe('Христина Павлів передала готівку Христині Вихопень ( Саджениці)');
     expect(plan.warnings).toEqual([]);
-    expect(cashPaymentId(plan)).toBe('cash:0000-066498:2026-09-01T12:20:00.000Z:4260.00');
   });
 
   // The template the managers were given, as written.

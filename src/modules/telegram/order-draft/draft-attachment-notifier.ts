@@ -23,6 +23,16 @@ export class DraftAttachmentNotifier {
     );
   }
 
+  /** The notice alone: its message id stays on the orders, so deleting one can remove it from the chat. */
+  async notice(orders: Order[], notice: string): Promise<void> {
+    const adminMessageId = await this.sender.sendToAdmins(notice);
+    if (adminMessageId === null || orders.length === 0) return;
+    await this.prisma.order.updateMany({
+      where: { id: { in: orders.map((order) => order.id) } },
+      data: { adminMessageId },
+    });
+  }
+
   async notify(
     order: Order,
     manager: Manager,

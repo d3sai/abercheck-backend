@@ -3,6 +3,7 @@ import { Prisma, type OrderRequisite } from '../../generated/prisma/client';
 import { type BotReply, button } from '../telegram/core/bot-reply';
 import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
 import { formatRate } from '../telegram/notifications/order-templates';
+import { cancelOrderButton } from '../telegram/orders-list/orders-list.messages';
 import {
   type FinanceFop,
   type FinancePayoutView,
@@ -278,7 +279,13 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
     // the date is given in the completion form; «Оплачено» is left for what was completed without one
     const paid =
       miniAppUrl && !completed.paidAt ? [webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)] : [];
-    return { html: lines.join('\n'), buttons: [[...paid, attachButton(view.id)]] };
+    return {
+      html: lines.join('\n'),
+      buttons: [
+        [...paid, attachButton(view.id)],
+        ...completed.orderNumbers.map((number) => [cancelOrderButton(number)]),
+      ],
+    };
   }
   // no editing: a manager accepts or cancels; a change is a new request
   if (view.status === 'pending') {

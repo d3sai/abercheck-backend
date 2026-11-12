@@ -14,6 +14,7 @@ import {
 } from '../core/format';
 import { NEW_REQUEST_LABEL } from '../core/menu';
 import { formatRate } from '../notifications/order-templates';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import type { NumberCheck } from './draft-orders';
 import type { RequisitesPlan } from './requisites.parser';
 
@@ -186,6 +187,7 @@ export function requisitesCreatedReply(orders: Order[], skipped: string[]): BotR
       : `✅ Оплату зареєстровано: № <b>${escapeHtml(first.orderNumber)}</b> · ${money(total, first.currency)}`;
   return {
     html: [head, 'Повідомлю про оплату.', ...skippedNote].join('\n'),
+    buttons: [[attachOrderButton(first.orderNumber)]],
   };
 }
 

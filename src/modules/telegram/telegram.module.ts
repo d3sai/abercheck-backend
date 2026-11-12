@@ -32,7 +32,6 @@ import { OrderCreationFlowService } from './order-draft/order-creation-flow.serv
 import { OrderDraftService } from './order-draft/order-draft.service';
 import { PartOfferStore } from './order-draft/part-offer.store';
 import { PendingFilesStore } from './order-draft/pending-files.store';
-import { ReportedPaymentService } from './order-draft/reported-payment.service';
 import { RequisitesDraftService } from './order-draft/requisites-draft.service';
 import { RequisitesDraftStore } from './order-draft/requisites-draft.store';
 import { OrderDeleteService } from './orders-list/order-delete.service';
@@ -77,7 +76,6 @@ import { TelegramSender } from './core/telegram-sender';
     OrderCreationFlowService,
     RequisitesDraftService,
     MinusClosingDraftService,
-    ReportedPaymentService,
     KitDraftService,
     CashDraftService,
     ForeignDraftService,
@@ -93,7 +91,6 @@ import { TelegramSender } from './core/telegram-sender';
     CashDraftService,
     ForeignDraftService,
     OrderDraftService,
-    DraftAttachmentNotifier,
   ],
 })
 export class TelegramModule {}
