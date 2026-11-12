@@ -15,6 +15,7 @@ import type {
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import type { RequestCreateService } from '../../../src/modules/finance-sync/request-create.service';
 import type { KitPlan } from '../../../src/modules/telegram/order-draft/kit.parser';
+import type { PendingOrdersService } from '../../../src/modules/miniapp/pending-orders.service';
 import type { DirectOrdersService } from '../../../src/modules/miniapp/direct-orders.service';
 import type { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
 import type { RequestSyncService } from '../../../src/modules/finance-sync/request-sync.service';
@@ -49,7 +50,8 @@ describe('MiniappController', () => {
   const cards = { byRequestId: jest.fn() };
   const sync = { renderManager: jest.fn(), renderGroup: jest.fn() };
   const completion = { complete: jest.fn(), markPaid: jest.fn() };
-  const directOrders = { create: jest.fn() };
+  const directOrders = {};
+  const pendingOrders = { submit: jest.fn() };
   const controller = new MiniappController(
     requests as unknown as RequestCreateService,
     finance as unknown as FinanceClient,
@@ -57,6 +59,7 @@ describe('MiniappController', () => {
     sync as unknown as RequestSyncService,
     completion as unknown as RequestCompletionService,
     directOrders as unknown as DirectOrdersService,
+    pendingOrders as unknown as PendingOrdersService,
   );
 
   beforeEach(() => {
@@ -501,9 +504,9 @@ describe('MiniappController', () => {
     const send = (dto: Partial<CreateMiniappOrderDto>) =>
       controller.createOrders(manager, dto as CreateMiniappOrderDto);
 
-    const planPassed = () => directOrders.create.mock.calls[0] as [Manager, OrderPlan];
+    const planPassed = () => pendingOrders.submit.mock.calls[0] as [Manager, OrderPlan];
 
-    beforeEach(() => directOrders.create.mockResolvedValue(answer));
+    beforeEach(() => pendingOrders.submit.mockResolvedValue(answer));
 
     describe('kit', () => {
       const kit = {
@@ -575,7 +578,7 @@ describe('MiniappController', () => {
           code: 'invalid-request',
           message,
         });
-        expect(directOrders.create).not.toHaveBeenCalled();
+        expect(pendingOrders.submit).not.toHaveBeenCalled();
       });
     });
 
@@ -645,7 +648,7 @@ describe('MiniappController', () => {
           code: 'invalid-request',
           message,
         });
-        expect(directOrders.create).not.toHaveBeenCalled();
+        expect(pendingOrders.submit).not.toHaveBeenCalled();
       });
 
       it('should refuse a date in the future', async () => {
@@ -704,7 +707,7 @@ describe('MiniappController', () => {
           code: 'invalid-request',
           message,
         });
-        expect(directOrders.create).not.toHaveBeenCalled();
+        expect(pendingOrders.submit).not.toHaveBeenCalled();
       });
 
       it('should refuse a time in the future today', async () => {

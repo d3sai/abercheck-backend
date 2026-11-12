@@ -2,7 +2,10 @@ import { Test } from '@nestjs/testing';
 import { ApiError } from '../../../src/common/api-error';
 import { PrismaService } from '../../../src/common/prisma/prisma.service';
 import { type Manager, Prisma } from '../../../src/generated/prisma/client';
-import { AttachmentsService } from '../../../src/modules/attachments/attachments.service';
+import {
+  AttachmentsService,
+  type TelegramFileRef,
+} from '../../../src/modules/attachments/attachments.service';
 import { DirectOrdersService } from '../../../src/modules/miniapp/direct-orders.service';
 import { type OrderPlan } from '../../../src/modules/miniapp/miniapp.dto';
 import { OrderNumberTakenError } from '../../../src/modules/orders/orders.errors';
@@ -75,6 +78,14 @@ const foreign: OrderPlan = {
   },
 };
 
+const receipt: TelegramFileRef = {
+  fileId: 'f1',
+  filename: 'photo.jpg',
+  mimeType: 'image/jpeg',
+  size: 10,
+  kind: 'photo',
+};
+
 const failure = async (promise: Promise<unknown>) => {
   try {
     await promise;
@@ -93,6 +104,7 @@ const failure = async (promise: Promise<unknown>) => {
 describe('DirectOrdersService', () => {
   const orders = { findWithBalance: jest.fn(), createGroup: jest.fn(), setPaidAt: jest.fn() };
   const payments = { findByExternalId: jest.fn(), ingest: jest.fn() };
+  const attachments = { saveFromTelegram: jest.fn() };
   const sender = {
     sendToAdmins: jest.fn(),
     send: jest.fn(),
@@ -115,7 +127,7 @@ describe('DirectOrdersService', () => {
         DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
         { provide: PaymentsService, useValue: payments },
-        { provide: AttachmentsService, useValue: {} },
+        { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
         { provide: PrismaService, useValue: {} },
       ],
@@ -123,6 +135,7 @@ describe('DirectOrdersService', () => {
     service = moduleRef.get(DirectOrdersService);
     orders.findWithBalance.mockResolvedValue(null);
     orders.createGroup.mockResolvedValue([{ id: 1 }]);
+    attachments.saveFromTelegram.mockResolvedValue([]);
     payments.findByExternalId.mockResolvedValue(null);
     payments.ingest.mockResolvedValue({ kind: 'recorded', order: { id: 1 } });
   });
@@ -174,6 +187,21 @@ describe('DirectOrdersService', () => {
 
       expect(error).toMatchObject({ status: 409, code: 'order-taken' });
       expect(error.message).toContain('Номер 0000-062265 щойно з');
+      expect(sender.sendToAdmins).not.toHaveBeenCalled();
+    });
+    it('should send the held files with the notice as one message', async () => {
+      await service.create(manager, kit, [receipt]);
+
+      expect(attachments.saveFromTelegram).toHaveBeenCalledTimes(1);
+      const [, files, , , caption] = attachments.saveFromTelegram.mock.calls[0] as [
+        unknown,
+        TelegramFileRef[],
+        unknown,
+        unknown,
+        string,
+      ];
+      expect(files).toEqual([receipt]);
+      expect(caption).toContain('647143353');
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
     });
   });
@@ -258,6 +286,18 @@ describe('DirectOrdersService', () => {
       });
       expect(payments.ingest).not.toHaveBeenCalled();
     });
+
+    it('should keep the held files with the recorded order without telling the admins', async () => {
+      await service.create(manager, cash, [receipt]);
+
+      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
+        { id: 1 },
+        [receipt],
+        { telegramId: manager.telegramId, name: manager.name },
+        true,
+      );
+      expect(sender.sendToAdmins).not.toHaveBeenCalled();
+    });
   });
 
   describe('foreign', () => {
@@ -332,6 +372,48 @@ describe('DirectOrdersService', () => {
         code: 'order-taken',
       });
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
+    });
+
+    it('should send the held files with the notice as one message', async () => {
+      await service.create(manager, foreign, [receipt]);
+
+      expect(attachments.saveFromTelegram).toHaveBeenCalledTimes(1);
+      const [, files, , , caption] = attachments.saveFromTelegram.mock.calls[0] as [
+        unknown,
+        TelegramFileRef[],
+        unknown,
+        unknown,
+        string,
+      ];
+      expect(files).toEqual([receipt]);
+      expect(caption).toContain('Абертайм ТОВ');
+      expect(sender.sendToAdmins).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('preview', () => {
+    it('should show a kit card with its access code and create nothing', async () => {
+      const card = await service.preview(kit);
+
+      expect(card.html).toContain('647143353');
+      expect(orders.createGroup).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).not.toHaveBeenCalled();
+    });
+
+    it('should refuse a cash payment that is already recorded', async () => {
+      payments.findByExternalId.mockResolvedValue({ id: 1 });
+
+      const error = await failure(service.preview(cash));
+
+      expect(error).toMatchObject({ status: 409, code: 'already-recorded' });
+    });
+
+    it('should show a foreign card for a number the system already has', async () => {
+      orders.findWithBalance.mockResolvedValue(stored('0000-066498', 'EUR'));
+
+      const card = await service.preview(foreign);
+
+      expect(card.html).toContain('0000-066498');
     });
   });
 

@@ -45,6 +45,7 @@ import {
   toOrderPlan,
 } from './miniapp.dto';
 import { financeError, notFound } from './miniapp.errors';
+import { PendingOrdersService } from './pending-orders.service';
 import { type CompletionResult, RequestCompletionService } from './request-completion.service';
 
 interface RequestResponse {
@@ -82,6 +83,7 @@ export class MiniappController {
     private readonly sync: RequestSyncService,
     private readonly completion: RequestCompletionService,
     private readonly directOrders: DirectOrdersService,
+    private readonly pendingOrders: PendingOrdersService,
   ) {}
 
   @Post('requests')
@@ -103,13 +105,13 @@ export class MiniappController {
     };
   }
 
-  /** Kit, cash and foreign payments: orders and notices without a request to the financiers. */
+  /** Kit, cash and foreign payments: a card in the manager's chat; the orders come with «Прийняти». */
   @Post('orders')
   async createOrders(
     @MiniappManager() manager: Manager,
     @Body() dto: CreateMiniappOrderDto,
   ): Promise<DirectOrdersResult> {
-    return this.directOrders.create(manager, toOrderPlan(dto));
+    return this.pendingOrders.submit(manager, toOrderPlan(dto));
   }
 
   @Get('orders/:number')

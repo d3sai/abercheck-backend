@@ -93,6 +93,7 @@ import { TelegramSender } from './core/telegram-sender';
     CashDraftService,
     ForeignDraftService,
     OrderDraftService,
+    DraftAttachmentNotifier,
   ],
 })
 export class TelegramModule {}

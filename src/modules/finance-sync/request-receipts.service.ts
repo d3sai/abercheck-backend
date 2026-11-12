@@ -16,6 +16,7 @@ import { button } from '../telegram/core/bot-reply';
 import { type MatchContext, edit, isPrivate, reply } from '../telegram/core/telegram-context';
 import { OrderDraftService } from '../telegram/order-draft/order-draft.service';
 import { paymentButtonLabel, receiptCaption } from './request-card.messages';
+import { PendingOrdersRepository } from './pending-orders.repository';
 import { RequestCardsRepository } from './request-cards.repository';
 
 type Next = () => Promise<void>;
@@ -36,6 +37,13 @@ interface PaymentChoice {
   expiresAt: number;
 }
 
+const fileRefusal = (file: TelegramFileRef): string | null => {
+  if (!ALLOWED_MIME_TYPES.has(file.mimeType)) {
+    return '⚠️ Такий тип файлу не підтримується. Додайте фото, PDF або зображення.';
+  }
+  return file.size > MAX_FILE_SIZE_BYTES ? '⚠️ Файл завеликий. Максимум 10 МБ.' : null;
+};
+
 const NO_ORDER = 'Запит оформлено, але бот не знайшов замовлення — додайте квитанцію в кабінеті';
 
 /** Receipts a manager sends in the bot chat as a reply to their request. */
@@ -52,6 +60,7 @@ export class RequestReceiptsService {
     private readonly attachments: AttachmentsService,
     private readonly managers: ManagersService,
     @Inject(forwardRef(() => OrderDraftService)) private readonly drafts: OrderDraftService,
+    private readonly pending: PendingOrdersRepository,
   ) {}
 
   private readonly choices = new Map<bigint, Choice>();
@@ -72,7 +81,7 @@ export class RequestReceiptsService {
     const requestId =
       (await this.cards.byManagerMessage(chatId, target.message_id))?.requestId ??
       (await this.cards.requestOfChatMessage(chatId, target.message_id));
-    if (!requestId) return next();
+    if (!requestId) return this.onDraftFile(ctx, chatId, target.message_id, file, next);
 
     const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from.id));
     if (!manager) {
@@ -81,6 +90,41 @@ export class RequestReceiptsService {
     }
     if ((await this.cards.byRequestId(requestId))?.managerId !== manager.id) return next();
     await this.answer(ctx, await this.receive(manager, requestId, file));
+  }
+
+  /** A file replied to the card of a Kit, cash or foreign order that waits for «Прийняти»: it is held on the draft. */
+  private async onDraftFile(
+    ctx: Context,
+    chatId: bigint,
+    messageId: number,
+    file: TelegramFileRef,
+    next: Next,
+  ): Promise<void> {
+    const draftId = await this.pending.idOfMessage(chatId, messageId);
+    if (!draftId) return next();
+    const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from!.id));
+    if (!manager) {
+      await reply(ctx, { html: NOT_A_MANAGER }, ctx.message!.message_id);
+      return;
+    }
+    if ((await this.pending.byId(draftId))?.managerId !== manager.id) return next();
+    const refusal = fileRefusal(file);
+    if (refusal) return this.answer(ctx, { html: refusal });
+    const outcome = await this.pending.addFile(draftId, file, MAX_FILES_PER_UPLOAD);
+    await this.answer(
+      ctx,
+      outcome === 'added'
+        ? {
+            html: '📎 Квитанцію збережено — вона піде з замовленням після «Прийняти»',
+            stored: true,
+          }
+        : {
+            html:
+              outcome === 'full'
+                ? `⚠️ Максимум ${MAX_FILES_PER_UPLOAD} файлів на замовлення.`
+                : 'Запит не знайдено',
+          },
+    );
   }
 
   /** A stored receipt gets a 👍 on the file instead of one more message. */
@@ -215,12 +259,8 @@ export class RequestReceiptsService {
     requestId: string,
     file: TelegramFileRef,
   ): Promise<ReceiptAnswer> {
-    if (!ALLOWED_MIME_TYPES.has(file.mimeType)) {
-      return { html: '⚠️ Такий тип файлу не підтримується. Додайте фото, PDF або зображення.' };
-    }
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      return { html: '⚠️ Файл завеликий. Максимум 10 МБ.' };
-    }
+    const refusal = fileRefusal(file);
+    if (refusal) return { html: refusal };
 
     // read fresh: completion may have finished while the file travelled
     const card = await this.cards.byRequestId(requestId);

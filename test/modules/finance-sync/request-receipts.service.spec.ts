@@ -13,6 +13,7 @@ import type {
   AttachmentsService,
   TelegramFileRef,
 } from '../../../src/modules/attachments/attachments.service';
+import type { PendingOrdersRepository } from '../../../src/modules/finance-sync/pending-orders.repository';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import { RequestReceiptsService } from '../../../src/modules/finance-sync/request-receipts.service';
 import { NOT_A_MANAGER } from '../../../src/modules/telegram/access/access.messages';
@@ -58,12 +59,14 @@ describe('RequestReceiptsService', () => {
   const attachments = { saveFromTelegram: jest.fn() };
   const managers = { findActiveByTelegramId: jest.fn() };
   const drafts = { isArmed: jest.fn().mockReturnValue(false) };
+  const pending = { idOfMessage: jest.fn(), byId: jest.fn(), addFile: jest.fn() };
   const service = new RequestReceiptsService(
     cards as unknown as RequestCardsRepository,
     prisma as unknown as PrismaService,
     attachments as unknown as AttachmentsService,
     managers as unknown as ManagersService,
     drafts as never,
+    pending as unknown as PendingOrdersRepository,
   );
   let logError: jest.SpyInstance;
 
@@ -305,6 +308,82 @@ describe('RequestReceiptsService', () => {
         expect.stringContaining('не підтримується'),
         expect.anything(),
       );
+    });
+
+    describe('replied to a direct order card', () => {
+      const draft = { id: 'p1', managerId: 4 };
+
+      beforeEach(() => {
+        cards.byManagerMessage.mockResolvedValue(null);
+        cards.requestOfChatMessage.mockResolvedValue(null);
+        pending.idOfMessage.mockResolvedValue('p1');
+        pending.byId.mockResolvedValue(draft);
+        pending.addFile.mockResolvedValue('added');
+      });
+
+      it('should hold the file on the draft and answer with a 👍', async () => {
+        const c = ctx();
+        const next = jest.fn();
+
+        await service.onFile(c as never, photo, next);
+
+        expect(pending.idOfMessage).toHaveBeenCalledWith(555n, 31);
+        expect(pending.addFile).toHaveBeenCalledWith('p1', photo, 10);
+        expect(c.react).toHaveBeenCalledWith('👍');
+        expect(next).not.toHaveBeenCalled();
+      });
+
+      it('should refuse a file type the receipts flow refuses', async () => {
+        const c = ctx();
+
+        await service.onFile(c as never, { ...photo, mimeType: 'application/zip' }, jest.fn());
+
+        expect(pending.addFile).not.toHaveBeenCalled();
+        expect(c.reply).toHaveBeenCalledWith(
+          expect.stringContaining('не підтримується'),
+          expect.anything(),
+        );
+      });
+
+      it('should say the limit is reached when the draft is full', async () => {
+        pending.addFile.mockResolvedValue('full');
+        const c = ctx();
+
+        await service.onFile(c as never, photo, jest.fn());
+
+        expect(c.reply).toHaveBeenCalledWith(
+          '⚠️ Максимум 10 файлів на замовлення.',
+          expect.anything(),
+        );
+      });
+
+      it('should say the request is gone when the draft was taken meanwhile', async () => {
+        pending.addFile.mockResolvedValue('gone');
+        const c = ctx();
+
+        await service.onFile(c as never, photo, jest.fn());
+
+        expect(c.reply).toHaveBeenCalledWith('Запит не знайдено', expect.anything());
+      });
+
+      it('should leave a draft of another manager to the next handler', async () => {
+        pending.byId.mockResolvedValue({ id: 'p1', managerId: 99 });
+        const next = jest.fn();
+
+        await service.onFile(ctx() as never, photo, next);
+
+        expect(pending.addFile).not.toHaveBeenCalled();
+        expect(next).toHaveBeenCalled();
+      });
+
+      it('should leave a reply to an unknown message to the next handler', async () => {
+        pending.idOfMessage.mockResolvedValue(null);
+        const next = jest.fn();
+
+        await service.onFile(ctx() as never, photo, next);
+
+        expect(next).toHaveBeenCalled();
+      });
     });
 
     it('should receive a file replied to a remembered chat message', async () => {

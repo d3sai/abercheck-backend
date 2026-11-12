@@ -76,8 +76,9 @@ model Manager {
   sessionVersion Int           @default(0) @map("session_version")
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  orders       Order[]
-  requestCards FinanceRequestCard[]
+  orders        Order[]
+  requestCards  FinanceRequestCard[]
+  pendingOrders PendingOrder[]
 
   @@map("managers")
 }
@@ -268,6 +269,24 @@ model FinanceRequestFile {
 
   @@index([requestId])
   @@map("finance_request_files")
+}
+
+// A Kit, cash or foreign order from the Mini App form that waits in the manager's chat for files and
+// «Прийняти». plan is the OrderPlan as JSON; files are the receipts' Telegram file refs. No order exists yet.
+model PendingOrder {
+  id               String   @id @default(uuid())
+  managerId        Int      @map("manager_id")
+  managerChatId    BigInt   @map("manager_chat_id")
+  managerMessageId Int?     @map("manager_message_id")
+  plan             Json
+  files            Json     @default("[]")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  manager Manager @relation(fields: [managerId], references: [id])
+
+  @@index([managerId])
+  @@index([managerChatId, managerMessageId])
+  @@map("pending_orders")
 }
 
 model FinanceMessageSeen {

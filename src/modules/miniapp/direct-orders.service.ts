@@ -3,14 +3,19 @@ import type { Manager } from '../../generated/prisma/client';
 import { ApiError } from '../../common/api-error';
 import { OrderNumberTakenError } from '../orders/orders.errors';
 import { OrdersService } from '../orders/orders.service';
+import type { TelegramFileRef } from '../attachments/attachments.service';
+import type { BotReply } from '../telegram/core/bot-reply';
 import { TelegramSender } from '../telegram/core/telegram-sender';
+import { DraftAttachmentNotifier } from '../telegram/order-draft/draft-attachment-notifier';
 import { CashDraftService } from '../telegram/order-draft/cash-draft.service';
 import type { CashPlan } from '../telegram/order-draft/cash.parser';
 import { ForeignDraftService } from '../telegram/order-draft/foreign-draft.service';
 import type { ForeignPlan } from '../telegram/order-draft/foreign.parser';
 import { KitDraftService } from '../telegram/order-draft/kit-draft.service';
 import type { KitPlan } from '../telegram/order-draft/kit.parser';
-import { foreignCreatedReply } from '../telegram/order-draft/foreign.messages';
+import { cashPreview } from '../telegram/order-draft/cash.messages';
+import { foreignCreatedReply, foreignPreview } from '../telegram/order-draft/foreign.messages';
+import { kitPreview } from '../telegram/order-draft/kit.messages';
 import { type OrderPlan, type PaidMiniappRequestDto, toPaidAt } from './miniapp.dto';
 import { notFound } from './miniapp.errors';
 
@@ -43,6 +48,7 @@ export class DirectOrdersService {
     private readonly foreign: ForeignDraftService,
     private readonly orders: OrdersService,
     private readonly sender: TelegramSender,
+    private readonly notifier: DraftAttachmentNotifier,
   ) {}
 
   /** The manager's own order; another manager's looks exactly like a missing one. */
@@ -75,15 +81,34 @@ export class DirectOrdersService {
     return { paidAt: paidAt.toISOString() };
   }
 
-  async create(manager: Manager, order: OrderPlan): Promise<DirectOrdersResult> {
+  /** The text of the card a form order waits in; refuses what `create` would refuse. */
+  async preview(order: OrderPlan): Promise<BotReply> {
+    switch (order.kind) {
+      case 'kit':
+        return kitPreview(order.plan, await this.kit.existingNumbers(order.plan), 0);
+      case 'cash': {
+        const check = await this.cashCheck(order.plan);
+        return cashPreview(order.plan, check.existing.length > 0, 0);
+      }
+      case 'foreign':
+        return foreignPreview(order.plan, await this.foreign.exists(order.plan), 0);
+    }
+  }
+
+  /** `files` are the receipts held on the card: they go with the notice as one message in «Оплати». */
+  async create(
+    manager: Manager,
+    order: OrderPlan,
+    files: TelegramFileRef[] = [],
+  ): Promise<DirectOrdersResult> {
     try {
       switch (order.kind) {
         case 'kit':
-          return await this.createKit(manager, order.plan);
+          return await this.createKit(manager, order.plan, files);
         case 'cash':
-          return await this.createCash(manager, order.plan);
+          return await this.createCash(manager, order.plan, files);
         case 'foreign':
-          return await this.createForeign(manager, order.plan);
+          return await this.createForeign(manager, order.plan, files);
       }
     } catch (error) {
       if (error instanceof OrderNumberTakenError) {
@@ -96,10 +121,14 @@ export class DirectOrdersService {
     }
   }
 
-  private async createKit(manager: Manager, plan: KitPlan): Promise<DirectOrdersResult> {
+  private async createKit(
+    manager: Manager,
+    plan: KitPlan,
+    files: TelegramFileRef[],
+  ): Promise<DirectOrdersResult> {
     const existing = await this.kit.existingNumbers(plan);
     const created = await this.kit.createOrders(manager, plan, existing);
-    await this.kit.announce(manager, plan, existing, created);
+    await this.kit.announce(manager, plan, existing, created, files);
     return {
       orderNumbers: plan.items
         .map((item) => item.number)
@@ -111,15 +140,16 @@ export class DirectOrdersService {
     };
   }
 
-  private async createCash(manager: Manager, plan: CashPlan): Promise<DirectOrdersResult> {
-    const check = await this.cash.check(plan);
-    if (!check.ok) {
-      throw check.alreadyRecorded
-        ? conflict('already-recorded', 'Цю оплату вже зареєстровано.')
-        : conflict('order-conflict', check.errors.join(' '));
-    }
+  private async createCash(
+    manager: Manager,
+    plan: CashPlan,
+    files: TelegramFileRef[],
+  ): Promise<DirectOrdersResult> {
+    const check = await this.cashCheck(plan);
     const exists = check.existing.length > 0;
-    await this.cash.record(manager, plan, exists);
+    const fileOrder = await this.cash.record(manager, plan, exists);
+    // cash never goes to the financiers: receipts only land in the storage chat
+    if (files.length > 0 && fileOrder) await this.notifier.store(fileOrder, manager, files);
     return exists
       ? {
           orderNumbers: [],
@@ -129,10 +159,24 @@ export class DirectOrdersService {
       : { orderNumbers: [plan.number], skipped: [] };
   }
 
-  private async createForeign(manager: Manager, plan: ForeignPlan): Promise<DirectOrdersResult> {
+  private async cashCheck(plan: CashPlan) {
+    const check = await this.cash.check(plan);
+    if (!check.ok) {
+      throw check.alreadyRecorded
+        ? conflict('already-recorded', 'Цю оплату вже зареєстровано.')
+        : conflict('order-conflict', check.errors.join(' '));
+    }
+    return check;
+  }
+
+  private async createForeign(
+    manager: Manager,
+    plan: ForeignPlan,
+    files: TelegramFileRef[],
+  ): Promise<DirectOrdersResult> {
     const exists = await this.foreign.exists(plan);
     const created = await this.foreign.createOrder(manager, plan, exists);
-    await this.foreign.announce(manager, plan, exists, created);
+    await this.foreign.announce(manager, plan, exists, created, files);
     // a form has no bot reply to carry the button, so the bot writes to the manager
     if (created && !plan.paidAt) {
       const { html, buttons } = foreignCreatedReply(plan, this.sender.miniAppUrl);

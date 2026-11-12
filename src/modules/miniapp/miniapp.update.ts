@@ -5,6 +5,8 @@ import { FinanceAction } from '../finance-sync/request-card.messages';
 import { ManagersService } from '../managers/managers.service';
 import { NOT_A_MANAGER } from '../telegram/access/access.messages';
 import { isPrivate, type MatchContext } from '../telegram/core/telegram-context';
+import { PendingOrderAction } from './pending-order.messages';
+import { PendingOrdersService } from './pending-orders.service';
 import { RequestCompletionService } from './request-completion.service';
 
 // Telegram caps an alert at 200 characters
@@ -20,6 +22,7 @@ export class MiniappUpdate {
   constructor(
     private readonly completion: RequestCompletionService,
     private readonly managers: ManagersService,
+    private readonly pendingOrders: PendingOrdersService,
   ) {}
 
   /** «✅ Прийняти»: the card redraws itself on success; the press only needs an answer. */
@@ -47,5 +50,20 @@ export class MiniappUpdate {
         ...alert(code === 'order-exists-part' ? message + PART_HINT : message),
       );
     }
+  }
+
+  @Action(PendingOrderAction.Accept)
+  acceptOrder(@Ctx() ctx: MatchContext): Promise<void> {
+    return this.pendingOrders.accept(ctx);
+  }
+
+  @Action(PendingOrderAction.Cancel)
+  cancelOrder(@Ctx() ctx: MatchContext): Promise<void> {
+    return this.pendingOrders.cancel(ctx);
+  }
+
+  @Action(PendingOrderAction.Attach)
+  attachToOrder(@Ctx() ctx: MatchContext): Promise<void> {
+    return this.pendingOrders.askFiles(ctx);
   }
 }

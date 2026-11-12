@@ -2,6 +2,7 @@ import { HttpStatus, Logger } from '@nestjs/common';
 import { ApiError } from '../../../src/common/api-error';
 import type { Manager } from '../../../src/generated/prisma/client';
 import type { ManagersService } from '../../../src/modules/managers/managers.service';
+import type { PendingOrdersService } from '../../../src/modules/miniapp/pending-orders.service';
 import { MiniappUpdate } from '../../../src/modules/miniapp/miniapp.update';
 import type { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
 import { NOT_A_MANAGER } from '../../../src/modules/telegram/access/access.messages';
@@ -10,10 +11,12 @@ const manager = { id: 4, telegramId: 555n, name: 'Уляна' } as Manager;
 
 describe('MiniappUpdate', () => {
   const completion = { accept: jest.fn() };
+  const pendingOrders = { accept: jest.fn(), cancel: jest.fn(), askFiles: jest.fn() };
   const managers = { findActiveByTelegramId: jest.fn() };
   const update = new MiniappUpdate(
     completion as unknown as RequestCompletionService,
     managers as unknown as ManagersService,
+    pendingOrders as unknown as PendingOrdersService,
   );
 
   const press = (type = 'private') => ({
@@ -107,5 +110,17 @@ describe('MiniappUpdate', () => {
     expect(c.answerCbQuery).toHaveBeenCalledWith('Не вдалося, спробуйте ще раз', {
       show_alert: true,
     });
+  });
+
+  it.each([
+    ['acceptOrder', 'accept'],
+    ['cancelOrder', 'cancel'],
+    ['attachToOrder', 'askFiles'],
+  ] as const)('should hand the %s press to the pending orders', async (handler, method) => {
+    const c = press();
+
+    await update[handler](c as never);
+
+    expect(pendingOrders[method]).toHaveBeenCalledWith(c);
   });
 });

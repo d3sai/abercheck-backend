@@ -9,6 +9,7 @@ import { DirectOrdersService } from './direct-orders.service';
 import { MiniappAuthGuard } from './miniapp-auth.guard';
 import { MiniappController } from './miniapp.controller';
 import { MiniappUpdate } from './miniapp.update';
+import { PendingOrdersService } from './pending-orders.service';
 import { RequestCompletionService } from './request-completion.service';
 
 @Module({
@@ -24,6 +25,12 @@ import { RequestCompletionService } from './request-completion.service';
     forwardRef(() => TelegramModule),
   ],
   controllers: [MiniappController],
-  providers: [MiniappAuthGuard, RequestCompletionService, DirectOrdersService, MiniappUpdate],
+  providers: [
+    MiniappAuthGuard,
+    RequestCompletionService,
+    DirectOrdersService,
+    PendingOrdersService,
+    MiniappUpdate,
+  ],
 })
 export class MiniappModule {}

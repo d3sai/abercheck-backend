@@ -9,6 +9,7 @@ import { FinanceWebhookController } from './finance-webhook.controller';
 import { FinanceWebhookGuard } from './finance-webhook.guard';
 import { FinanceSyncUpdate } from './finance-sync.update';
 import { ManagerActionsService } from './manager-actions.service';
+import { PendingOrdersRepository } from './pending-orders.repository';
 import { RequestCardsRepository } from './request-cards.repository';
 import { RequestCreateService } from './request-create.service';
 import { RequestReceiptsService } from './request-receipts.service';
@@ -22,6 +23,7 @@ import { RequestSyncService } from './request-sync.service';
     FinanceClient,
     FinanceWebhookGuard,
     RequestCardsRepository,
+    PendingOrdersRepository,
     RequestCreateService,
     RequestSyncService,
     FinancierActionsService,
@@ -32,6 +34,7 @@ import { RequestSyncService } from './request-sync.service';
   exports: [
     FinanceClient,
     RequestCardsRepository,
+    PendingOrdersRepository,
     RequestCreateService,
     RequestReceiptsService,
     RequestSyncService,
