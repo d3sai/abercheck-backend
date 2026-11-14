@@ -1,7 +1,7 @@
 import { adminOrderCreatedMessage } from '../telegram/notifications/order-templates';
 import { TELEGRAM_CAPTION_LIMIT } from '../attachments/attachments.constants';
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { ApiError } from '../../common/api-error';
+import { ApiError, type ApiErrorBody } from '../../common/api-error';
 import {
   Currency,
   type FinanceRequestCard,
@@ -138,6 +138,10 @@ function withOverrides(view: FinanceRequestView, input: Completion): FinanceRequ
   };
 }
 
+const NO_PAYMENT_DATE = 'no-payment-date';
+const NO_PAYMENT_DATE_TEXT =
+  'Дати оплати немає — натисніть «✅ Прийняти» у картці ще раз і вкажіть її у формі.';
+
 /** When the client paid: the latest date among the payments, if any has one. */
 const latest = (payments: Payment[]): Date | null =>
   payments.reduce<Date | null>(
@@ -173,22 +177,42 @@ export class RequestCompletionService {
     });
   }
 
-  /** «✅ Прийняти»: the orders as the card showed them, with the payments stored at creation. */
-  accept(manager: Manager, requestId: string): Promise<CompletionResult> {
-    return this.finish(manager, requestId, {
-      payments: (kind, card) => {
-        const stored = storedPayments(card.payments);
-        if (stored.length === 0 || stored.some((payment) => payment.paidAt === null)) {
-          throw apiError(
-            HttpStatus.BAD_REQUEST,
-            'invalid-request',
-            'Дати оплати немає — відкрийте «✅ Прийняти» у картці й вкажіть її.',
-          );
-        }
-        return fromStored(stored);
-      },
-      addPart: false,
+  /**
+   * «✅ Прийняти»: the orders as the card showed them, with the payments stored at creation. A card
+   * sent before its payments had dates still carries this button: it is redrawn with the form.
+   */
+  async accept(manager: Manager, requestId: string): Promise<CompletionResult> {
+    try {
+      return await this.finish(manager, requestId, {
+        payments: (kind, card) => {
+          const stored = storedPayments(card.payments);
+          if (stored.length === 0 || stored.some((payment) => payment.paidAt === null)) {
+            throw apiError(HttpStatus.BAD_REQUEST, NO_PAYMENT_DATE, NO_PAYMENT_DATE_TEXT);
+          }
+          return fromStored(stored);
+        },
+        addPart: false,
+      });
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        (error.getResponse() as ApiErrorBody).code === NO_PAYMENT_DATE
+      ) {
+        await this.safely(requestId, 'stale accept card', () => this.redrawManagerCard(requestId));
+      }
+      throw error;
+    }
+  }
+
+  private async redrawManagerCard(requestId: string): Promise<void> {
+    const card = await this.cards.byRequestId(requestId);
+    if (card?.managerMessageId == null) return;
+    const { request } = await this.finance.get(requestId);
+    const { html, buttons } = managerCard(request, {
+      miniAppUrl: this.sender.miniAppUrl,
+      payments: storedPayments(card.payments),
     });
+    await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
   }
 
   /**

@@ -1215,10 +1215,23 @@ describe('RequestCompletionService', () => {
 
         const error = await failure(service.accept(manager, 'req1'));
 
-        expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'invalid-request' });
+        expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'no-payment-date' });
         expect(cards.claimCompletion).not.toHaveBeenCalled();
       },
     );
+
+    it('should redraw a stale card with the form button when a date is missing', async () => {
+      sender.miniAppUrl = 'https://cab.example.ua/tg/request';
+      withStored([{ payerName: null, account: null, amount: '1000.00', paidAt: null }]);
+      view('card', { orders: [orderRow('0000-070217', '1000')] });
+
+      await failure(service.accept(manager, 'req1'));
+
+      const [chat, message, , buttons] = sender.editMessage.mock.calls[0] as unknown[];
+      expect([chat, message]).toEqual([555n, 77]);
+      expect(JSON.stringify(buttons)).toContain('web_app');
+      expect(JSON.stringify(buttons)).not.toContain('mo:');
+    });
 
     it('should redraw the manager card as completed', async () => {
       withStored(stored);
@@ -1239,7 +1252,7 @@ describe('RequestCompletionService', () => {
 
         const error = await failure(service.accept(manager, 'req1'));
 
-        expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'invalid-request' });
+        expect(error).toMatchObject({ status: HttpStatus.BAD_REQUEST, code: 'no-payment-date' });
         expect(cards.claimCompletion).not.toHaveBeenCalled();
       },
     );
