@@ -289,6 +289,15 @@ model PendingOrder {
   @@map("pending_orders")
 }
 
+model GuideVideo {
+  key       String   @id
+  fileId    String   @map("file_id")
+  fileSize  Int      @map("file_size")
+  fileMtime DateTime @map("file_mtime") @db.Timestamptz(3)
+
+  @@map("guide_videos")
+}
+
 model FinanceMessageSeen {
   messageId String   @id @map("message_id")
   seenAt    DateTime @default(now()) @map("seen_at") @db.Timestamptz(3)
