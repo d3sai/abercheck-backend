@@ -23,6 +23,7 @@ import { RequestCardsRepository } from './request-cards.repository';
 type Next = () => Promise<void>;
 
 const OPEN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const CLOSED_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 // a prompt asking for the files of an accepted order is remembered as «order:<number>» next to the request ids
 const ORDER_PROMPT = 'order:';
 const CHOICE_TTL_MS = 10 * 60 * 1000;
@@ -246,7 +247,11 @@ export class RequestReceiptsService {
     const choice: Choice = { files: [file], expiresAt: Date.now() + CHOICE_TTL_MS };
     this.choices.set(userId, choice);
     const [open, drafts] = await Promise.all([
-      this.cards.openOfManager(manager.id, new Date(Date.now() - OPEN_WINDOW_MS)),
+      this.cards.openOfManager(
+        manager.id,
+        new Date(Date.now() - OPEN_WINDOW_MS),
+        new Date(Date.now() - CLOSED_WINDOW_MS),
+      ),
       this.pending.openOfManager(manager.id),
     ]);
     const targets: Target[] = [
@@ -270,9 +275,12 @@ export class RequestReceiptsService {
       );
       return;
     }
-    if (targets.length === 1) {
+    const [only] = targets;
+    if (
+      targets.length === 1 &&
+      (only!.draft || (await this.cards.latestOfManager(manager.id))?.requestId === only!.id)
+    ) {
       this.choices.delete(userId);
-      const [only] = targets;
       const answers: ReceiptAnswer[] = [];
       for (const held of choice.files) {
         answers.push(

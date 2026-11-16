@@ -7,6 +7,7 @@ describe('RequestCardsRepository', () => {
   const financeRequestCard = {
     create: jest.fn(),
     findFirst: jest.fn(),
+    findMany: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
@@ -36,6 +37,35 @@ describe('RequestCardsRepository', () => {
   });
 
   afterEach(() => jest.resetAllMocks());
+
+  it('should offer open requests and those closed since the given date, never cancelled ones', async () => {
+    const since = new Date('2026-10-17T00:00:00Z');
+    const closedSince = new Date('2026-11-13T00:00:00Z');
+
+    await repository.openOfManager(4, since, closedSince);
+
+    expect(financeRequestCard.findMany).toHaveBeenCalledWith({
+      where: {
+        managerId: 4,
+        createdAt: { gte: since },
+        AND: [
+          { OR: [{ closedAt: null }, { closedAt: { gte: closedSince } }] },
+          { OR: [{ notifiedStatus: null }, { notifiedStatus: { not: 'cancelled' } }] },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+    });
+  });
+
+  it('should find the manager’s latest request', async () => {
+    await repository.latestOfManager(4);
+
+    expect(financeRequestCard.findFirst).toHaveBeenCalledWith({
+      where: { managerId: 4 },
+      orderBy: { createdAt: 'desc' },
+    });
+  });
 
   it('should create a card from the given data', async () => {
     const card = {

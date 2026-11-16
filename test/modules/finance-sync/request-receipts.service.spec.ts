@@ -52,6 +52,7 @@ describe('RequestReceiptsService', () => {
     deleteHeldFiles: jest.fn(),
     rememberChatMessage: jest.fn(),
     openOfManager: jest.fn(),
+    latestOfManager: jest.fn(),
   };
   const prisma = {
     order: { findUnique: jest.fn() },
@@ -447,6 +448,7 @@ describe('RequestReceiptsService', () => {
 
       beforeEach(() => {
         drafts.isArmed.mockReturnValue(false);
+        cards.latestOfManager.mockResolvedValue(card('req1', '42'));
       });
 
       it('should call next while a Kit, cash or foreign text mode is armed', async () => {
@@ -462,6 +464,7 @@ describe('RequestReceiptsService', () => {
 
       it('should keep it on the only open request and answer with a 👍', async () => {
         cards.openOfManager.mockResolvedValue([card('req1', '42')]);
+        cards.latestOfManager.mockResolvedValue(card('req1', '42'));
         const c = loose();
         const next = jest.fn();
 
@@ -470,6 +473,45 @@ describe('RequestReceiptsService', () => {
         expect(cards.holdFile).toHaveBeenCalledWith('req1', photo);
         expect(c.react).toHaveBeenCalledWith('👍');
         expect(next).not.toHaveBeenCalled();
+      });
+
+      it('should also offer the requests closed in the last 3 days', async () => {
+        cards.openOfManager.mockResolvedValue([]);
+        pending.openOfManager.mockResolvedValue([]);
+
+        await service.onFile(loose() as never, photo, jest.fn());
+
+        const [, since, closedSince] = cards.openOfManager.mock.calls[0] as [number, Date, Date];
+        const days = (date: Date) => (Date.now() - date.getTime()) / (24 * 60 * 60 * 1000);
+        expect(days(since)).toBeCloseTo(30, 2);
+        expect(days(closedSince)).toBeCloseTo(3, 2);
+      });
+
+      it('should ask, not attach, when the only open request is not the manager’s latest', async () => {
+        cards.openOfManager.mockResolvedValue([card('req60', '60')]);
+        pending.openOfManager.mockResolvedValue([]);
+        cards.latestOfManager.mockResolvedValue(card('req208', '208'));
+        const c = loose();
+
+        await service.onFile(c as never, photo, jest.fn());
+
+        expect(cards.holdFile).not.toHaveBeenCalled();
+        expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
+        expect(c.reply).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(c.reply.mock.calls[0])).toContain('До якого запиту');
+        expect(JSON.stringify(c.reply.mock.calls[0])).toContain('mr:req60');
+
+        cards.byRequestId.mockResolvedValue({ ...open, requestId: 'req60', number: '60' });
+        await service.onChoice({
+          from: { id: 555 },
+          chat: { id: 555, type: 'private' },
+          match: ['mr:req60', 'req60'],
+          answerCbQuery: jest.fn(),
+          editMessageText: jest.fn().mockResolvedValue(true),
+          deleteMessage: jest.fn(),
+        } as never);
+
+        expect(cards.holdFile).toHaveBeenCalledWith('req60', photo);
       });
 
       it('should say there is no open request', async () => {

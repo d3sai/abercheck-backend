@@ -211,6 +211,21 @@ describe('RequestSyncService', () => {
       ).toEqual(['💰 Оплачено', '📎 Прикріпити файли', '🗑 Скасувати № 0000-1']);
     });
 
+    it('should show a completed request whose orders were deleted as cancelled, with no buttons', async () => {
+      sender.miniAppUrl = URL_;
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10] },
+        view({ status: 'cancelled', kind: 'our_fop' }),
+      );
+
+      const [, , html, buttons] = edit();
+      expect(html).toContain('❌ Скасовано');
+      expect(html).not.toContain('Оформлено');
+      expect(buttons ?? []).toEqual([]);
+      expect(orders.numbersByIds).not.toHaveBeenCalled();
+    });
+
     it('should offer «Оплачено» on a completed our_fop that is still open', async () => {
       sender.miniAppUrl = URL_;
       orders.numbersByIds.mockResolvedValue(['0000-1']);

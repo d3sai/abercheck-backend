@@ -18,23 +18,36 @@ export class RequestCardsRepository {
     return this.prisma.financeRequestCard.findUnique({ where: { requestId } });
   }
 
+  byOrderId(orderId: number): Promise<FinanceRequestCard | null> {
+    return this.prisma.financeRequestCard.findFirst({ where: { orderIds: { has: orderId } } });
+  }
+
   byGroupMessage(groupChatId: bigint, groupMessageId: number): Promise<FinanceRequestCard | null> {
     return this.prisma.financeRequestCard.findUnique({
       where: { groupChatId_groupMessageId: { groupChatId, groupMessageId } },
     });
   }
 
-  /** A manager's requests a loose file can still go to: not closed, not cancelled, recent. */
-  openOfManager(managerId: number, since: Date): Promise<FinanceRequestCard[]> {
+  /** A manager's requests a loose file can still go to: not closed or closed lately, not cancelled, recent. */
+  openOfManager(managerId: number, since: Date, closedSince: Date): Promise<FinanceRequestCard[]> {
     return this.prisma.financeRequestCard.findMany({
       where: {
         managerId,
-        closedAt: null,
         createdAt: { gte: since },
-        OR: [{ notifiedStatus: null }, { notifiedStatus: { not: 'cancelled' } }],
+        AND: [
+          { OR: [{ closedAt: null }, { closedAt: { gte: closedSince } }] },
+          { OR: [{ notifiedStatus: null }, { notifiedStatus: { not: 'cancelled' } }] },
+        ],
       },
       orderBy: { createdAt: 'desc' },
       take: 6,
+    });
+  }
+
+  latestOfManager(managerId: number): Promise<FinanceRequestCard | null> {
+    return this.prisma.financeRequestCard.findFirst({
+      where: { managerId },
+      orderBy: { createdAt: 'desc' },
     });
   }
 

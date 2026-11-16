@@ -9,6 +9,7 @@ import { FinanceWebhookController } from './finance-webhook.controller';
 import { FinanceWebhookGuard } from './finance-webhook.guard';
 import { FinanceSyncUpdate } from './finance-sync.update';
 import { ManagerActionsService } from './manager-actions.service';
+import { OrderDeletedListener } from './order-deleted.listener';
 import { PendingOrdersRepository } from './pending-orders.repository';
 import { RequestCardsRepository } from './request-cards.repository';
 import { RequestCreateService } from './request-create.service';
@@ -28,6 +29,7 @@ import { RequestSyncService } from './request-sync.service';
     RequestSyncService,
     FinancierActionsService,
     ManagerActionsService,
+    OrderDeletedListener,
     RequestReceiptsService,
     FinanceSyncUpdate,
   ],

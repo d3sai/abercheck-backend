@@ -45,13 +45,14 @@ export class RequestSyncService {
     return managerCard(view, {
       miniAppUrl: this.sender.miniAppUrl,
       payments: storedPayments(card.payments),
-      completed: card.completedAt
-        ? {
-            orderNumbers: await this.orders.numbersByIds(card.orderIds),
-            closed: card.closedAt != null,
-            paidAt: await this.orders.latestPaidAt(card.orderIds),
-          }
-        : false,
+      completed:
+        card.completedAt && view.status !== 'cancelled'
+          ? {
+              orderNumbers: await this.orders.numbersByIds(card.orderIds),
+              closed: card.closedAt != null,
+              paidAt: await this.orders.latestPaidAt(card.orderIds),
+            }
+          : false,
     });
   }
 

@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Currency, OrderStatus, Prisma } from '../../../src/generated/prisma/client';
 import { AdminOrdersService } from '../../../src/modules/admin-orders/admin-orders.service';
+import { OrderEvents } from '../../../src/modules/orders/order.events';
 
 const d = (value: string) => new Prisma.Decimal(value);
 
@@ -33,11 +34,12 @@ describe('AdminOrdersService', () => {
     orderAttachment: { findMany: jest.fn(), deleteMany: jest.fn() },
   };
   const attachments = { discardMessage: jest.fn() };
+  const events = { emit: jest.fn() };
   let service: AdminOrdersService;
   let log: jest.SpyInstance;
 
   beforeEach(() => {
-    service = new AdminOrdersService(prisma as never, attachments as never);
+    service = new AdminOrdersService(prisma as never, attachments as never, events as never);
     prisma.$transaction.mockImplementation((fn: (client: typeof tx) => unknown) => fn(tx));
     log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
   });
@@ -119,6 +121,16 @@ describe('AdminOrdersService', () => {
 
       expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(tx.order.delete).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('should announce the deleted order once it is gone', async () => {
+      await service.remove(NUMBER, dto(), 'tool');
+
+      expect(events.emit).toHaveBeenCalledWith(OrderEvents.Deleted, { orderId: 1 });
+      expect(events.emit.mock.invocationCallOrder[0]).toBeGreaterThan(
+        tx.order.delete.mock.invocationCallOrder[0]!,
+      );
     });
 
     it('should fail with ORDER_NOT_FOUND when the order is missing', async () => {
