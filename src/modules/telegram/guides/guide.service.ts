@@ -3,7 +3,7 @@ import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Context } from 'telegraf';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { GUIDES, GUIDES_DIR } from './guides';
+import { GUIDE_HEIGHT, GUIDE_WIDTH, GUIDES, GUIDES_DIR } from './guides';
 
 @Injectable()
 export class GuideService {
@@ -17,7 +17,12 @@ export class GuideService {
     const path = join(process.cwd(), GUIDES_DIR, guide.file);
     const stat = statSync(path, { throwIfNoEntry: false });
     const stored = await this.prisma.guideVideo.findUnique({ where: { key: guide.key } });
-    const options = { caption: guide.title, supports_streaming: true };
+    const options = {
+      caption: guide.title,
+      supports_streaming: true,
+      width: GUIDE_WIDTH,
+      height: GUIDE_HEIGHT,
+    };
 
     if (
       stored &&

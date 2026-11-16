@@ -58,6 +58,8 @@ describe('GuideService', () => {
       expect.objectContaining({
         caption: '📝 Як створити запит фінансисту',
         supports_streaming: true,
+        width: 1920,
+        height: 1080,
       }),
     );
     const { fileSize, fileMtime } = stored();
