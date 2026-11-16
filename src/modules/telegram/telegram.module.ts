@@ -36,6 +36,7 @@ import { RequisitesDraftService } from './order-draft/requisites-draft.service';
 import { RequisitesDraftStore } from './order-draft/requisites-draft.store';
 import { OrderDeleteService } from './orders-list/order-delete.service';
 import { OrderListService } from './orders-list/order-list.service';
+import { GuideService } from './guides/guide.service';
 import { TelegramSender } from './core/telegram-sender';
 
 @Module({
@@ -82,6 +83,7 @@ import { TelegramSender } from './core/telegram-sender';
     OrderDraftService,
     OrderListService,
     OrderDeleteService,
+    GuideService,
     AdminFlowService,
     DailyReportJob,
   ],

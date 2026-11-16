@@ -51,6 +51,7 @@ import { PrismaService } from '../../../../src/common/prisma/prisma.service';
 import { OrderDeleteService } from '../../../../src/modules/telegram/orders-list/order-delete.service';
 import { OrderListService } from '../../../../src/modules/telegram/orders-list/order-list.service';
 import { DailyReportJob } from '../../../../src/modules/telegram/reports/daily-report.job';
+import { GuideService } from '../../../../src/modules/telegram/guides/guide.service';
 
 const ADMIN_CHAT_ID = -1002286861249;
 const MANAGER_ID = 111;
@@ -84,6 +85,8 @@ const ordersMock = {
 };
 
 const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
+
+const guidesMock = { send: jest.fn() };
 
 @Module({
   providers: [
@@ -125,6 +128,7 @@ const requisitesMock = { addMany: jest.fn(), list: jest.fn() };
     { provide: AttachmentsService, useValue: {} },
     { provide: AdminFlowService, useValue: {} },
     { provide: DailyReportJob, useValue: {} },
+    { provide: GuideService, useValue: guidesMock },
   ],
 })
 class BotTestModule {}
@@ -166,6 +170,7 @@ describe('BotUpdate', () => {
     ordersMock.createGroup.mockReset();
     requisitesMock.addMany.mockReset();
     requisitesMock.list.mockReset().mockResolvedValue([]);
+    guidesMock.send.mockReset();
     loggedErrors = jest.spyOn(ConsoleLogger.prototype, 'error').mockImplementation(() => undefined);
     jest.spyOn(Telegram.prototype, 'callApi').mockImplementation(((
       method: string,
@@ -283,6 +288,35 @@ describe('BotUpdate', () => {
         file_size: 1000,
       },
     });
+
+  describe('video guides', () => {
+    it('should list the guides as buttons on /video', async () => {
+      const replies = await say('/video');
+
+      expect(replies).toHaveLength(1);
+      expect(replies[0]!.reply_markup?.inline_keyboard?.flat().map((b) => b.callback_data)).toEqual(
+        ['guide:request', 'guide:answer', 'guide:cancel'],
+      );
+    });
+
+    it('should point to /video from /help', async () => {
+      const replies = await say('/help');
+
+      expect(replies[0]!.text).toContain('/video');
+    });
+
+    it('should send the chosen guide', async () => {
+      await press('guide:answer');
+
+      expect(guidesMock.send).toHaveBeenCalledWith(expect.anything(), 'answer');
+    });
+
+    it('should not send a guide to someone who is not a manager', async () => {
+      await press('guide:answer', STRANGER_ID);
+
+      expect(guidesMock.send).not.toHaveBeenCalled();
+    });
+  });
 
   describe('the old reply keyboard', () => {
     it.each(['/start', '/help', 'привіт'])(
@@ -544,6 +578,7 @@ describe('BotUpdate bootstrap', () => {
       {} as never,
       {} as never,
       sender as unknown as TelegramSender,
+      {} as never,
     );
     return { sender, update };
   };
@@ -583,6 +618,7 @@ describe('BotUpdate bootstrap', () => {
       'newminus',
       'requisites',
       'cancel',
+      'video',
       'help',
     ]);
     const [adminCommands] = commandCalls()[1]!;

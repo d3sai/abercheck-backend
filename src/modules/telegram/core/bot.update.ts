@@ -9,6 +9,8 @@ import { ADMIN_HELP } from '../admin/admin.update';
 import { MENU_LABEL, NEW_REQUEST_LABEL } from './menu';
 import { DeleteAction, OrderDeleteService } from '../orders-list/order-delete.service';
 import { OrderListService } from '../orders-list/order-list.service';
+import { GuideService } from '../guides/guide.service';
+import { GuideAction, GUIDES_MENU } from '../guides/guides';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
 import { CashAction } from '../order-draft/cash.messages';
 import { ForeignAction } from '../order-draft/foreign.messages';
@@ -37,6 +39,7 @@ export class BotUpdate implements OnApplicationBootstrap {
     private readonly lists: OrderListService,
     private readonly deletions: OrderDeleteService,
     private readonly sender: TelegramSender,
+    private readonly guides: GuideService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -46,6 +49,7 @@ export class BotUpdate implements OnApplicationBootstrap {
         { command: 'newminus', description: 'Закрити мінус' },
         { command: 'requisites', description: 'Кілька номерів або чужі реквізити' },
         { command: 'cancel', description: 'Скасувати' },
+        { command: 'video', description: 'Відео-інструкції' },
         { command: 'help', description: 'Що вміє бот' },
       ],
       { type: 'all_private_chats' },
@@ -88,6 +92,21 @@ export class BotUpdate implements OnApplicationBootstrap {
       await reply(ctx, { html: ADMIN_HELP });
     } else if (isPrivate(ctx)) {
       await reply(ctx, { html: HELP, removeKeyboard: true });
+    }
+  }
+
+  @Command('video')
+  async video(@Ctx() ctx: Context): Promise<void> {
+    if (await this.activeManager(ctx)) {
+      await reply(ctx, GUIDES_MENU);
+    }
+  }
+
+  @Action(GuideAction.Send)
+  async guide(@Ctx() ctx: MatchContext): Promise<void> {
+    if (await this.activeManager(ctx)) {
+      await ctx.answerCbQuery();
+      await this.guides.send(ctx, ctx.match[1]!);
     }
   }
 
