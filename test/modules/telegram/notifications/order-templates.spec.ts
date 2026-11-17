@@ -42,6 +42,7 @@ const manager: Manager = {
   login: null,
   passwordHash: null,
   sessionVersion: 0,
+  keyboardVersion: 0,
   createdAt: new Date(),
 };
 

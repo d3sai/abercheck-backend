@@ -66,24 +66,28 @@ describe('reply', () => {
     expect(options.reply_markup).toEqual({ inline_keyboard: buttons });
   });
 
-  it('should remove the old reply keyboard when removeKeyboard is true, even with buttons given', async () => {
+  it('should show the guides keyboard when keyboard is true, even with buttons given', async () => {
     const { ctx, replyFn } = ctxWith();
     const buttons = [[{ text: 'OK', callback_data: 'ok' }]];
 
-    await reply(ctx, { html: 'text', buttons, removeKeyboard: true });
+    await reply(ctx, { html: 'text', buttons, keyboard: true });
 
     const [, options] = replyFn.mock.calls[0]!;
     expect(options.reply_markup).not.toEqual({ inline_keyboard: buttons });
-    expect(options.reply_markup).toEqual({ remove_keyboard: true });
+    expect(options.reply_markup).toEqual({
+      keyboard: [[{ text: '🎬 Відео-інструкції' }]],
+      resize_keyboard: true,
+      is_persistent: false,
+    });
   });
 
-  it('should force a reply with the given placeholder, taking priority over buttons and removeKeyboard', async () => {
+  it('should force a reply with the given placeholder, taking priority over buttons and keyboard', async () => {
     const { ctx, replyFn } = ctxWith();
 
     await reply(ctx, {
       html: 'text',
       buttons: [[{ text: 'OK', callback_data: 'ok' }]],
-      removeKeyboard: true,
+      keyboard: true,
       forceReply: { placeholder: '0000-066717' },
     });
 

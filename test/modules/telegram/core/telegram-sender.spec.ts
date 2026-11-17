@@ -71,14 +71,18 @@ describe('TelegramSender', () => {
       );
     });
 
-    it('should remove the old reply keyboard instead of attaching buttons when the flag is set', async () => {
+    it('should show the guides keyboard instead of attaching buttons when the flag is set', async () => {
       bot.telegram.sendMessage.mockResolvedValue({});
       const buttons = [[{ text: 'OK', callback_data: 'ok' }]];
 
       await sender.send(111, 'text', buttons, true);
 
       const [, , options] = bot.telegram.sendMessage.mock.calls[0]!;
-      expect(options.reply_markup).toEqual({ remove_keyboard: true });
+      expect(options.reply_markup).toEqual({
+        keyboard: [[{ text: '🎬 Відео-інструкції' }]],
+        resize_keyboard: true,
+        is_persistent: false,
+      });
     });
 
     it('should convert a bigint chat id to a number for the Telegram API', async () => {
@@ -290,7 +294,7 @@ describe('TelegramSender', () => {
       expect(rebuild().miniAppUrl).toBeUndefined();
     });
 
-    it('should never attach a reply keyboard, with or without the Mini App configured', async () => {
+    it('should attach only the guides keyboard, with or without the Mini App configured', async () => {
       bot.telegram.sendMessage.mockResolvedValue({});
       env.FINANCE_API_URL = 'http://finance.local';
       env.MINI_APP_URL = 'https://cab.example.ua/tg/request';
@@ -298,7 +302,11 @@ describe('TelegramSender', () => {
       await rebuild().send(111, 'text', undefined, true);
 
       const options = bot.telegram.sendMessage.mock.calls[0]?.[2];
-      expect(options?.reply_markup).toEqual({ remove_keyboard: true });
+      expect(options?.reply_markup).toEqual({
+        keyboard: [[{ text: '🎬 Відео-інструкції' }]],
+        resize_keyboard: true,
+        is_persistent: false,
+      });
     });
   });
 

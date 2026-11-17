@@ -24,7 +24,7 @@ export const HELP = [
 export function startReply(manager: Manager): BotReply {
   switch (manager.status) {
     case ManagerStatus.ACTIVE:
-      return { html: `Вітаю, ${escapeHtml(manager.name)}! 👋\n\n${HELP}`, removeKeyboard: true };
+      return { html: `Вітаю, ${escapeHtml(manager.name)}! 👋\n\n${HELP}`, keyboard: true };
     case ManagerStatus.PENDING:
       return { html: 'Заявка ще на розгляді. Напишу, щойно її розглянуть.' };
     case ManagerStatus.REJECTED:

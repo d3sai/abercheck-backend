@@ -1,4 +1,4 @@
-import type { ReplyKeyboardRemove } from 'telegraf/types';
+import type { ReplyKeyboardMarkup } from 'telegraf/types';
 
 // The buttons the reply keyboard used to carry. Kept to recognise a press from a keyboard
 // that is still on someone's screen.
@@ -18,5 +18,15 @@ export const MENU_LABEL = {
 // opened from a keyboard button no initData, so the form could not authenticate.
 export const NEW_REQUEST_LABEL = '📝 Новий запит';
 
-// The bot has no reply keyboard any more; this clears the old one from existing users' chats.
-export const removeKeyboard: ReplyKeyboardRemove = { remove_keyboard: true };
+export const GUIDES_LABEL = '🎬 Відео-інструкції';
+
+// Replaces the old reply keyboard in existing users' chats; the user can collapse it.
+export const mainKeyboard: ReplyKeyboardMarkup = {
+  keyboard: [[{ text: GUIDES_LABEL }]],
+  resize_keyboard: true,
+  is_persistent: false,
+};
+
+// Bump to push mainKeyboard to every active manager on the next restart.
+export const KEYBOARD_VERSION = 1;
+export const KEYBOARD_NOTICE = `Відео-інструкції тепер під кнопкою «${GUIDES_LABEL}» внизу. Сховати кнопку можна іконкою ⌨️ біля поля введення.`;

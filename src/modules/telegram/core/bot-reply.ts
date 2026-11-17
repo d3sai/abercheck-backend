@@ -7,8 +7,8 @@ export interface BotReply {
   html: string;
   buttons?: InlineKeyboardButton[][];
   forceReply?: { placeholder: string };
-  /** Clears the old reply keyboard from the chat. */
-  removeKeyboard?: boolean;
+  /** Shows the reply keyboard with the guides button. */
+  keyboard?: boolean;
 }
 
 export const button = (text: string, callbackData: string): InlineKeyboardButton => ({

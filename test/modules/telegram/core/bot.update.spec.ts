@@ -22,7 +22,14 @@ import { RequisitesService } from '../../../../src/modules/requisites/requisites
 import { AdminFlowService } from '../../../../src/modules/telegram/admin/admin-flow.service';
 import { AdminUpdate } from '../../../../src/modules/telegram/admin/admin.update';
 import { BotUpdate } from '../../../../src/modules/telegram/core/bot.update';
-import { MENU_LABEL, NEW_REQUEST_LABEL } from '../../../../src/modules/telegram/core/menu';
+import {
+  GUIDES_LABEL,
+  KEYBOARD_NOTICE,
+  KEYBOARD_VERSION,
+  MENU_LABEL,
+  NEW_REQUEST_LABEL,
+  mainKeyboard,
+} from '../../../../src/modules/telegram/core/menu';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import {
   CashDraftService,
@@ -117,6 +124,7 @@ const guidesMock = { send: jest.fn() };
         findActiveByTelegramId: (telegramId: bigint) =>
           Promise.resolve(telegramId === manager.telegramId ? manager : null),
         requestAccess: () => Promise.resolve({ manager, isNew: false }),
+        withOldKeyboard: () => Promise.resolve([]),
       },
     },
     { provide: OrdersService, useValue: ordersMock },
@@ -318,29 +326,38 @@ describe('BotUpdate', () => {
     });
   });
 
-  describe('the old reply keyboard', () => {
+  describe('the reply keyboard', () => {
     it.each(['/start', '/help', 'привіт'])(
-      'should be removed, not replaced, in reply to %s',
+      'should be replaced with the guides keyboard in reply to %s',
       async (text) => {
         const replies = await say(text);
 
         expect(replies).toHaveLength(1);
-        expect(replies[0]!.reply_markup).toEqual({ remove_keyboard: true });
+        expect(replies[0]!.reply_markup).toEqual(mainKeyboard);
         expect(replies[0]!.text).toContain(NEW_REQUEST_LABEL);
       },
     );
 
     it.each(Object.values(MENU_LABEL))(
-      'should be removed when its stale button %s is pressed',
+      'should be replaced when its stale button %s is pressed',
       async (label) => {
         const replies = await say(label);
 
         expect(replies).toHaveLength(1);
-        expect(replies[0]!.reply_markup).toEqual({ remove_keyboard: true });
+        expect(replies[0]!.reply_markup).toEqual(mainKeyboard);
         expect(replies[0]!.text).toContain(NEW_REQUEST_LABEL);
         expect(ordersMock.create).not.toHaveBeenCalled();
       },
     );
+
+    it('should list the guides when its button is pressed', async () => {
+      const replies = await say(GUIDES_LABEL);
+
+      expect(replies).toHaveLength(1);
+      expect(replies[0]!.reply_markup?.inline_keyboard?.flat().map((b) => b.callback_data)).toEqual(
+        ['guide:request', 'guide:answer', 'guide:cancel'],
+      );
+    });
 
     it('should send someone who is not a manager to /start from a stale button', async () => {
       const replies = await say(MENU_LABEL.Cancel, {
@@ -571,16 +588,21 @@ describe('BotUpdate bootstrap', () => {
       adminChatId: ADMIN_CHAT_ID,
       registerCommands: jest.fn().mockResolvedValue(undefined),
       setDefaultMenuButton: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(1),
+    };
+    const managers = {
+      withOldKeyboard: jest.fn().mockResolvedValue([]),
+      markKeyboard: jest.fn().mockResolvedValue(undefined),
     };
     const update = new BotUpdate(
-      {} as never,
+      managers as unknown as ManagersService,
       {} as never,
       {} as never,
       {} as never,
       sender as unknown as TelegramSender,
       {} as never,
     );
-    return { sender, update };
+    return { sender, managers, update };
   };
 
   it('should make «Новий запит» the default menu button when MINI_APP_URL is set', async () => {
@@ -593,6 +615,20 @@ describe('BotUpdate bootstrap', () => {
       text: '📝 Новий запит',
       url: 'https://cab.example.ua/tg/request',
     });
+  });
+
+  it('should push the guides keyboard to managers who have the old one and remember it', async () => {
+    const { sender, managers, update } = build();
+    managers.withOldKeyboard.mockResolvedValue([manager, { ...manager, id: 2, telegramId: 333n }]);
+    sender.send.mockResolvedValueOnce(10).mockResolvedValueOnce(null);
+
+    await update.onApplicationBootstrap();
+
+    expect(managers.withOldKeyboard).toHaveBeenCalledWith(KEYBOARD_VERSION);
+    expect(sender.send).toHaveBeenCalledWith(manager.telegramId, KEYBOARD_NOTICE, undefined, true);
+    expect(sender.send).toHaveBeenCalledWith(333n, KEYBOARD_NOTICE, undefined, true);
+    expect(managers.markKeyboard).toHaveBeenCalledTimes(1);
+    expect(managers.markKeyboard).toHaveBeenCalledWith(manager.id, KEYBOARD_VERSION);
   });
 
   it('should reset the menu button to the commands menu without MINI_APP_URL', async () => {

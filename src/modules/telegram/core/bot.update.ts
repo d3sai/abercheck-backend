@@ -6,7 +6,13 @@ import type { Manager } from '../../../generated/prisma/client';
 import { ManagersService } from '../../managers/managers.service';
 import { HELP, NOT_A_MANAGER, newManagerNotice, startReply } from '../access/access.messages';
 import { ADMIN_HELP } from '../admin/admin.update';
-import { MENU_LABEL, NEW_REQUEST_LABEL } from './menu';
+import {
+  GUIDES_LABEL,
+  KEYBOARD_NOTICE,
+  KEYBOARD_VERSION,
+  MENU_LABEL,
+  NEW_REQUEST_LABEL,
+} from './menu';
 import { DeleteAction, OrderDeleteService } from '../orders-list/order-delete.service';
 import { OrderListService } from '../orders-list/order-list.service';
 import { GuideService } from '../guides/guide.service';
@@ -68,6 +74,11 @@ export class BotUpdate implements OnApplicationBootstrap {
     await this.sender.setDefaultMenuButton(
       this.sender.miniAppUrl ? { text: NEW_REQUEST_LABEL, url: this.sender.miniAppUrl } : null,
     );
+    for (const manager of await this.managers.withOldKeyboard(KEYBOARD_VERSION)) {
+      if (await this.sender.send(manager.telegramId, KEYBOARD_NOTICE, undefined, true)) {
+        await this.managers.markKeyboard(manager.id, KEYBOARD_VERSION);
+      }
+    }
   }
 
   @Start()
@@ -91,7 +102,7 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (ctx.chat?.id === this.sender.adminChatId) {
       await reply(ctx, { html: ADMIN_HELP });
     } else if (isPrivate(ctx)) {
-      await reply(ctx, { html: HELP, removeKeyboard: true });
+      await reply(ctx, { html: HELP, keyboard: true });
     }
   }
 
@@ -338,11 +349,15 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (!manager) {
       return;
     }
+    if (ctx.text === GUIDES_LABEL) {
+      await reply(ctx, GUIDES_MENU);
+      return;
+    }
     // a press of a button from the old reply keyboard: clear the keyboard and point at the new one
     const answer = LEGACY_BUTTONS.has(ctx.text)
       ? null
       : await this.drafts.handleText(manager, ctx.text);
-    await reply(ctx, answer ?? { html: HELP, removeKeyboard: true });
+    await reply(ctx, answer ?? { html: HELP, keyboard: true });
   }
 
   @On('document')

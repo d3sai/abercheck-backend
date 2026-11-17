@@ -44,6 +44,7 @@ describe('AuthService', () => {
     login: null,
     passwordHash: null,
     sessionVersion: 0,
+    keyboardVersion: 0,
     createdAt: new Date('2026-09-01T00:00:00Z'),
   };
   const telegramLogin = {

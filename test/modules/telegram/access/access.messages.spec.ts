@@ -16,6 +16,7 @@ const manager = (overrides: Partial<Manager> = {}): Manager => ({
   login: null,
   passwordHash: null,
   sessionVersion: 0,
+  keyboardVersion: 0,
   createdAt: new Date(),
   ...overrides,
 });
@@ -43,12 +44,12 @@ describe('newManagerNotice', () => {
 });
 
 describe('startReply', () => {
-  it('should greet an active manager with the help text and clears the old keyboard', () => {
+  it('should greet an active manager with the help text and the guides keyboard', () => {
     const reply = startReply(manager({ status: ManagerStatus.ACTIVE }));
 
     expect(reply.html).toContain('Вітаю, Христина!');
     expect(reply.html).toContain(HELP);
-    expect(reply.removeKeyboard).toBe(true);
+    expect(reply.keyboard).toBe(true);
     expect(reply.html).toContain('Новий запит');
   });
 
@@ -56,7 +57,7 @@ describe('startReply', () => {
     const reply = startReply(manager({ status: ManagerStatus.PENDING }));
 
     expect(reply.html).toContain('ще на розгляді');
-    expect(reply.removeKeyboard).toBeUndefined();
+    expect(reply.keyboard).toBeUndefined();
   });
 
   it('should tell a rejected manager access was not granted', () => {
