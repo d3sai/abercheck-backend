@@ -49,7 +49,12 @@ describe('MiniappController', () => {
   const finance = { get: jest.fn(), edit: jest.fn() };
   const cards = { byRequestId: jest.fn() };
   const sync = { renderManager: jest.fn(), renderGroup: jest.fn() };
-  const completion = { complete: jest.fn(), markPaid: jest.fn() };
+  const completion = {
+    complete: jest.fn(),
+    markPaid: jest.fn(),
+    addPayments: jest.fn(),
+    progress: jest.fn(),
+  };
   const directOrders = {};
   const pendingOrders = { submit: jest.fn() };
   const controller = new MiniappController(
@@ -397,8 +402,10 @@ describe('MiniappController', () => {
         completed: false,
         closed: false,
         payments: [],
+        progress: null,
       });
       expect(finance.get).toHaveBeenCalledWith('req1');
+      expect(completion.progress).not.toHaveBeenCalled();
     });
 
     it('should return the stored payments as Kyiv date and time', async () => {
@@ -746,6 +753,43 @@ describe('MiniappController', () => {
     });
   });
 
+  describe('payments', () => {
+    it('should pass the manager, the id and the body to the completion service', async () => {
+      const dto = { payments: [{ amount: '50000', date: '2026-11-18' }] };
+      completion.addPayments.mockResolvedValue({ paid: '50000.00', due: '200000.00' });
+
+      await expect(controller.payments(manager, 'req1', dto)).resolves.toEqual({
+        paid: '50000.00',
+        due: '200000.00',
+      });
+      expect(completion.addPayments).toHaveBeenCalledWith(manager, 'req1', dto);
+    });
+  });
+
+  describe('progress', () => {
+    it('should give the paid sum of a completed our_fop', async () => {
+      cards.byRequestId.mockResolvedValue({ ...card, completedAt: new Date(), orderIds: [10] });
+      finance.get.mockResolvedValue({ request: { ...view, kind: 'our_fop' } });
+      completion.progress.mockResolvedValue({
+        paid: new Prisma.Decimal('50000'),
+        due: new Prisma.Decimal('200000'),
+      });
+
+      const answer = await controller.get(manager, 'req1');
+
+      expect(completion.progress).toHaveBeenCalledWith([10]);
+      expect(answer.progress).toEqual({ paid: '50000.00', due: '200000.00' });
+    });
+
+    it('should give none for a completed card request', async () => {
+      cards.byRequestId.mockResolvedValue({ ...card, completedAt: new Date(), orderIds: [10] });
+      finance.get.mockResolvedValue({ request: { ...view, kind: 'card' } });
+
+      await expect(controller.get(manager, 'req1')).resolves.toMatchObject({ progress: null });
+      expect(completion.progress).not.toHaveBeenCalled();
+    });
+  });
+
   describe('completed flag', () => {
     it('should report completed once the card has a completedAt', async () => {
       cards.byRequestId.mockResolvedValue({ ...card, completedAt: new Date() });
@@ -773,6 +817,7 @@ describe('MiniappController', () => {
         completed: false,
         closed: false,
         payments: [],
+        progress: null,
       });
     });
 

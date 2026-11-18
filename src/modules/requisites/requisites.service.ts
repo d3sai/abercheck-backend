@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { OrderRequisite } from '../../generated/prisma/client';
+import { type OrderRequisite, Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Initiator } from '../refunds/refund.events';
 
@@ -45,6 +45,21 @@ export class RequisitesService {
       where: { orderId: { in: orderIds }, paidAt: null },
       data: { paidAt },
     });
+  }
+
+  /** What the payments of the orders add up to against what the orders are due. */
+  async progress(orderIds: number[]): Promise<{ paid: Prisma.Decimal; due: Prisma.Decimal }> {
+    const [payments, orders] = await Promise.all([
+      this.prisma.orderRequisite.aggregate({
+        where: { orderId: { in: orderIds } },
+        _sum: { amount: true },
+      }),
+      this.prisma.order.aggregate({ where: { id: { in: orderIds } }, _sum: { amountDue: true } }),
+    ]);
+    return {
+      paid: payments._sum.amount ?? new Prisma.Decimal(0),
+      due: orders._sum.amountDue ?? new Prisma.Decimal(0),
+    };
   }
 
   list(orderId: number): Promise<OrderRequisite[]> {

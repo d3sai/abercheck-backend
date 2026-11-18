@@ -1,4 +1,4 @@
-import type { FinanceRequestCard } from '../../../src/generated/prisma/client';
+import { type FinanceRequestCard, Prisma } from '../../../src/generated/prisma/client';
 import type { FinanceClient } from '../../../src/modules/finance-sync/finance.client';
 import {
   FinanceApiError,
@@ -8,6 +8,7 @@ import {
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import { RequestSyncService } from '../../../src/modules/finance-sync/request-sync.service';
 import type { OrdersService } from '../../../src/modules/orders/orders.service';
+import type { RequisitesService } from '../../../src/modules/requisites/requisites.service';
 import type { ManagersService } from '../../../src/modules/managers/managers.service';
 import type { TelegramSender } from '../../../src/modules/telegram/core/telegram-sender';
 
@@ -56,12 +57,14 @@ describe('RequestSyncService', () => {
     setManagerMessage: jest.fn(),
   };
   const managers = { findById: jest.fn() };
+  const requisites = { progress: jest.fn() };
   const service = new RequestSyncService(
     sender as unknown as TelegramSender,
     finance as unknown as FinanceClient,
     cards as unknown as RequestCardsRepository,
     managers as unknown as ManagersService,
     orders as unknown as OrdersService,
+    requisites as unknown as RequisitesService,
   );
 
   beforeEach(() => {
@@ -71,6 +74,10 @@ describe('RequestSyncService', () => {
     sender.send.mockResolvedValue(77);
     sender.sendDocument.mockResolvedValue(78);
     managers.findById.mockResolvedValue({ name: 'Уляна' });
+    requisites.progress.mockResolvedValue({
+      paid: new Prisma.Decimal(0),
+      due: new Prisma.Decimal(0),
+    });
     sender.miniAppUrl = undefined;
   });
   afterEach(() => jest.resetAllMocks());
@@ -183,6 +190,7 @@ describe('RequestSyncService', () => {
         view({ status: 'accepted', kind: 'card' }),
       );
 
+      expect(requisites.progress).not.toHaveBeenCalled();
       expect(orders.numbersByIds).toHaveBeenCalledWith([10, 11]);
       const [, , html, buttons] = edit();
       expect(html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
@@ -226,20 +234,43 @@ describe('RequestSyncService', () => {
       expect(orders.numbersByIds).not.toHaveBeenCalled();
     });
 
-    it('should offer «Оплачено» on a completed our_fop that is still open', async () => {
+    it('should show the paid sum and offer «Додати оплату» on a completed our_fop that is still open', async () => {
       sender.miniAppUrl = URL_;
       orders.numbersByIds.mockResolvedValue(['0000-1']);
+      requisites.progress.mockResolvedValue({
+        paid: new Prisma.Decimal('50000'),
+        due: new Prisma.Decimal('200000'),
+      });
 
       await service.renderManager(
         { ...card, completedAt: new Date(), closedAt: null, orderIds: [10] },
         view({ status: 'accepted', kind: 'our_fop' }),
       );
 
+      expect(requisites.progress).toHaveBeenCalledWith([10]);
+      expect(edit()[2]).toContain('💰 Оплачено 50 000 грн з 200 000 грн · залишок 150 000 грн');
       expect(
         edit()[3]!
           .flat()
           .map((b) => b.text),
-      ).toEqual(['💰 Оплачено', '📎 Прикріпити файли', '🗑 Скасувати № 0000-1']);
+      ).toEqual(['➕ Додати оплату', '📎 Прикріпити файли', '🗑 Скасувати № 0000-1']);
+    });
+
+    it('should draw a closed our_fop without payments the old way', async () => {
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      orders.latestPaidAt.mockResolvedValue(new Date('2026-11-04T12:30:00.000Z'));
+      requisites.progress.mockResolvedValue({
+        paid: new Prisma.Decimal('0'),
+        due: new Prisma.Decimal('200000'),
+      });
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10] },
+        view({ status: 'accepted', kind: 'our_fop' }),
+      );
+
+      expect(edit()[2]).not.toContain('💰 Оплачено 0');
+      expect(edit()[2]).toContain('✅ Оплачено 04.11.2026 14:30');
     });
 
     it('should show when a completed our_fop was paid', async () => {

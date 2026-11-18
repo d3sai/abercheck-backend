@@ -12,6 +12,7 @@ import {
   type RequestKind,
   type RequestWarning,
 } from './finance.types';
+import { paymentProgressLine } from './payment-report';
 import type { StoredPayment } from './stored-payments';
 
 export const FinanceAction = {
@@ -190,8 +191,18 @@ export interface ManagerCardOptions {
   miniAppUrl?: string;
   /** The payments stored at creation: part of the ready text the manager accepts. */
   payments?: StoredPayment[];
-  /** The card's real state: set once the manager completed the request. */
-  completed?: { orderNumbers: string[]; closed?: boolean; paidAt?: Date | null } | false;
+  /**
+   * The card's real state: set once the manager completed the request. `progress` (our_fop, foreign_fop)
+   * replaces the payment date with the paid sum.
+   */
+  completed?:
+    | {
+        orderNumbers: string[];
+        closed?: boolean;
+        paidAt?: Date | null;
+        progress?: { paid: Prisma.Decimal; due: Prisma.Decimal };
+      }
+    | false;
 }
 
 export const webApp = (text: string, miniAppUrl: string, mode: string, id: string) => {
@@ -275,10 +286,19 @@ export function managerCard(view: FinanceRequestView, opts: ManagerCardOptions =
   if (completed) {
     const lines = [...body(view), '', completedLine(completed.orderNumbers)];
     lines.push(ATTACH_HINT);
-    if (completed.paidAt) lines.push(`✅ Оплачено ${dateTime(completed.paidAt)}`);
+    const { progress } = completed;
+    if (progress) lines.push(paymentProgressLine(progress.paid, progress.due));
+    else if (completed.paidAt) lines.push(`✅ Оплачено ${dateTime(completed.paidAt)}`);
     // the date is given in the completion form; «Оплачено» is left for what was completed without one
-    const paid =
-      miniAppUrl && !completed.paidAt ? [webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)] : [];
+    const paid = !miniAppUrl
+      ? []
+      : progress
+        ? completed.closed
+          ? []
+          : [webApp('➕ Додати оплату', miniAppUrl, 'paid', view.id)]
+        : completed.paidAt
+          ? []
+          : [webApp('💰 Оплачено', miniAppUrl, 'paid', view.id)];
     return {
       html: lines.join('\n'),
       buttons: [

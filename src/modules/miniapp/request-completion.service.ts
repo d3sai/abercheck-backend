@@ -18,6 +18,11 @@ import {
   paysAfterConfirm,
   type RequestKind,
 } from '../finance-sync/finance.types';
+import {
+  paymentReportMessage,
+  type ReportedPayment,
+  UNNAMED_PAYER,
+} from '../finance-sync/payment-report';
 import { managerCard } from '../finance-sync/request-card.messages';
 import { RequestCardsRepository } from '../finance-sync/request-cards.repository';
 import { RequestReceiptsService } from '../finance-sync/request-receipts.service';
@@ -36,6 +41,7 @@ import { adminMinusMessage } from '../telegram/order-draft/minus-closing.message
 import { adminRequisitesMessage } from '../telegram/order-draft/requisites.messages';
 import type { PlanItem, RequisitesPlan } from '../telegram/order-draft/requisites.parser';
 import {
+  type AddPaymentsMiniappDto,
   type CompleteMiniappRequestDto,
   fromStored,
   type PaidMiniappRequestDto,
@@ -58,6 +64,8 @@ interface Made {
   skipped: string[];
   /** The admin notice that still has to go out; our_fop's and foreign_fop's go out through the order events. */
   notice: string | null;
+  /** our_fop, foreign_fop: the payments given in the form, reported in reply to the notice. */
+  report?: string | null;
 }
 
 /** What the creators report while they work, so a failure after the orders exist loses nothing. */
@@ -148,6 +156,29 @@ const latest = (payments: Payment[]): Date | null =>
     (best, { paidAt }) => (paidAt && (!best || paidAt > best) ? paidAt : best),
     null,
   );
+
+/** When the client first paid: the date an order of payments in parts carries. */
+const earliest = (payments: Payment[]): Date | null =>
+  payments.reduce<Date | null>(
+    (best, { paidAt }) => (paidAt && (!best || paidAt < best) ? paidAt : best),
+    null,
+  );
+
+const sumOf = (amounts: (string | Prisma.Decimal)[]): Prisma.Decimal =>
+  amounts.reduce<Prisma.Decimal>((sum, amount) => sum.plus(amount), new Prisma.Decimal(0));
+
+const reported = (payment: Payment): ReportedPayment => ({
+  payerName: payment.payerName ?? UNNAMED_PAYER,
+  amount: new Prisma.Decimal(payment.amount),
+  paidAt: payment.paidAt,
+});
+
+const requisiteOf = (payment: Payment) => ({
+  payerName: payment.payerName ?? UNNAMED_PAYER,
+  account: payment.account,
+  amount: new Prisma.Decimal(payment.amount).toFixed(2),
+  paidAt: payment.paidAt,
+});
 
 @Injectable()
 export class RequestCompletionService {
@@ -253,6 +284,84 @@ export class RequestCompletionService {
     return { paidAt: paidAt.toISOString() };
   }
 
+  /**
+   * «➕ Додати оплату» of our_fop and foreign_fop: the payments go to the request's first order, a report
+   * to «Оплати», and the task closes once they reach the orders' sum.
+   */
+  async addPayments(
+    manager: Manager,
+    requestId: string,
+    body: AddPaymentsMiniappDto,
+  ): Promise<{ paid: string; due: string }> {
+    const card = await this.cards.byRequestId(requestId);
+    if (card?.managerId !== manager.id) throw notFound();
+    const firstId = card.completedAt ? card.orderIds[0] : undefined;
+    if (firstId === undefined) {
+      throw apiError(HttpStatus.CONFLICT, 'not-completed', 'Запит ще не оформлено');
+    }
+    let view: FinanceRequestView;
+    try {
+      view = (await this.finance.get(requestId)).request;
+    } catch (error) {
+      throw financeError(error);
+    }
+    if (!paysAfterConfirm(view.kind)) {
+      throw apiError(
+        HttpStatus.CONFLICT,
+        'not-pay-later',
+        'Для цього запиту оплату вносять під час оформлення',
+      );
+    }
+    const payments = toPayments(view.kind!, body.payments);
+    if (payments.length === 0) {
+      throw apiError(HttpStatus.BAD_REQUEST, 'invalid-request', 'Додайте хоча б один платіж.');
+    }
+    const before = await this.requisites.progress(card.orderIds);
+    if (!before.paid.lessThan(before.due)) {
+      throw apiError(HttpStatus.CONFLICT, 'fully-paid', 'Запит уже оплачено повністю');
+    }
+
+    await this.requisites.addMany(firstId, payments.map(requisiteOf), initiatorOf(manager));
+    await this.orders.fillPaidAt(card.orderIds, earliest(payments)!);
+    const { paid, due } = await this.requisites.progress(card.orderIds);
+    const reached = !paid.lessThan(due);
+    if (reached)
+      await this.safely(requestId, 'closing', () => this.cards.claimClosing(requestId, new Date()));
+
+    // the payments are stored: nothing below may fail the answer
+    const orderNumbers = await this.orders.numbersByIds(card.orderIds).catch(() => []);
+    await this.safely(requestId, 'payment report', async () => {
+      const first = await this.orders.findById(firstId);
+      const report = paymentReportMessage({
+        orderNumbers,
+        clientName: first?.clientName ?? '',
+        managerName: manager.name,
+        added: payments.map(reported),
+        paid,
+        due,
+      });
+      const replyTo = first?.adminMessageId ?? null;
+      await this.sender.sendToTopic(
+        'payments',
+        report,
+        undefined,
+        replyTo === null ? {} : { replyTo },
+      );
+    });
+    await this.safely(requestId, 'manager card', () =>
+      this.markCompleted(card, view, orderNumbers, null, card.closedAt != null || reached, {
+        paid,
+        due,
+      }),
+    );
+    return { paid: paid.toFixed(2), due: due.toFixed(2) };
+  }
+
+  /** What the payments of a request's orders add up to against what the orders are due. */
+  progress(orderIds: number[]): Promise<{ paid: Prisma.Decimal; due: Prisma.Decimal }> {
+    return this.requisites.progress(orderIds);
+  }
+
   /** Files from the Mini App go to the request's first order, like a receipt replied to the card. */
   async addFiles(
     manager: Manager,
@@ -295,9 +404,18 @@ export class RequestCompletionService {
     // finance keeps its own numbers; only the orders take the overrides
     const view = withOverrides(requested, input);
     const live = view.kind === 'minus' ? null : await this.liveItems(view, input.addPart);
+    // our_fop and foreign_fop stay open until their payments reach the orders' sum
+    const sums =
+      live && paysAfterConfirm(view.kind)
+        ? {
+            paid: sumOf(payments.map((payment) => payment.amount)),
+            due: sumOf(live.items.map((item) => item.amount)),
+          }
+        : null;
+    const close = !sums?.paid.lessThan(sums.due);
 
     // atomic: of two parallel completions only one may create orders
-    if (!(await this.cards.claimCompletion(requestId, new Date(), true))) {
+    if (!(await this.cards.claimCompletion(requestId, new Date(), close))) {
       throw apiError(HttpStatus.CONFLICT, 'already-completed', 'Запит уже оформлено');
     }
 
@@ -348,9 +466,7 @@ export class RequestCompletionService {
       made.notice.length <= TELEGRAM_CAPTION_LIMIT &&
       made.orders[0] !== undefined &&
       (await this.cards.heldFiles(requestId)).length > 0;
-    if (!merged) {
-      await this.safely(requestId, 'admin notice', () => this.sendNotice(made));
-    }
+    let noticeId = merged ? null : await this.announce(requestId, made);
     // a receipt held before this point is found here; one sent after the ids is attached at once
     const receiptsAttached = await this.safely(requestId, 'held receipts', async () => {
       if (made.orders[0]) {
@@ -364,24 +480,46 @@ export class RequestCompletionService {
     });
     // the files did not go: the notice must not get lost with them
     if (merged && !receiptsAttached) {
-      await this.safely(requestId, 'admin notice', () => this.sendNotice(made));
+      noticeId = await this.announce(requestId, made);
     }
     if (!receiptsAttached) note = [note, RECEIPTS_NOTE].filter(Boolean).join(' ');
+    const report = made.report;
+    if (report) {
+      await this.safely(requestId, 'payment report', () =>
+        this.sender.sendToTopic(
+          'payments',
+          report,
+          undefined,
+          noticeId === null ? {} : { replyTo: noticeId },
+        ),
+      );
+    }
     await this.safely(requestId, 'manager card', () =>
-      this.markCompleted(card, requested, orderNumbers, latest(payments)),
+      this.markCompleted(card, requested, orderNumbers, latest(payments), close, sums),
     );
     return { orderNumbers, skipped: made.skipped, ...(note && { note }) };
   }
 
   /** The notice goes to «Оплати»; its message id stays on the orders so deleting one can remove it. */
-  private async sendNotice(made: Made): Promise<void> {
-    if (!made.notice) return;
+  private async sendNotice(made: Made): Promise<number | null> {
+    if (!made.notice) return null;
     const messageId = await this.sender.sendToAdmins(made.notice);
     if (messageId !== null && made.orders.length > 0) {
       await this.orders.setAdminMessageId(
         made.orders.map((order) => order.id),
         messageId,
       );
+    }
+    return messageId;
+  }
+
+  /** Like `safely`, but keeps the id of the notice for the payment report to reply to. */
+  private async announce(requestId: string, made: Made): Promise<number | null> {
+    try {
+      return await this.sendNotice(made);
+    } catch (error) {
+      this.logger.error(`Request ${requestId}: admin notice failed`, error);
+      return null;
     }
   }
 
@@ -417,25 +555,30 @@ export class RequestCompletionService {
   ): Promise<Made> {
     if (live === null) return this.createMinus(manager, view, payments[0]!, progress);
     return paysAfterConfirm(view.kind)
-      ? this.createPayLater(manager, view, payments[0], live, progress)
+      ? this.createPayLater(manager, view, payments, live, progress)
       : this.createRequisites(manager, view, payments, live, progress);
   }
 
   private async createPayLater(
     manager: Manager,
     view: FinanceRequestView,
-    payment: Payment | undefined,
+    payments: Payment[],
     { items, skipped, addPart: part }: LiveItems,
     progress: Progress,
   ): Promise<Made> {
     progress.skipped = skipped;
+    // with payments the notice goes from here, so the payment report can reply to it
+    const announced = progress.heldReceipts || payments.length > 0;
+    const notices = (orders: Order[]) =>
+      orders.map((order) => adminOrderCreatedMessage(order, manager)).join('\n\n');
+    if (announced) progress.fallbackNotice = notices;
     const common = {
       clientName: view.fopLabel ?? (view.kind === 'foreign_fop' ? 'Чужий ФОП' : 'Наш ФОП'),
       currency: Currency.UAH,
       exchangeRate: view.exchangeRate ?? undefined,
       comment: view.comment ?? undefined,
-      // the client may not have paid yet: no date until «💰 Оплачено»
-      paidAt: payment?.paidAt ?? undefined,
+      // the client may not have paid yet: no date until «➕ Додати оплату»
+      paidAt: earliest(payments) ?? undefined,
     };
     const orders =
       items.length === 1
@@ -449,7 +592,7 @@ export class RequestCompletionService {
                 orderNumber: items[0]!.number,
                 amountDue: items[0]!.amount.toFixed(2),
               },
-              { notify: !progress.heldReceipts, addPart: part },
+              { notify: !announced, addPart: part },
             ),
           ]
         : await this.orders.createGroup(
@@ -460,13 +603,22 @@ export class RequestCompletionService {
               exchangeRate: item.rate ?? undefined,
             })),
             common,
-            { notify: !progress.heldReceipts },
+            { notify: !announced },
           );
     progress.created.push(...orders);
-    const notice = progress.heldReceipts
-      ? orders.map((order) => adminOrderCreatedMessage(order, manager)).join('\n\n')
-      : null;
-    return { orders, skipped, notice };
+    if (payments.length === 0) {
+      return { orders, skipped, notice: announced ? notices(orders) : null };
+    }
+    await this.requisites.addMany(orders[0]!.id, payments.map(requisiteOf), initiatorOf(manager));
+    const report = paymentReportMessage({
+      orderNumbers: orders.map((order) => order.orderNumber),
+      clientName: orders[0]!.clientName,
+      managerName: manager.name,
+      added: payments.map(reported),
+      paid: sumOf(payments.map((payment) => payment.amount)),
+      due: sumOf(orders.map((order) => order.amountDue)),
+    });
+    return { orders, skipped, notice: notices(orders), report };
   }
 
   private async createRequisites(
@@ -567,11 +719,13 @@ export class RequestCompletionService {
     view: FinanceRequestView,
     orderNumbers: string[],
     paidAt: Date | null,
+    closed: boolean,
+    progress: { paid: Prisma.Decimal; due: Prisma.Decimal } | null,
   ): Promise<void> {
     if (card.managerMessageId === null) return;
     const { html, buttons } = managerCard(view, {
       miniAppUrl: this.sender.miniAppUrl,
-      completed: { orderNumbers, closed: true, paidAt },
+      completed: { orderNumbers, closed, paidAt, ...(progress && { progress }) },
     });
     await this.sender.editMessage(card.managerChatId, card.managerMessageId, html, buttons);
   }

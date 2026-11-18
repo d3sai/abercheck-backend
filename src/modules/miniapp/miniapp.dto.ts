@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -184,6 +185,16 @@ export class CompleteMiniappRequestDto {
   addPart?: boolean;
 }
 
+/** «➕ Додати оплату» of our_fop and foreign_fop: what the client paid since. */
+export class AddPaymentsMiniappDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_PAYMENTS)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentRowDto)
+  payments!: PaymentRowDto[];
+}
+
 export class PaidMiniappRequestDto {
   @IsString()
   @MaxLength(10)
@@ -339,8 +350,8 @@ const notInFuture = (paid: Date, now: Date): Date => {
 
 /**
  * The date is required, the time is not (the day then starts at Kyiv midnight); a new request carries
- * none (`dated` false): it is asked when the manager accepts. Several rows only for card. Never in the
- * future.
+ * none (`dated` false): it is asked when the manager accepts. A minus takes one row; our_fop and
+ * foreign_fop may take none, as the client may not have paid yet. Never in the future.
  */
 export function toPayments(
   kind: RequestKind,
@@ -349,10 +360,13 @@ export function toPayments(
   dated = true,
 ): Payment[] {
   const withPayers = kind === 'card';
-  if (rows.length < 1 || rows.length > MAX_PAYMENTS) {
-    throw invalid(`Додайте від 1 до ${MAX_PAYMENTS} платежів.`);
+  const least = paysAfterConfirm(kind) ? 0 : 1;
+  if (rows.length < least || rows.length > MAX_PAYMENTS) {
+    throw invalid(`Додайте від ${least} до ${MAX_PAYMENTS} платежів.`);
   }
-  if (!withPayers && rows.length > 1) throw invalid('Для цього запиту потрібна одна дата оплати.');
+  if (kind === 'minus' && rows.length > 1) {
+    throw invalid('Для цього запиту потрібна одна дата оплати.');
+  }
   return rows.map((row) => {
     // the date is asked after the financier accepts, in the completion form
     const date = dated ? text(row.date) : null;

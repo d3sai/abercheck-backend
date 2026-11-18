@@ -1,3 +1,4 @@
+import { Prisma } from '../../../src/generated/prisma/client';
 import type {
   FinanceFops,
   FinanceRequestView,
@@ -398,6 +399,41 @@ describe('managerCard with the Mini App', () => {
       CANCEL('0000-1'),
     ]);
     expect(reply.html).not.toContain('закрито');
+  });
+
+  it('completed our_fop with progress: the sum line and «Додати оплату» while it is open', () => {
+    const reply = managerCard(accepted(), {
+      miniAppUrl,
+      completed: {
+        orderNumbers: ['0000-1'],
+        closed: false,
+        paidAt: new Date('2026-11-04T12:30:00.000Z'),
+        progress: { paid: new Prisma.Decimal('50000'), due: new Prisma.Decimal('200000') },
+      },
+    });
+
+    expect(all(reply)).toEqual([
+      [{ text: '➕ Додати оплату', web_app: { url: `${miniAppUrl}?mode=paid&id=${ID}` } }, ATTACH],
+      CANCEL('0000-1'),
+    ]);
+    expect(reply.html.split('\n').at(-1)).toBe(
+      '💰 Оплачено 50 000 грн з 200 000 грн · залишок 150 000 грн',
+    );
+    expect(reply.html).not.toContain('✅ Оплачено 04.11.2026');
+  });
+
+  it('completed our_fop with progress, closed: the sum line and no «Додати оплату»', () => {
+    const reply = managerCard(accepted(), {
+      miniAppUrl,
+      completed: {
+        orderNumbers: ['0000-1'],
+        closed: true,
+        progress: { paid: new Prisma.Decimal('200000'), due: new Prisma.Decimal('200000') },
+      },
+    });
+
+    expect(all(reply)).toEqual([[ATTACH], CANCEL('0000-1')]);
+    expect(reply.html).toContain('✅ Оплачено повністю: 200 000 грн');
   });
 
   it('completed our_fop without the URL: no button', () => {

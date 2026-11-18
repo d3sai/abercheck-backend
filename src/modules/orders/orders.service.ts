@@ -288,6 +288,14 @@ export class OrdersService {
     await this.prisma.order.updateMany({ where: { id: { in: ids } }, data: { paidAt } });
   }
 
+  /** The first payment dates the orders: later ones leave it as it is. */
+  async fillPaidAt(ids: number[], paidAt: Date): Promise<void> {
+    await this.prisma.order.updateMany({
+      where: { id: { in: ids }, paidAt: null },
+      data: { paidAt },
+    });
+  }
+
   /** The message of the orders' notice in «Оплати»: deleting an order removes it from the chat. */
   async setAdminMessageId(ids: number[], adminMessageId: number): Promise<void> {
     await this.prisma.order.updateMany({ where: { id: { in: ids } }, data: { adminMessageId } });
