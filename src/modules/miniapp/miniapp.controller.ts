@@ -37,6 +37,7 @@ import { MiniappManager, MiniappAuthGuard } from './miniapp-auth.guard';
 import {
   CompleteMiniappRequestDto,
   CreateMiniappOrderDto,
+  AddPaymentsMiniappDto,
   CreateMiniappRequestDto,
   EditMiniappRequestDto,
   PaidMiniappRequestDto,
@@ -62,6 +63,8 @@ interface RequestResponse {
     date: string | null;
     time: string | null;
   }[];
+  /** A completed our_fop or foreign_fop: what its payments add up to against the orders' sum. */
+  progress: { paid: string; due: string } | null;
 }
 
 const CREATE_STATUS = {
@@ -136,7 +139,7 @@ export class MiniappController {
   async get(@MiniappManager() manager: Manager, @Param('id') id: string): Promise<RequestResponse> {
     const card = await this.ownCard(manager, id);
     try {
-      return this.response(manager, card, (await this.finance.get(id)).request);
+      return await this.response(manager, card, (await this.finance.get(id)).request);
     } catch (error) {
       throw financeError(error);
     }
@@ -187,6 +190,16 @@ export class MiniappController {
     return this.completion.markPaid(manager, id, dto);
   }
 
+  @Post('requests/:id/payments')
+  @HttpCode(HttpStatus.OK)
+  payments(
+    @MiniappManager() manager: Manager,
+    @Param('id') id: string,
+    @Body() dto: AddPaymentsMiniappDto,
+  ): Promise<{ paid: string; due: string }> {
+    return this.completion.addPayments(manager, id, dto);
+  }
+
   /** Files for the request's first order; the cabinet's type and size rules, errors in its shape. */
   @Post('requests/:id/files')
   @UseFilters(DomainErrorFilter)
@@ -206,11 +219,15 @@ export class MiniappController {
     return card;
   }
 
-  private response(
+  private async response(
     manager: Manager,
     card: FinanceRequestCard,
     request: FinanceRequestView,
-  ): RequestResponse {
+  ): Promise<RequestResponse> {
+    const progress =
+      card.completedAt != null && paysAfterConfirm(request.kind)
+        ? await this.completion.progress(card.orderIds)
+        : null;
     return {
       request,
       managerName: manager.name,
@@ -229,6 +246,7 @@ export class MiniappController {
         const { hour, minute } = kyivParts(paidAt);
         return { ...base, date: kyivDate(paidAt), time: `${hour}:${minute}` };
       }),
+      progress: progress && { paid: progress.paid.toFixed(2), due: progress.due.toFixed(2) },
     };
   }
 }

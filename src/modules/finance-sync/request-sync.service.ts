@@ -2,10 +2,16 @@ import { Injectable } from '@nestjs/common';
 import type { FinanceRequestCard } from '../../generated/prisma/client';
 import { ManagersService } from '../managers/managers.service';
 import { OrdersService } from '../orders/orders.service';
+import { RequisitesService } from '../requisites/requisites.service';
 import { escapeHtml } from '../telegram/core/format';
 import { TelegramSender } from '../telegram/core/telegram-sender';
 import { FinanceClient } from './finance.client';
-import { type FinanceEvent, type FinanceFops, type FinanceRequestView } from './finance.types';
+import {
+  type FinanceEvent,
+  type FinanceFops,
+  type FinanceRequestView,
+  paysAfterConfirm,
+} from './finance.types';
 import { groupCard, managerCard } from './request-card.messages';
 import { RequestCardsRepository } from './request-cards.repository';
 import { storedPayments } from './stored-payments';
@@ -22,6 +28,7 @@ export class RequestSyncService {
     private readonly cards: RequestCardsRepository,
     private readonly managers: ManagersService,
     private readonly orders: OrdersService,
+    private readonly requisites: RequisitesService,
   ) {}
 
   /** The webhook is only a hint: redraw both cards from the re-read view, then relay what is new. */
@@ -42,17 +49,24 @@ export class RequestSyncService {
   }
 
   private async managerReply(card: FinanceRequestCard, view: FinanceRequestView) {
+    const completed = card.completedAt != null && view.status !== 'cancelled';
+    const progress =
+      completed && paysAfterConfirm(view.kind)
+        ? await this.requisites.progress(card.orderIds)
+        : null;
     return managerCard(view, {
       miniAppUrl: this.sender.miniAppUrl,
       payments: storedPayments(card.payments),
-      completed:
-        card.completedAt && view.status !== 'cancelled'
-          ? {
-              orderNumbers: await this.orders.numbersByIds(card.orderIds),
-              closed: card.closedAt != null,
-              paidAt: await this.orders.latestPaidAt(card.orderIds),
-            }
-          : false,
+      completed: completed
+        ? {
+            orderNumbers: await this.orders.numbersByIds(card.orderIds),
+            closed: card.closedAt != null,
+            paidAt: await this.orders.latestPaidAt(card.orderIds),
+            // closed before payments were recorded: drawn with its date, as it was
+            ...(progress &&
+              (card.closedAt == null || progress.paid.greaterThan(0)) && { progress }),
+          }
+        : false,
     });
   }
 

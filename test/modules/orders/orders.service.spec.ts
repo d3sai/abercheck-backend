@@ -587,6 +587,20 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('fillPaidAt', () => {
+    it('should stamp the date only on the orders that have none', async () => {
+      const paidAt = new Date('2026-11-04T12:30:00.000Z');
+      order.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.fillPaidAt([3, 4], paidAt);
+
+      expect(order.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [3, 4] }, paidAt: null },
+        data: { paidAt },
+      });
+    });
+  });
+
   describe('latestPaidAt', () => {
     it('should return the latest payment date of the orders', async () => {
       const paidAt = new Date('2026-11-04T12:30:00.000Z');

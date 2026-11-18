@@ -1,9 +1,11 @@
 import { PrismaService } from '../../../src/common/prisma/prisma.service';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { RequisitesService } from '../../../src/modules/requisites/requisites.service';
 
 describe('RequisitesService', () => {
-  const orderRequisite = { create: jest.fn(), findMany: jest.fn() };
-  const prisma = { orderRequisite };
+  const orderRequisite = { create: jest.fn(), findMany: jest.fn(), aggregate: jest.fn() };
+  const order = { aggregate: jest.fn() };
+  const prisma = { orderRequisite, order };
   const service = new RequisitesService(prisma as unknown as PrismaService);
 
   afterEach(() => jest.resetAllMocks());
@@ -53,6 +55,34 @@ describe('RequisitesService', () => {
 
       expect(created).toEqual([]);
       expect(orderRequisite.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('progress', () => {
+    it('should sum the payments and the amounts due of the orders', async () => {
+      orderRequisite.aggregate.mockResolvedValue({ _sum: { amount: new Prisma.Decimal('80000') } });
+      order.aggregate.mockResolvedValue({ _sum: { amountDue: new Prisma.Decimal('200000') } });
+
+      const { paid, due } = await service.progress([10, 11]);
+
+      expect(orderRequisite.aggregate).toHaveBeenCalledWith({
+        where: { orderId: { in: [10, 11] } },
+        _sum: { amount: true },
+      });
+      expect(order.aggregate).toHaveBeenCalledWith({
+        where: { id: { in: [10, 11] } },
+        _sum: { amountDue: true },
+      });
+      expect([paid.toFixed(2), due.toFixed(2)]).toEqual(['80000.00', '200000.00']);
+    });
+
+    it('should count nothing as zero', async () => {
+      orderRequisite.aggregate.mockResolvedValue({ _sum: { amount: null } });
+      order.aggregate.mockResolvedValue({ _sum: { amountDue: null } });
+
+      const { paid, due } = await service.progress([10]);
+
+      expect([paid.toFixed(2), due.toFixed(2)]).toEqual(['0.00', '0.00']);
     });
   });
 
