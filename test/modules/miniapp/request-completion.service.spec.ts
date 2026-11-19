@@ -660,18 +660,20 @@ describe('RequestCompletionService', () => {
       expect(cards.claimCompletion).not.toHaveBeenCalled();
     });
 
-    it('should answer 400 without a payer name', async () => {
+    it('should take a payment without a payer as «Не вказано»', async () => {
       view('card', { orders: [orderRow('0000-070217', '1000')] });
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
 
-      const error = await failure(
-        service.complete(
-          manager,
-          'req1',
-          body([{ amount: '1000', date: '2026-11-04', time: '10:00' }]),
-        ),
+      await service.complete(
+        manager,
+        'req1',
+        body([{ amount: '1000', date: '2026-11-04', time: '10:00' }]),
       );
 
-      expect(error.status).toBe(HttpStatus.BAD_REQUEST);
+      expect(callArg(orders.create, 1)).toMatchObject({ clientName: 'Не вказано' });
+      expect(callArg(requisites.addMany, 1)).toEqual([
+        expect.objectContaining({ payerName: 'Не вказано', amount: '1000.00' }),
+      ]);
     });
   });
 

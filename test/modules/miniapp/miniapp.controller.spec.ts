@@ -321,10 +321,6 @@ describe('MiniappController', () => {
       ['our_fop with a payment', { kind: 'our_fop', orders: [order] }],
       ['foreign_fop with a payment', { kind: 'foreign_fop', orders: [order] }],
       [
-        'card without a payer name',
-        { kind: 'card', orders: [order], payments: [{ ...paid, payerName: ' ' }] },
-      ],
-      [
         'card with eleven payments',
         { kind: 'card', orders: [order], payments: Array(11).fill(paid) },
       ],
