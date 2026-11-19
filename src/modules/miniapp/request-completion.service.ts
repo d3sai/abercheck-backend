@@ -637,11 +637,11 @@ export class RequestCompletionService {
       total: items.reduce((sum, item) => sum.plus(item.amount), new Prisma.Decimal(0)),
       derivedTotal: false,
       rate: (items.length === 1 ? items[0]?.rate : null) ?? view.exchangeRate,
-      label: payments[0]!.payerName!,
+      label: payments[0]!.payerName ?? UNNAMED_PAYER,
       warnings: [],
       comment: view.comment,
       requisiteLines: payments.map((payment) => ({
-        payerName: payment.payerName!,
+        payerName: payment.payerName ?? UNNAMED_PAYER,
         account: payment.account,
         amount: new Prisma.Decimal(payment.amount).toFixed(2),
         paidAt: payment.paidAt,

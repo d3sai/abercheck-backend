@@ -359,7 +359,6 @@ export function toPayments(
   now = new Date(),
   dated = true,
 ): Payment[] {
-  const withPayers = kind === 'card';
   const least = paysAfterConfirm(kind) ? 0 : 1;
   if (rows.length < least || rows.length > MAX_PAYMENTS) {
     throw invalid(`Додайте від ${least} до ${MAX_PAYMENTS} платежів.`);
@@ -371,10 +370,8 @@ export function toPayments(
     // the date is asked after the financier accepts, in the completion form
     const date = dated ? text(row.date) : null;
     if (dated && date === null) throw invalid('Вкажіть дату оплати.');
-    const payerName = text(row.payerName);
-    if (withPayers && payerName === null) throw invalid('Вкажіть, хто платив.');
     return {
-      payerName,
+      payerName: text(row.payerName),
       account: text(row.account),
       amount: money(row.amount),
       paidAt: date === null ? null : notInFuture(paidAt(date, text(row.time)), now),
