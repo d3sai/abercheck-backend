@@ -553,7 +553,7 @@ export class RequestCompletionService {
     live: LiveItems | null,
     progress: Progress,
   ): Promise<Made> {
-    if (live === null) return this.createMinus(manager, view, payments[0]!, progress);
+    if (live === null) return this.createMinus(manager, view, payments, progress);
     return paysAfterConfirm(view.kind)
       ? this.createPayLater(manager, view, payments, live, progress)
       : this.createRequisites(manager, view, payments, live, progress);
@@ -664,23 +664,27 @@ export class RequestCompletionService {
   private async createMinus(
     manager: Manager,
     view: FinanceRequestView,
-    payment: Payment,
+    payments: Payment[],
     progress: Progress,
   ): Promise<Made> {
     const client = view.clientLabel ?? '';
+    const described =
+      payments.length > 1 ||
+      payments.some((payment) => (payment.payerName ?? payment.account ?? null) !== null);
     const percent =
       view.withPercent === null ? null : `з урахуванням %: ${view.withPercent ? 'так' : 'ні'}`;
+    progress.fallbackNotice = (orders) => adminMinusMessage(orders[0]!, manager.name, []);
     const { order, added } = await createMinusOrder(
       { orders: this.orders, requisites: this.requisites },
       manager,
       {
         clientName: client,
         period: null,
-        paidAt: payment.paidAt,
+        paidAt: earliest(payments),
         currency: Currency.UAH,
         total: new Prisma.Decimal(view.sum),
         ourFop: view.fopLabel,
-        requisiteLines: [],
+        requisiteLines: described ? payments.map(requisiteOf) : [],
         comment: [view.comment, percent].filter(Boolean).join(' · ') || null,
         rate: view.exchangeRate,
         sheetUrl: view.sheetUrl,
