@@ -1,3 +1,4 @@
+import { OrderVerificationService } from '../../../src/modules/telegram/verification/order-verification.service';
 import { Test } from '@nestjs/testing';
 import { ApiError } from '../../../src/common/api-error';
 import { PrismaService } from '../../../src/common/prisma/prisma.service';
@@ -129,6 +130,7 @@ describe('DirectOrdersService', () => {
         { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
         { provide: PrismaService, useValue: prisma },
+        { provide: OrderVerificationService, useValue: { attachControls: jest.fn() } },
       ],
     }).compile();
     service = moduleRef.get(DirectOrdersService);

@@ -1,3 +1,4 @@
+import { OrderVerificationService } from '../../../src/modules/telegram/verification/order-verification.service';
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
@@ -47,9 +48,11 @@ class ManagersStub {}
     { provide: KitDraftService, useValue: {} },
     { provide: CashDraftService, useValue: {} },
     { provide: ForeignDraftService, useValue: {} },
+    { provide: OrderVerificationService, useValue: {} },
   ],
   exports: [
     TelegramSender,
+    OrderVerificationService,
     KitDraftService,
     CashDraftService,
     ForeignDraftService,

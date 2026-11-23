@@ -62,6 +62,9 @@ export class OrderDeleteService {
       ...(order.adminMessageId === null ? [] : [order.adminMessageId]),
       ...order.attachments.map((file) => file.telegramMessageId),
     ];
+    if (order.verifyMessageId !== null && !messageIds.includes(order.verifyMessageId)) {
+      messageIds.push(order.verifyMessageId);
+    }
     await Promise.all(messageIds.map((id) => this.sender.deleteAdminMessage(id)));
     return { html: `🗑 Замовлення № <b>${escapeHtml(order.orderNumber)}</b> видалено.` };
   }

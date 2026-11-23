@@ -263,7 +263,7 @@ export function receiptCaption(
     ...(payment.account ? [escapeHtml(clip(payment.account))] : []),
     `Сума: ${money(payment.amount.toFixed(2))}`,
     ...(payment.paidAt ? [`Дата оплати: ${dateTime(payment.paidAt)}`] : []),
-    `Додав: ${escapeHtml(uploaderName)} · ${dateTime(new Date())}`,
+    `Завантажено: ${escapeHtml(uploaderName)} · ${dateTime(new Date())}`,
   ].join('\n');
 }
 

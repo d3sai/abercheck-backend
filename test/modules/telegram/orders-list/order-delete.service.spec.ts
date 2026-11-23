@@ -11,6 +11,7 @@ const found = (overrides: Record<string, unknown> = {}) => ({
   status: OrderStatus.AWAITING_PAYMENT,
   managerId: 7,
   adminMessageId: 500,
+  verifyMessageId: 500,
   attachments: [{ telegramMessageId: 501 }, { telegramMessageId: 502 }],
   _count: { payments: 0, refunds: 0 },
   ...overrides,
@@ -73,8 +74,30 @@ describe('OrderDeleteService', () => {
       expect(reply.html).toContain('видалено');
     });
 
+    it('should also remove the «🔎 Звірка» message of an album', async () => {
+      prisma.order.findUnique.mockResolvedValue(found({ verifyMessageId: 503 }));
+
+      await service.confirm(manager, '1234-567890');
+
+      expect((sender.deleteAdminMessage.mock.calls as number[][]).map(([id]) => id)).toEqual([
+        500, 501, 502, 503,
+      ]);
+    });
+
+    it('should not delete the buttons twice when they sit on the notice or a file', async () => {
+      prisma.order.findUnique.mockResolvedValue(found({ verifyMessageId: 502 }));
+
+      await service.confirm(manager, '1234-567890');
+
+      expect((sender.deleteAdminMessage.mock.calls as number[][]).map(([id]) => id)).toEqual([
+        500, 501, 502,
+      ]);
+    });
+
     it('should skip the notice message when none was stored', async () => {
-      prisma.order.findUnique.mockResolvedValue(found({ adminMessageId: null, attachments: [] }));
+      prisma.order.findUnique.mockResolvedValue(
+        found({ adminMessageId: null, verifyMessageId: null, attachments: [] }),
+      );
 
       await service.confirm(manager, '1234-567890');
 

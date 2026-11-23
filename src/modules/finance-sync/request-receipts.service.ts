@@ -1,7 +1,12 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import type { Context } from 'telegraf';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import type { Manager, Order, OrderRequisite } from '../../generated/prisma/client';
+import type {
+  Manager,
+  Order,
+  OrderAttachment,
+  OrderRequisite,
+} from '../../generated/prisma/client';
 import { AttachmentStorageError } from '../attachments/attachments.errors';
 import {
   ALLOWED_MIME_TYPES,
@@ -484,10 +489,10 @@ export class RequestReceiptsService {
     requestId: string,
     order: Order,
     caption?: string,
-  ): Promise<void> {
+  ): Promise<number | null> {
     const held = await this.cards.heldFiles(requestId);
-    if (held.length === 0) return;
-    await this.attach(
+    if (held.length === 0) return null;
+    const saved = await this.attach(
       manager,
       order,
       held.map(({ fileId, filename, mimeType, size, kind }) => ({
@@ -500,6 +505,7 @@ export class RequestReceiptsService {
       caption,
     );
     await this.cards.deleteHeldFiles(held.map(({ id }) => id));
+    return saved.at(-1)?.telegramMessageId ?? null;
   }
 
   // group orders attach their files the same way: kept in the storage chat even if the order is deleted
@@ -508,7 +514,7 @@ export class RequestReceiptsService {
     order: Order,
     files: TelegramFileRef[],
     caption?: string,
-  ): Promise<unknown> {
+  ): Promise<OrderAttachment[]> {
     return this.attachments.saveFromTelegram(
       order,
       files,

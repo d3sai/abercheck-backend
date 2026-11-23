@@ -89,7 +89,7 @@ export class MinusClosingDraftService {
     if (files.length > 0) {
       await this.notifier.notify(order, manager, files, notice);
     } else {
-      await this.sender.sendToAdmins(notice);
+      await this.notifier.notice([order], notice);
     }
     return minusCreatedReply(order);
   }

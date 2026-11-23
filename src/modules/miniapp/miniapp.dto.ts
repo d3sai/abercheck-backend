@@ -281,6 +281,7 @@ export function toCreateInput(dto: CreateMiniappRequestDto, now = new Date()): C
   if (!clientLabel) throw invalid('Вкажіть клієнта.');
   const sum = money(dto.sum);
   const payments = toPayments('minus', dto.payments ?? [], now, false);
+  if (payments.length > 1) throw invalid('Для цього запиту потрібна одна дата оплати.');
   if (!new Prisma.Decimal(payments[0]!.amount).equals(sum)) {
     throw invalid('Сума платежу має дорівнювати сумі мінусу.');
   }
@@ -350,7 +351,7 @@ const notInFuture = (paid: Date, now: Date): Date => {
 
 /**
  * The date is required, the time is not (the day then starts at Kyiv midnight); a new request carries
- * none (`dated` false): it is asked when the manager accepts. A minus takes one row; our_fop and
+ * none (`dated` false): it is asked when the manager accepts. A new minus takes one row; our_fop and
  * foreign_fop may take none, as the client may not have paid yet. Never in the future.
  */
 export function toPayments(
@@ -362,9 +363,6 @@ export function toPayments(
   const least = paysAfterConfirm(kind) ? 0 : 1;
   if (rows.length < least || rows.length > MAX_PAYMENTS) {
     throw invalid(`Додайте від ${least} до ${MAX_PAYMENTS} платежів.`);
-  }
-  if (kind === 'minus' && rows.length > 1) {
-    throw invalid('Для цього запиту потрібна одна дата оплати.');
   }
   return rows.map((row) => {
     // the date is asked after the financier accepts, in the completion form

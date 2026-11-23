@@ -58,6 +58,7 @@ import { PrismaService } from '../../../../src/common/prisma/prisma.service';
 import { OrderDeleteService } from '../../../../src/modules/telegram/orders-list/order-delete.service';
 import { OrderListService } from '../../../../src/modules/telegram/orders-list/order-list.service';
 import { DailyReportJob } from '../../../../src/modules/telegram/reports/daily-report.job';
+import { OrderVerificationService } from '../../../../src/modules/telegram/verification/order-verification.service';
 import { GuideService } from '../../../../src/modules/telegram/guides/guide.service';
 
 const ADMIN_CHAT_ID = -1002286861249;
@@ -117,7 +118,7 @@ const guidesMock = { send: jest.fn() };
     DraftAttachmentNotifier,
     OrderListService,
     { provide: OrderDeleteService, useValue: {} },
-    { provide: PrismaService, useValue: {} },
+    { provide: PrismaService, useValue: { order: { updateMany: jest.fn() } } },
     {
       provide: ManagersService,
       useValue: {
@@ -136,6 +137,7 @@ const guidesMock = { send: jest.fn() };
     { provide: AttachmentsService, useValue: {} },
     { provide: AdminFlowService, useValue: {} },
     { provide: DailyReportJob, useValue: {} },
+    { provide: OrderVerificationService, useValue: { attachControls: jest.fn() } },
     { provide: GuideService, useValue: guidesMock },
   ],
 })

@@ -8,6 +8,7 @@ import {
   acceptRefusal,
   groupCard,
   managerCard,
+  receiptCaption,
 } from '../../../src/modules/finance-sync/request-card.messages';
 
 const ID = 'cmabcdefghij0123456789xyz';
@@ -665,5 +666,23 @@ describe('acceptRefusal', () => {
     expect(
       acceptRefusal('fop-foreign-project', { project: 'я'.repeat(500) }).length,
     ).toBeLessThanOrEqual(200);
+  });
+});
+
+describe('receiptCaption', () => {
+  it('should tell the upload time from the payment time', () => {
+    const caption = receiptCaption(
+      '0000-066717',
+      {
+        payerName: 'Вальчук Влад',
+        account: '5175477414177590',
+        amount: new Prisma.Decimal('3030'),
+        paidAt: new Date('2026-11-20T23:30:00Z'),
+      },
+      'Христина',
+    );
+
+    expect(caption).toContain('Дата оплати: 21.11.2026 01:30');
+    expect(caption).toMatch(/Завантажено: Христина · \d\d\.\d\d\.\d{4} \d\d:\d\d/);
   });
 });

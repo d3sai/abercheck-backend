@@ -4,10 +4,12 @@ import type { OrderCreated } from '../../../../src/modules/orders/order.events';
 import { PrismaService } from '../../../../src/common/prisma/prisma.service';
 import { OrderNotifier } from '../../../../src/modules/telegram/notifications/order-notifier';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
+import { OrderVerificationService } from '../../../../src/modules/telegram/verification/order-verification.service';
 
 describe('OrderNotifier', () => {
   const prisma = { manager: { findUniqueOrThrow: jest.fn() }, order: { update: jest.fn() } };
   const sender = { sendToAdmins: jest.fn() };
+  const verification = { attachControls: jest.fn() };
   let notifier: OrderNotifier;
 
   const event: OrderCreated = {
@@ -26,6 +28,12 @@ describe('OrderNotifier', () => {
       period: null,
       sheetUrl: null,
       adminMessageId: null,
+      verifiedAt: null,
+      verifiedByName: null,
+      problem: null,
+      problemAt: null,
+      problemByName: null,
+      verifyMessageId: null,
       orderType: 'REGULAR',
       status: 'AWAITING_PAYMENT',
       managerId: 7,
@@ -40,6 +48,7 @@ describe('OrderNotifier', () => {
         OrderNotifier,
         { provide: PrismaService, useValue: prisma },
         { provide: TelegramSender, useValue: sender },
+        { provide: OrderVerificationService, useValue: verification },
       ],
     }).compile();
 
@@ -66,6 +75,22 @@ describe('OrderNotifier', () => {
       where: { id: 1 },
       data: { adminMessageId: 555 },
     });
+  });
+
+  it('should put the verify buttons on the notice', async () => {
+    sender.sendToAdmins.mockResolvedValue(555);
+
+    await notifier.onCreated(event);
+
+    expect(verification.attachControls).toHaveBeenCalledWith([event.order], 555);
+  });
+
+  it('should still offer the verify buttons when the notice did not go', async () => {
+    sender.sendToAdmins.mockResolvedValue(null);
+
+    await notifier.onCreated(event);
+
+    expect(verification.attachControls).toHaveBeenCalledWith([event.order], null);
   });
 
   it('should not store anything when the admin message could not be sent', async () => {

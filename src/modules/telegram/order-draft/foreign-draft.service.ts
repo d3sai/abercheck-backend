@@ -119,7 +119,7 @@ export class ForeignDraftService {
         ? (created ?? (await this.orders.findWithBalance(plan.number))?.order)
         : undefined;
     if (fileOrder) {
-      await this.notifier.notify(fileOrder, manager, files, notice);
+      await this.notifier.notify(fileOrder, manager, files, notice, created ? [created] : []);
     } else {
       await this.notifier.notice(created ? [created] : [], notice);
     }

@@ -13,6 +13,7 @@ import {
   CashDraftStore,
 } from '../../../../src/modules/telegram/order-draft/cash-draft.service';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
+import { OrderVerificationService } from '../../../../src/modules/telegram/verification/order-verification.service';
 import {
   ForeignDraftService,
   ForeignDraftStore,
@@ -59,6 +60,8 @@ describe('OrderDraftService', () => {
   const payments = { findByExternalId: jest.fn(), ingest: jest.fn() };
   const attachments = { saveFromTelegram: jest.fn() };
   const sender = { sendToAdmins: jest.fn(), send: jest.fn() };
+  const verification = { attachControls: jest.fn() };
+  const prismaOrder = { update: jest.fn(), updateMany: jest.fn() };
   let service: OrderDraftService;
 
   const file = (filename = 'screenshot.png') => ({
@@ -123,10 +126,8 @@ describe('OrderDraftService', () => {
         { provide: PaymentsService, useValue: payments },
         { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
-        {
-          provide: PrismaService,
-          useValue: { order: { update: jest.fn(), updateMany: jest.fn() } },
-        },
+        { provide: OrderVerificationService, useValue: verification },
+        { provide: PrismaService, useValue: { order: prismaOrder } },
       ],
     }).compile();
 
@@ -681,6 +682,7 @@ UA549358710000067320000088286"`;
 
     it('should create several numbers as one group, as a REGULAR order, with no requisites of their own', async () => {
       orders.createGroup.mockResolvedValue(groupOrders());
+      sender.sendToAdmins.mockResolvedValue(1);
       await begin(GROUP);
 
       const reply = await service.confirmRequisites(MANAGER);
@@ -701,6 +703,11 @@ UA549358710000067320000088286"`;
       );
       expect(requisites.addMany).not.toHaveBeenCalled();
       expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
+      expect(verification.attachControls).toHaveBeenCalledWith(groupOrders(), 1);
+      expect(prismaOrder.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: groupOrders().map((order) => order.id) } },
+        data: { adminMessageId: 1 },
+      });
       expect(sender.sendToAdmins).toHaveBeenCalledWith(
         expect.stringContaining('Разом: 1 912,82 грн'),
       );
@@ -922,6 +929,7 @@ UA549358710000067320000088286"`;
 
     it('should attach the files to the first order and merge the notice into their caption', async () => {
       orders.createGroup.mockResolvedValue(groupOrders());
+      attachments.saveFromTelegram.mockResolvedValue([{ telegramMessageId: 61 }]);
       service.startRequisites(USER);
       await service.addFile(MANAGER, file());
       await service.handleText(MANAGER, GROUP);
@@ -936,6 +944,7 @@ UA549358710000067320000088286"`;
         expect.stringContaining('Разом: 1 912,82 грн'),
       );
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
+      expect(verification.attachControls).toHaveBeenCalledWith(groupOrders(), 61);
     });
 
     describe('when a number is already in the system', () => {
@@ -1090,6 +1099,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
     it('should preview the message in the template, then create the closing with every field', async () => {
       orders.create.mockResolvedValue(closing());
+      sender.sendToAdmins.mockResolvedValue(5);
 
       const preview = await begin(EXAMPLE);
       expect(preview?.html).toContain('Клієнт: <b>Гук Руслан</b> за підрахунком 31 серпня 2026');
@@ -1119,6 +1129,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       const [[notice]] = sender.sendToAdmins.mock.calls as [[string]];
       expect(notice).toContain('Закриття заборгованості клієнта</b>\n№ <b>1789996839638</b>');
       expect(notice).toContain('№ <b>1789996839638</b>');
+      expect(verification.attachControls).toHaveBeenCalledWith([closing()], 5);
     });
 
     it('should store card payments as requisites of the closing', async () => {

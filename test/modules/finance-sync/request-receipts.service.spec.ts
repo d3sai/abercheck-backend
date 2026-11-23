@@ -243,10 +243,20 @@ describe('RequestReceiptsService', () => {
       expect(cards.deleteHeldFiles).toHaveBeenCalledWith([1, 2]);
     });
 
+    it('should answer the message that carries the caption', async () => {
+      cards.heldFiles.mockResolvedValue([row(1, 'photo'), row(2, 'photo')]);
+      attachments.saveFromTelegram.mockResolvedValue([
+        { telegramMessageId: 40 },
+        { telegramMessageId: 41 },
+      ]);
+
+      await expect(service.attachHeld(manager, 'req1', order, 'notice')).resolves.toBe(41);
+    });
+
     it('should do nothing when no receipt was held', async () => {
       cards.heldFiles.mockResolvedValue([]);
 
-      await service.attachHeld(manager, 'req1', order);
+      await expect(service.attachHeld(manager, 'req1', order)).resolves.toBeNull();
 
       expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
       expect(cards.deleteHeldFiles).not.toHaveBeenCalled();

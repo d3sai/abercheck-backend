@@ -106,6 +106,26 @@ export class TelegramSender {
     }
   }
 
+  async editButtons(
+    chatId: number | bigint,
+    messageId: number,
+    buttons: InlineKeyboardButton[][],
+  ): Promise<boolean> {
+    try {
+      await this.bot.telegram.editMessageReplyMarkup(Number(chatId), messageId, undefined, {
+        inline_keyboard: buttons,
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof Error && /message is not modified/i.test(error.message)) return true;
+      this.logger.warn(
+        `Failed to edit the buttons of message ${messageId} in chat ${chatId}`,
+        error,
+      );
+      return false;
+    }
+  }
+
   async deleteMessage(chatId: number | bigint, messageId: number): Promise<void> {
     await this.bot.telegram
       .deleteMessage(Number(chatId), messageId)

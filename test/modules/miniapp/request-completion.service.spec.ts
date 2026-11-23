@@ -18,6 +18,7 @@ import {
 import type { RequestReceiptsService } from '../../../src/modules/finance-sync/request-receipts.service';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import type { CompleteMiniappRequestDto } from '../../../src/modules/miniapp/miniapp.dto';
+import { OrderVerificationService } from '../../../src/modules/telegram/verification/order-verification.service';
 import { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
 import { OrderNumberTakenError } from '../../../src/modules/orders/orders.errors';
 import type { OrdersService } from '../../../src/modules/orders/orders.service';
@@ -137,6 +138,7 @@ describe('RequestCompletionService', () => {
     editMessage: jest.fn(),
   };
   const receipts = { attachHeld: jest.fn() };
+  const verification = { attachControls: jest.fn() };
   const service = new RequestCompletionService(
     finance as unknown as FinanceClient,
     cards as unknown as RequestCardsRepository,
@@ -145,6 +147,7 @@ describe('RequestCompletionService', () => {
     sender as unknown as TelegramSender,
     receipts as unknown as RequestReceiptsService,
     { save: jest.fn() } as unknown as AttachmentsService,
+    verification as unknown as OrderVerificationService,
   );
 
   let logError: jest.SpyInstance;
@@ -368,6 +371,15 @@ describe('RequestCompletionService', () => {
         });
         expect(logError).toHaveBeenCalled();
       });
+    });
+
+    it('should leave the verify buttons to the notice the orders send themselves', async () => {
+      view('our_fop', one);
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.complete(manager, 'req1', body([]));
+
+      expect(verification.attachControls).not.toHaveBeenCalled();
     });
 
     it('should complete without payments: no date, no rows, no report, the task open', async () => {
@@ -728,6 +740,10 @@ describe('RequestCompletionService', () => {
       await service.complete(manager, 'req1', body([row]));
 
       expect(orders.setAdminMessageId).toHaveBeenCalledWith([10], 77);
+      expect(verification.attachControls).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: 10 })],
+        77,
+      );
     });
 
     it('should start the day at Kyiv midnight when the manager gives no time', async () => {
@@ -743,13 +759,100 @@ describe('RequestCompletionService', () => {
       );
     });
 
-    it('should answer 400 for more than one payment row', async () => {
-      view('minus', { clientLabel: 'Іваненко' });
+    it('should keep a lone payment with no payer as the date only', async () => {
+      view('minus', { clientLabel: 'Гук Руслан' });
+      orders.create.mockResolvedValue(order(10, 'MC-1', { orderType: OrderType.MINUS_CLOSING }));
 
-      const error = await failure(service.complete(manager, 'req1', body([row, row])));
+      await service.complete(manager, 'req1', body([row]));
 
-      expect(error.status).toBe(HttpStatus.BAD_REQUEST);
-      expect(cards.claimCompletion).not.toHaveBeenCalled();
+      expect(requisites.addMany).not.toHaveBeenCalled();
+    });
+
+    it('should store every receipt with its own time, the order dated by the first', async () => {
+      view('minus', { clientLabel: 'Вівчарук Валентин' });
+      orders.create.mockResolvedValue(order(10, 'MC-1', { orderType: OrderType.MINUS_CLOSING }));
+
+      await service.complete(
+        manager,
+        'req1',
+        body([
+          { amount: '600', date: '2026-11-04', time: '09:05' },
+          {
+            payerName: 'Вальчук Влад',
+            account: '5175477414177590',
+            amount: '400',
+            date: '2026-11-03',
+            time: '01:30',
+          },
+        ]),
+      );
+
+      expect(orders.create).toHaveBeenCalledWith(
+        4,
+        expect.objectContaining({ paidAt: kyivDateTime(2026, 11, 3, 1, 30) }),
+        { notify: false },
+      );
+      expect(requisites.addMany).toHaveBeenCalledWith(
+        10,
+        [
+          {
+            payerName: 'Не вказано',
+            account: null,
+            amount: '600.00',
+            paidAt: kyivDateTime(2026, 11, 4, 9, 5),
+          },
+          {
+            payerName: 'Вальчук Влад',
+            account: '5175477414177590',
+            amount: '400.00',
+            paidAt: kyivDateTime(2026, 11, 3, 1, 30),
+          },
+        ],
+        { telegramId: 555n, name: 'Уляна' },
+      );
+    });
+
+    it('should still tell the admins when the receipts rows fail after the order exists', async () => {
+      view('minus', { clientLabel: 'Вівчарук Валентин' });
+      orders.create.mockResolvedValue(order(10, 'MC-1', { orderType: OrderType.MINUS_CLOSING }));
+      requisites.addMany.mockRejectedValue(new Error('db down'));
+
+      await service.complete(
+        manager,
+        'req1',
+        body([
+          { amount: '600', date: '2026-11-04', time: '09:05' },
+          { payerName: 'Вальчук Влад', amount: '400', date: '2026-11-03', time: '01:30' },
+        ]),
+      );
+
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(
+        expect.stringContaining('Закриття заборгованості клієнта'),
+      );
+    });
+
+    it('should keep an old stored payment with no payer keys as the date only', async () => {
+      cards.byRequestId.mockResolvedValue({
+        ...card,
+        payments: [{ amount: '1000.00', paidAt: '2026-11-04T09:00:00.000Z' }],
+      });
+      view('minus', { clientLabel: 'Гук Руслан' });
+      orders.create.mockResolvedValue(order(10, 'MC-1', { orderType: OrderType.MINUS_CLOSING }));
+
+      await service.accept(manager, 'req1');
+
+      expect(requisites.addMany).not.toHaveBeenCalled();
+    });
+
+    it('should store a lone payment that names its payer', async () => {
+      view('minus', { clientLabel: 'Гук Руслан' });
+      orders.create.mockResolvedValue(order(10, 'MC-1', { orderType: OrderType.MINUS_CLOSING }));
+
+      await service.complete(manager, 'req1', body([{ ...row, payerName: 'Гук Руслан' }]));
+
+      expect(callArg(requisites.addMany, 1)).toEqual([
+        expect.objectContaining({ payerName: 'Гук Руслан', amount: '1000.00' }),
+      ]);
     });
   });
 
@@ -945,6 +1048,23 @@ describe('RequestCompletionService', () => {
           expect.stringContaining('Оплата на реквізити'),
         );
         expect(sender.sendToAdmins).not.toHaveBeenCalled();
+      });
+
+      it('should put the verify buttons on the receipt that carries the notice', async () => {
+        view('card', { orders: [orderRow('0000-070217', '1000')] });
+        orders.create.mockResolvedValue(order(10, '0000-070217'));
+        receipts.attachHeld.mockResolvedValue(900);
+
+        await service.complete(
+          manager,
+          'req1',
+          body([{ payerName: 'Іван', amount: '1000', date: '2026-11-04', time: '10:00' }]),
+        );
+
+        expect(verification.attachControls).toHaveBeenCalledWith(
+          [expect.objectContaining({ id: 10 })],
+          900,
+        );
       });
 
       it('should still tell the admins when the receipts cannot be attached', async () => {
