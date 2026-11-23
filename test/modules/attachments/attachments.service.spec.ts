@@ -105,7 +105,7 @@ describe('AttachmentsService.saveFromTelegram', () => {
     expect(media[1]!.caption).toContain('📎 <b>');
     expect(media[1]!.caption).toContain('№ 0000-066717');
     expect(media[1]!.caption).toContain('Дата оплати: 14:53 11.11.2026');
-    expect(media[1]!.caption).toMatch(/Додав: Христина · \d\d:\d\d \d\d\.\d\d\.\d{4}/);
+    expect(media[1]!.caption).toMatch(/Завантажено: Христина · \d\d:\d\d \d\d\.\d\d\.\d{4}/);
   });
 
   it('should send a single photo via sendPhoto, not sendDocument', async () => {
@@ -182,7 +182,7 @@ describe('AttachmentsService.saveFromTelegram', () => {
       bot.telegram.sendDocument.mockResolvedValue({ document: { file_id: 'f1' }, message_id: 10 });
     });
 
-    it('should reply to the notice with a short caption instead of repeating the order', async () => {
+    it('should reply to the notice with the whole order, so a late file reads on its own', async () => {
       prisma.order.findUnique.mockResolvedValue({ adminMessageId: 500, attachments: [] });
 
       await service.saveFromTelegram(order, [file('f1')], uploader, true);
@@ -193,8 +193,9 @@ describe('AttachmentsService.saveFromTelegram', () => {
         allow_sending_without_reply: true,
       });
       expect(options.caption).toContain('№ 0000-066717');
-      expect(options.caption).toContain('Христина');
-      expect(options.caption).not.toContain('Сума:');
+      expect(options.caption).toContain('Сума:');
+      expect(options.caption).toContain('Дата оплати: 14:53 11.11.2026');
+      expect(options.caption).toMatch(/Завантажено: Христина · \d\d:\d\d \d\d\.\d\d\.\d{4}/);
     });
 
     it('should reply to the first file when the notice was merged into it', async () => {

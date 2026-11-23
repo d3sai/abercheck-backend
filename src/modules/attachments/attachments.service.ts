@@ -45,13 +45,8 @@ function caption(order: CaptionOrder, uploader: Initiator): string {
     ...(order.exchangeRate ? [`Курс: ${formatRate(order.exchangeRate)}`] : []),
     ...(order.paidAt ? [`Дата оплати: ${formatKyivPaidAt(order.paidAt)}`] : []),
     ...(order.comment ? [`Коментар: ${escapeHtml(order.comment.slice(0, 300))}`] : []),
-    `Додав: ${escapeHtml(uploader.name)} · ${formatKyivDateTime(new Date())}`,
+    `Завантажено: ${escapeHtml(uploader.name)} · ${formatKyivDateTime(new Date())}`,
   ].join('\n');
-}
-
-// a file added after the notice: it answers the notice, so the order is not repeated
-function shortCaption(order: CaptionOrder, uploader: Initiator): string {
-  return `📎 № ${escapeHtml(order.orderNumber)} · додав ${escapeHtml(uploader.name)} · ${formatKyivDateTime(new Date())}`;
 }
 
 const replyTo = (messageId: number | undefined) =>
@@ -107,7 +102,7 @@ export class AttachmentsService {
               this.storageChatId,
               { source: file.buffer, filename: file.originalname },
               {
-                caption: anchor ? shortCaption(order, uploader) : caption(order, uploader),
+                caption: caption(order, uploader),
                 parse_mode: 'HTML',
                 message_thread_id: this.storageThreadId,
                 ...replyTo(anchor),
@@ -138,9 +133,7 @@ export class AttachmentsService {
     const attachments: OrderAttachment[] = [];
     for (const [index, group] of groups.entries()) {
       const captionText =
-        index === groups.length - 1
-          ? (groupCaption ?? (anchor ? shortCaption(order, uploader) : caption(order, uploader)))
-          : undefined;
+        index === groups.length - 1 ? (groupCaption ?? caption(order, uploader)) : undefined;
       attachments.push(
         ...(await this.saveGroup(
           order,
