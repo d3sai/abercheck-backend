@@ -18,6 +18,7 @@ import { AdminUpdate } from './admin/admin.update';
 import { BotLauncher } from './core/bot-launcher';
 import { BotUpdate } from './core/bot.update';
 import { DailyReportJob } from './reports/daily-report.job';
+import { OrderVerificationService } from './verification/order-verification.service';
 import { OrderNotifier } from './notifications/order-notifier';
 import { PaymentNotifier } from './notifications/payment-notifier';
 import { CashDraftService, CashDraftStore } from './order-draft/cash-draft.service';
@@ -86,9 +87,11 @@ import { TelegramSender } from './core/telegram-sender';
     GuideService,
     AdminFlowService,
     DailyReportJob,
+    OrderVerificationService,
   ],
   exports: [
     TelegramSender,
+    OrderVerificationService,
     KitDraftService,
     CashDraftService,
     ForeignDraftService,

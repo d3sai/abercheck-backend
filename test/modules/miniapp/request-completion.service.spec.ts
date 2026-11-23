@@ -18,6 +18,7 @@ import {
 import type { RequestReceiptsService } from '../../../src/modules/finance-sync/request-receipts.service';
 import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
 import type { CompleteMiniappRequestDto } from '../../../src/modules/miniapp/miniapp.dto';
+import { OrderVerificationService } from '../../../src/modules/telegram/verification/order-verification.service';
 import { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
 import { OrderNumberTakenError } from '../../../src/modules/orders/orders.errors';
 import type { OrdersService } from '../../../src/modules/orders/orders.service';
@@ -137,6 +138,7 @@ describe('RequestCompletionService', () => {
     editMessage: jest.fn(),
   };
   const receipts = { attachHeld: jest.fn() };
+  const verification = { attachControls: jest.fn() };
   const service = new RequestCompletionService(
     finance as unknown as FinanceClient,
     cards as unknown as RequestCardsRepository,
@@ -145,6 +147,7 @@ describe('RequestCompletionService', () => {
     sender as unknown as TelegramSender,
     receipts as unknown as RequestReceiptsService,
     { save: jest.fn() } as unknown as AttachmentsService,
+    verification as unknown as OrderVerificationService,
   );
 
   let logError: jest.SpyInstance;
@@ -368,6 +371,15 @@ describe('RequestCompletionService', () => {
         });
         expect(logError).toHaveBeenCalled();
       });
+    });
+
+    it('should leave the verify buttons to the notice the orders send themselves', async () => {
+      view('our_fop', one);
+      orders.create.mockResolvedValue(order(10, '0000-070217'));
+
+      await service.complete(manager, 'req1', body([]));
+
+      expect(verification.attachControls).not.toHaveBeenCalled();
     });
 
     it('should complete without payments: no date, no rows, no report, the task open', async () => {
@@ -728,6 +740,10 @@ describe('RequestCompletionService', () => {
       await service.complete(manager, 'req1', body([row]));
 
       expect(orders.setAdminMessageId).toHaveBeenCalledWith([10], 77);
+      expect(verification.attachControls).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: 10 })],
+        77,
+      );
     });
 
     it('should start the day at Kyiv midnight when the manager gives no time', async () => {
@@ -1032,6 +1048,23 @@ describe('RequestCompletionService', () => {
           expect.stringContaining('Оплата на реквізити'),
         );
         expect(sender.sendToAdmins).not.toHaveBeenCalled();
+      });
+
+      it('should put the verify buttons on the receipt that carries the notice', async () => {
+        view('card', { orders: [orderRow('0000-070217', '1000')] });
+        orders.create.mockResolvedValue(order(10, '0000-070217'));
+        receipts.attachHeld.mockResolvedValue(900);
+
+        await service.complete(
+          manager,
+          'req1',
+          body([{ payerName: 'Іван', amount: '1000', date: '2026-11-04', time: '10:00' }]),
+        );
+
+        expect(verification.attachControls).toHaveBeenCalledWith(
+          [expect.objectContaining({ id: 10 })],
+          900,
+        );
       });
 
       it('should still tell the admins when the receipts cannot be attached', async () => {

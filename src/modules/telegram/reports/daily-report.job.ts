@@ -5,6 +5,8 @@ import { DailyReportService } from '../../reports/daily-report.service';
 import type { BotReply } from '../core/bot-reply';
 import { dailyReportMessage, underpaidMessage } from './report.messages';
 import { TelegramSender } from '../core/telegram-sender';
+import { OrderVerificationService } from '../verification/order-verification.service';
+import { digestMessage } from '../verification/verification.messages';
 
 @Injectable()
 export class DailyReportJob {
@@ -13,6 +15,7 @@ export class DailyReportJob {
   constructor(
     private readonly reports: DailyReportService,
     private readonly sender: TelegramSender,
+    private readonly verification: OrderVerificationService,
   ) {}
 
   @Cron('0 9 * * *', { name: 'daily-report', timeZone: KYIV_TIME_ZONE })
@@ -33,6 +36,15 @@ export class DailyReportJob {
       this.logger.log(`Daily report sent, ${underpaid.length} orders marked underpaid`);
     } catch (error) {
       this.logger.error('Daily report failed', error);
+    }
+    try {
+      const digest = digestMessage(
+        await this.verification.digestItems(now),
+        this.sender.adminChatId,
+      );
+      if (digest) await this.sender.sendToTopic('reports', digest);
+    } catch (error) {
+      this.logger.error('Verification digest failed', error);
     }
   }
 

@@ -31,6 +31,7 @@ import { OrderNumberTakenError } from '../orders/orders.errors';
 import { type OrderWithManager, type OrderWithPaid, OrdersService } from '../orders/orders.service';
 import { RequisitesService } from '../requisites/requisites.service';
 import { TelegramSender } from '../telegram/core/telegram-sender';
+import { OrderVerificationService } from '../telegram/verification/order-verification.service';
 import {
   checkExistingNumbers,
   createMinusOrder,
@@ -192,6 +193,7 @@ export class RequestCompletionService {
     private readonly sender: TelegramSender,
     private readonly receipts: RequestReceiptsService,
     private readonly attachments: AttachmentsService,
+    private readonly verification: OrderVerificationService,
   ) {}
 
   /** «✏️ Змінити»: the payments, and optionally the amounts, rates and comment, come from the form. */
@@ -467,10 +469,11 @@ export class RequestCompletionService {
       made.orders[0] !== undefined &&
       (await this.cards.heldFiles(requestId)).length > 0;
     let noticeId = merged ? null : await this.announce(requestId, made);
+    let captionId: number | null = null;
     // a receipt held before this point is found here; one sent after the ids is attached at once
     const receiptsAttached = await this.safely(requestId, 'held receipts', async () => {
       if (made.orders[0]) {
-        await this.receipts.attachHeld(
+        captionId = await this.receipts.attachHeld(
           manager,
           requestId,
           made.orders[0],
@@ -481,6 +484,12 @@ export class RequestCompletionService {
     // the files did not go: the notice must not get lost with them
     if (merged && !receiptsAttached) {
       noticeId = await this.announce(requestId, made);
+    }
+    if (made.notice) {
+      await this.verification.attachControls(
+        made.orders,
+        merged && receiptsAttached ? captionId : noticeId,
+      );
     }
     if (!receiptsAttached) note = [note, RECEIPTS_NOTE].filter(Boolean).join(' ');
     const report = made.report;

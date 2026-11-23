@@ -18,6 +18,7 @@ describe('TelegramSender', () => {
       sendMessage: jest.fn<Promise<unknown>, SendArgs>(),
       sendDocument: jest.fn(),
       editMessageText: jest.fn(),
+      editMessageReplyMarkup: jest.fn(),
       deleteMessage: jest.fn(),
       setMyCommands: jest.fn(),
       setChatMenuButton: jest.fn(),
@@ -339,6 +340,36 @@ describe('TelegramSender', () => {
       jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
       await expect(sender.setDefaultMenuButton(null)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('editButtons', () => {
+    const buttons = [[{ text: 'OK', callback_data: 'ok' }]];
+
+    it('should replace only the buttons and report success', async () => {
+      bot.telegram.editMessageReplyMarkup.mockResolvedValue(true);
+
+      await expect(sender.editButtons(5, 8, buttons)).resolves.toBe(true);
+
+      expect(bot.telegram.editMessageReplyMarkup).toHaveBeenCalledWith(5, 8, undefined, {
+        inline_keyboard: buttons,
+      });
+    });
+
+    it('should count "message is not modified" as success', async () => {
+      bot.telegram.editMessageReplyMarkup.mockRejectedValue(
+        new Error('400: Bad Request: message is not modified'),
+      );
+
+      await expect(sender.editButtons(5, 8, buttons)).resolves.toBe(true);
+    });
+
+    it('should report a message that takes no buttons as false', async () => {
+      bot.telegram.editMessageReplyMarkup.mockRejectedValue(
+        new Error("400: Bad Request: message can't be edited"),
+      );
+
+      await expect(sender.editButtons(5, 8, buttons)).resolves.toBe(false);
     });
   });
 

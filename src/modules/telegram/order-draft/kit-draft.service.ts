@@ -116,7 +116,7 @@ export class KitDraftService {
         ? (created[0] ?? (await this.orders.findWithBalance(existing[0]!))?.order)
         : undefined;
     if (fileOrder) {
-      await this.notifier.notify(fileOrder, manager, files, notice);
+      await this.notifier.notify(fileOrder, manager, files, notice, created);
     } else {
       await this.notifier.notice(created, notice);
     }

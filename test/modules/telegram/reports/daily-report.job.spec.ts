@@ -3,10 +3,12 @@ import { Prisma } from '../../../../src/generated/prisma/client';
 import { DailyReportService } from '../../../../src/modules/reports/daily-report.service';
 import { DailyReportJob } from '../../../../src/modules/telegram/reports/daily-report.job';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
+import { OrderVerificationService } from '../../../../src/modules/telegram/verification/order-verification.service';
 
 describe('DailyReportJob', () => {
   const reports = { markUnderpaid: jest.fn(), build: jest.fn() };
-  const sender = { send: jest.fn(), sendToTopic: jest.fn() };
+  const sender = { send: jest.fn(), sendToTopic: jest.fn(), adminChatId: -1001234567890 };
+  const verification = { digestItems: jest.fn() };
   let job: DailyReportJob;
 
   const now = new Date('2026-09-11T06:00:00Z');
@@ -38,11 +40,14 @@ describe('DailyReportJob', () => {
         DailyReportJob,
         { provide: DailyReportService, useValue: reports },
         { provide: TelegramSender, useValue: sender },
+        { provide: OrderVerificationService, useValue: verification },
       ],
     }).compile();
 
     job = moduleRef.get(DailyReportJob);
     reports.build.mockImplementation((dayStart: Date) => Promise.resolve(emptyReport(dayStart)));
+    reports.markUnderpaid.mockResolvedValue([]);
+    verification.digestItems.mockResolvedValue([]);
   });
 
   afterEach(() => jest.resetAllMocks());
@@ -105,5 +110,64 @@ describe('DailyReportJob', () => {
       html: expect.stringContaining('Звіт за сьогодні, 11.09.2026') as unknown,
     });
     expect(reports.markUnderpaid).not.toHaveBeenCalled();
+  });
+
+  describe('the verification digest', () => {
+    const item = {
+      orderNumber: '0000-076454',
+      clientName: 'Берчатова Л.О.',
+      amountDue: new Prisma.Decimal('13309'),
+      currency: 'UAH',
+      managerName: 'Діана',
+      createdAt: new Date('2026-09-10T10:00:00Z'),
+      problem: 'processing',
+      verifyMessageId: 55,
+    };
+
+    it('should send the digest to reports after the daily report', async () => {
+      verification.digestItems.mockResolvedValue([item]);
+
+      await job.run(now);
+
+      expect(verification.digestItems).toHaveBeenCalledWith(now);
+      expect(sender.sendToTopic).toHaveBeenCalledTimes(2);
+      expect(sender.sendToTopic).toHaveBeenLastCalledWith(
+        'reports',
+        expect.stringContaining('🔎 <b>Звірка</b>'),
+      );
+      expect(sender.sendToTopic).toHaveBeenLastCalledWith(
+        'reports',
+        expect.stringContaining('https://t.me/c/1234567890/55'),
+      );
+    });
+
+    it('should send nothing when every order is verified', async () => {
+      await job.run(now);
+
+      expect(sender.sendToTopic).toHaveBeenCalledTimes(1);
+    });
+
+    it('should still send the daily report when the digest fails', async () => {
+      verification.digestItems.mockRejectedValue(new Error('db down'));
+
+      await expect(job.run(now)).resolves.toBe(undefined);
+
+      expect(sender.sendToTopic).toHaveBeenCalledWith(
+        'reports',
+        expect.stringContaining('Звіт за'),
+      );
+    });
+
+    it('should still send the digest when the daily report fails', async () => {
+      reports.build.mockRejectedValue(new Error('db down'));
+      verification.digestItems.mockResolvedValue([item]);
+
+      await job.run(now);
+
+      expect(sender.sendToTopic).toHaveBeenCalledWith(
+        'reports',
+        expect.stringContaining('🔎 <b>Звірка</b>'),
+      );
+    });
   });
 });

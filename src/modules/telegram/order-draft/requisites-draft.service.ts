@@ -142,9 +142,9 @@ export class RequisitesDraftService {
     const files = this.pendingFiles.take(manager.telegramId);
     const notice = adminRequisitesMessage(orders, manager.name, added, draft.skipped);
     if (files.length > 0) {
-      await this.notifier.notify(orders[0]!, manager, files, notice);
+      await this.notifier.notify(orders[0]!, manager, files, notice, orders);
     } else {
-      await this.sender.sendToAdmins(notice);
+      await this.notifier.notice(orders, notice);
     }
     return orders;
   }
