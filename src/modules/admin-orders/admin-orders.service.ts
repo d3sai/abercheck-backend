@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AttachmentsService } from '../attachments/attachments.service';
@@ -8,6 +9,7 @@ import {
   resolveBaseNumber,
   syncGroupStatus,
 } from '../orders/order-ledger';
+import { type OrderDeleted, OrderEvents } from '../orders/order.events';
 import { normalizePartNumber } from '../orders/order-number';
 import { AdminOrdersErrors } from './admin-orders.errors';
 import type { DeleteOrderDto } from './dto/delete-order.dto';
@@ -20,6 +22,7 @@ export class AdminOrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly attachments: AttachmentsService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async preview(rawNumber: string): Promise<OrderPreviewResponse> {
@@ -77,7 +80,7 @@ export class AdminOrdersService {
       throw AdminOrdersErrors.confirmMismatch();
     }
 
-    const { result, files, snapshot } = await this.prisma.$transaction(async (tx) => {
+    const { result, files, snapshot, orderId } = await this.prisma.$transaction(async (tx) => {
       const parts = await lockGroup(tx, await resolveBaseNumber(tx, orderNumber));
       const target = parts.find((part) => part.orderNumber === orderNumber);
       if (!target) {
@@ -117,11 +120,12 @@ export class AdminOrdersService {
         currency: target.currency,
         status: target.status,
       };
-      return { result, files, snapshot };
+      return { result, files, snapshot, orderId: target.id };
     });
 
     await Promise.allSettled(files.map((file) => this.attachments.discardMessage(file)));
     this.logger.log(`Order deleted ${JSON.stringify({ ...snapshot, ...result, actor })}`);
+    this.events.emit(OrderEvents.Deleted, { orderId } satisfies OrderDeleted);
     return result;
   }
 }

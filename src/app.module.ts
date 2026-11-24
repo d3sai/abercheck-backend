@@ -6,8 +6,10 @@ import { AdminOrdersModule } from './modules/admin-orders/admin-orders.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CabinetModule } from './modules/cabinet/cabinet.module';
 import { validateEnv } from './common/config/env.validation';
+import { FinanceSyncModule } from './modules/finance-sync/finance-sync.module';
 import { HealthModule } from './modules/health/health.module';
 import { ManagersModule } from './modules/managers/managers.module';
+import { MiniappModule } from './modules/miniapp/miniapp.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PrismaModule } from './common/prisma/prisma.module';
@@ -22,8 +24,10 @@ import { TelegramModule } from './modules/telegram/telegram.module';
     AdminOrdersModule,
     AuthModule,
     CabinetModule,
+    FinanceSyncModule, // before TelegramModule: its text handler must run ahead of BotUpdate.text (test/app)
     HealthModule,
     ManagersModule,
+    MiniappModule,
     OrdersModule,
     PaymentsModule,
     TelegramModule,

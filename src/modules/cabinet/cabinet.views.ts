@@ -82,7 +82,7 @@ export interface OrderRequisiteView {
   payerName: string;
   account: string | null;
   amount: string;
-  paidAt: string;
+  paidAt: string | null;
   addedByName: string;
   createdAt: string;
 }
@@ -213,7 +213,7 @@ export function toRequisiteView(requisite: OrderRequisite): OrderRequisiteView {
     payerName: requisite.payerName,
     account: requisite.account,
     amount: money(requisite.amount),
-    paidAt: requisite.paidAt.toISOString(),
+    paidAt: requisite.paidAt?.toISOString() ?? null,
     addedByName: requisite.addedByName,
     createdAt: requisite.createdAt.toISOString(),
   };

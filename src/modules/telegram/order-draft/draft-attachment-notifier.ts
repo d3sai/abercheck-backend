@@ -4,6 +4,7 @@ import { AttachmentsService, type TelegramFileRef } from '../../attachments/atta
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import type { Manager, Order } from '../../../generated/prisma/client';
 import { TelegramSender } from '../core/telegram-sender';
+import { OrderVerificationService } from '../verification/order-verification.service';
 
 @Injectable()
 export class DraftAttachmentNotifier {
@@ -11,18 +12,43 @@ export class DraftAttachmentNotifier {
     private readonly attachments: AttachmentsService,
     private readonly sender: TelegramSender,
     private readonly prisma: PrismaService,
+    private readonly verification: OrderVerificationService,
   ) {}
+
+  /** Keeps the files with the order without telling the admins. */
+  async store(order: Order, manager: Manager, files: TelegramFileRef[]): Promise<void> {
+    await this.attachments.saveFromTelegram(
+      order,
+      files,
+      { telegramId: manager.telegramId, name: manager.name },
+      true,
+    );
+  }
+
+  /** The notice alone: its message id stays on the orders, so deleting one can remove it from the chat. */
+  async notice(orders: Order[], notice: string): Promise<void> {
+    const adminMessageId = await this.sender.sendToAdmins(notice);
+    if (adminMessageId !== null && orders.length > 0) {
+      await this.prisma.order.updateMany({
+        where: { id: { in: orders.map((order) => order.id) } },
+        data: { adminMessageId },
+      });
+    }
+    await this.verification.attachControls(orders, adminMessageId);
+  }
 
   async notify(
     order: Order,
     manager: Manager,
     files: TelegramFileRef[],
     notice: string,
+    group: Order[] = [order],
   ): Promise<void> {
     const canMergeCaption = notice.length <= TELEGRAM_CAPTION_LIMIT;
     let merged = false;
+    let noticeId: number | null = null;
     try {
-      await this.attachments.saveFromTelegram(
+      const saved = await this.attachments.saveFromTelegram(
         order,
         files,
         { telegramId: manager.telegramId, name: manager.name },
@@ -30,13 +56,18 @@ export class DraftAttachmentNotifier {
         canMergeCaption ? notice : undefined,
       );
       merged = canMergeCaption;
+      if (merged) noticeId = saved.at(-1)?.telegramMessageId ?? null;
     } finally {
       if (!merged) {
-        const adminMessageId = await this.sender.sendToAdmins(notice);
-        if (adminMessageId !== null) {
-          await this.prisma.order.update({ where: { id: order.id }, data: { adminMessageId } });
+        noticeId = await this.sender.sendToAdmins(notice);
+        if (noticeId !== null) {
+          await this.prisma.order.update({
+            where: { id: order.id },
+            data: { adminMessageId: noticeId },
+          });
         }
       }
+      await this.verification.attachControls(group, noticeId);
     }
   }
 }

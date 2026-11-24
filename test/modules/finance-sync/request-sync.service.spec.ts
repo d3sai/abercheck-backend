@@ -1,0 +1,558 @@
+import { type FinanceRequestCard, Prisma } from '../../../src/generated/prisma/client';
+import type { FinanceClient } from '../../../src/modules/finance-sync/finance.client';
+import {
+  FinanceApiError,
+  type FinanceEvent,
+  type FinanceRequestView,
+} from '../../../src/modules/finance-sync/finance.types';
+import type { RequestCardsRepository } from '../../../src/modules/finance-sync/request-cards.repository';
+import { RequestSyncService } from '../../../src/modules/finance-sync/request-sync.service';
+import type { OrdersService } from '../../../src/modules/orders/orders.service';
+import type { RequisitesService } from '../../../src/modules/requisites/requisites.service';
+import type { ManagersService } from '../../../src/modules/managers/managers.service';
+import type { TelegramSender } from '../../../src/modules/telegram/core/telegram-sender';
+
+const card = {
+  requestId: 'req1',
+  number: '42',
+  managerId: 4,
+  managerChatId: 555n,
+  managerMessageId: 31,
+  groupChatId: -1002n,
+  groupMessageId: 700,
+} as FinanceRequestCard;
+
+const view = (patch: Partial<FinanceRequestView> = {}) =>
+  ({
+    id: 'req1',
+    number: '42',
+    status: 'pending',
+    kind: 'our_fop',
+    sum: '100',
+    orders: [],
+    payouts: [],
+    warnings: [],
+    isPaid: false,
+    fopLabel: 'ФОП Іванов',
+    ...patch,
+  }) as unknown as FinanceRequestView;
+
+describe('RequestSyncService', () => {
+  const sender = {
+    miniAppUrl: undefined as string | undefined,
+    send: jest.fn(),
+    editMessage: jest.fn(),
+    deleteMessage: jest.fn(),
+    sendDocument: jest.fn(),
+  };
+  const orders = { numbersByIds: jest.fn(), latestPaidAt: jest.fn() };
+  const finance = { fops: jest.fn(), get: jest.fn(), file: jest.fn() };
+  const cards = {
+    byRequestId: jest.fn(),
+    markNotified: jest.fn(),
+    resetNotified: jest.fn(),
+    markSeen: jest.fn(),
+    unmarkSeen: jest.fn(),
+    rememberChatMessage: jest.fn(),
+    setManagerMessage: jest.fn(),
+  };
+  const managers = { findById: jest.fn() };
+  const requisites = { progress: jest.fn() };
+  const service = new RequestSyncService(
+    sender as unknown as TelegramSender,
+    finance as unknown as FinanceClient,
+    cards as unknown as RequestCardsRepository,
+    managers as unknown as ManagersService,
+    orders as unknown as OrdersService,
+    requisites as unknown as RequisitesService,
+  );
+
+  beforeEach(() => {
+    cards.byRequestId.mockResolvedValue(card);
+    cards.markNotified.mockResolvedValue(true);
+    cards.markSeen.mockResolvedValue(true);
+    sender.send.mockResolvedValue(77);
+    sender.sendDocument.mockResolvedValue(78);
+    managers.findById.mockResolvedValue({ name: 'Уляна' });
+    requisites.progress.mockResolvedValue({
+      paid: new Prisma.Decimal(0),
+      due: new Prisma.Decimal(0),
+    });
+    sender.miniAppUrl = undefined;
+  });
+  afterEach(() => jest.resetAllMocks());
+
+  describe('notifyManager', () => {
+    it.each([
+      ['accepted', { status: 'accepted' }],
+      ['cancelled', { status: 'cancelled' }],
+    ] as const)(
+      'should move the card down on %s: a fresh card, the old one stubbed and deleted',
+      async (status, patch) => {
+        await service.notifyManager(view(patch));
+
+        expect(cards.markNotified).toHaveBeenCalledWith('req1', status);
+        expect(sender.send).toHaveBeenCalledTimes(1);
+        const [chat, html] = sender.send.mock.calls[0] as [bigint, string];
+        expect(chat).toBe(555n);
+        expect(html).toContain('#42');
+        expect(cards.setManagerMessage).toHaveBeenCalledWith('req1', 77);
+        expect(cards.rememberChatMessage).toHaveBeenCalledWith(555n, 31, 'req1');
+        expect(sender.editMessage).toHaveBeenCalledWith(
+          555n,
+          31,
+          '⬇️ Запит #42: актуальна картка нижче',
+          [],
+        );
+        expect(sender.deleteMessage).toHaveBeenCalledWith(555n, 31);
+      },
+    );
+
+    it('should send nothing for a payment: the card is only redrawn in place', async () => {
+      await service.notifyManager(view({ status: 'accepted', isPaid: true }));
+
+      expect(cards.markNotified).toHaveBeenCalledWith('req1', 'paid');
+      expect(sender.send).not.toHaveBeenCalled();
+      expect(sender.deleteMessage).not.toHaveBeenCalled();
+    });
+
+    it('should stay silent when this status was already notified', async () => {
+      cards.markNotified.mockResolvedValue(false);
+
+      await service.notifyManager(view({ status: 'accepted' }));
+
+      expect(sender.send).not.toHaveBeenCalled();
+    });
+
+    it('should do nothing for a pending request or an unknown card', async () => {
+      await service.notifyManager(view());
+      cards.byRequestId.mockResolvedValue(null);
+      await service.notifyManager(view({ status: 'cancelled' }));
+
+      expect(cards.markNotified).not.toHaveBeenCalled();
+      expect(sender.send).not.toHaveBeenCalled();
+    });
+
+    it('should keep the old card and revert the status when the new one could not be sent', async () => {
+      sender.send.mockResolvedValue(null);
+
+      await service.notifyManager(view({ status: 'accepted' }));
+
+      expect(cards.resetNotified).toHaveBeenCalledWith('req1', 'accepted');
+      expect(cards.setManagerMessage).not.toHaveBeenCalled();
+      expect(sender.deleteMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('renderManager', () => {
+    const URL_ = 'https://cab.example.ua/tg/request';
+    type Edit = [bigint, number, string, { text: string }[][] | undefined];
+    const edit = (index = 0) => sender.editMessage.mock.calls[index] as Edit;
+
+    it('should give a pending card only the cancel button even when the URL is set', async () => {
+      sender.miniAppUrl = URL_;
+
+      await service.renderManager(card, view());
+
+      const buttons = edit()[3]!;
+      expect(buttons[0]!.map((b) => b.text)).toEqual(['✖ Скасувати запит']);
+      expect(buttons).toHaveLength(1);
+      expect(orders.numbersByIds).not.toHaveBeenCalled();
+    });
+
+    it('should show the stored payments and offer «Прийняти» on an accepted card that is not completed', async () => {
+      sender.miniAppUrl = URL_;
+      const payments = [
+        { payerName: 'Іван', account: null, amount: '700', paidAt: '2026-11-04T08:15:00.000Z' },
+      ];
+
+      await service.renderManager(
+        { ...card, payments },
+        view({ status: 'accepted', kind: 'card' }),
+      );
+
+      const [, , html, buttons] = edit();
+      expect(buttons!.flat().map((b) => b.text)).toEqual([
+        '✅ Прийняти',
+        '✖ Скасувати',
+        '📎 Прикріпити файли',
+      ]);
+      expect(html).toContain('• Іван · 700 грн · 04.11.2026 10:15');
+    });
+
+    it('should keep the «Оформлено» line and drop «Оплачено» on a completed card whose orders are dated', async () => {
+      sender.miniAppUrl = URL_;
+      orders.numbersByIds.mockResolvedValue(['0000-1', '0000-2']);
+      orders.latestPaidAt.mockResolvedValue(new Date('2026-11-04T12:30:00.000Z'));
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10, 11] },
+        view({ status: 'accepted', kind: 'card' }),
+      );
+
+      expect(requisites.progress).not.toHaveBeenCalled();
+      expect(orders.numbersByIds).toHaveBeenCalledWith([10, 11]);
+      const [, , html, buttons] = edit();
+      expect(html).toContain('✅ Оформлено: № 0000-1, 0000-2 (2 замовлення)');
+      expect(buttons).toEqual([
+        [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
+        [{ text: '🗑 Скасувати № 0000-1', callback_data: 'del:0000-1' }],
+        [{ text: '🗑 Скасувати № 0000-2', callback_data: 'del:0000-2' }],
+      ]);
+      expect(html).toContain('✅ Оплачено 04.11.2026 14:30');
+    });
+
+    it('should offer «Оплачено» on a completed card whose orders have no date yet', async () => {
+      sender.miniAppUrl = URL_;
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      orders.latestPaidAt.mockResolvedValue(null);
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10] },
+        view({ status: 'accepted', kind: 'card' }),
+      );
+
+      expect(
+        edit()[3]!
+          .flat()
+          .map((b) => b.text),
+      ).toEqual(['💰 Оплачено', '📎 Прикріпити файли', '🗑 Скасувати № 0000-1']);
+    });
+
+    it('should show a completed request whose orders were deleted as cancelled, with no buttons', async () => {
+      sender.miniAppUrl = URL_;
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10] },
+        view({ status: 'cancelled', kind: 'our_fop' }),
+      );
+
+      const [, , html, buttons] = edit();
+      expect(html).toContain('❌ Скасовано');
+      expect(html).not.toContain('Оформлено');
+      expect(buttons ?? []).toEqual([]);
+      expect(orders.numbersByIds).not.toHaveBeenCalled();
+    });
+
+    it('should show the paid sum and offer «Додати оплату» on a completed our_fop that is still open', async () => {
+      sender.miniAppUrl = URL_;
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      requisites.progress.mockResolvedValue({
+        paid: new Prisma.Decimal('50000'),
+        due: new Prisma.Decimal('200000'),
+      });
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: null, orderIds: [10] },
+        view({ status: 'accepted', kind: 'our_fop' }),
+      );
+
+      expect(requisites.progress).toHaveBeenCalledWith([10]);
+      expect(edit()[2]).toContain('💰 Оплачено 50 000 грн з 200 000 грн · залишок 150 000 грн');
+      expect(
+        edit()[3]!
+          .flat()
+          .map((b) => b.text),
+      ).toEqual(['➕ Додати оплату', '📎 Прикріпити файли', '🗑 Скасувати № 0000-1']);
+    });
+
+    it('should draw a closed our_fop without payments the old way', async () => {
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      orders.latestPaidAt.mockResolvedValue(new Date('2026-11-04T12:30:00.000Z'));
+      requisites.progress.mockResolvedValue({
+        paid: new Prisma.Decimal('0'),
+        due: new Prisma.Decimal('200000'),
+      });
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10] },
+        view({ status: 'accepted', kind: 'our_fop' }),
+      );
+
+      expect(edit()[2]).not.toContain('💰 Оплачено 0');
+      expect(edit()[2]).toContain('✅ Оплачено 04.11.2026 14:30');
+    });
+
+    it('should show when a completed our_fop was paid', async () => {
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      orders.latestPaidAt.mockResolvedValue(new Date('2026-11-04T12:30:00.000Z'));
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), closedAt: new Date(), orderIds: [10] },
+        view({ status: 'accepted', kind: 'our_fop' }),
+      );
+
+      expect(orders.latestPaidAt).toHaveBeenCalledWith([10]);
+      expect(edit()[2]).toContain('✅ Оплачено 04.11.2026 14:30');
+      expect(edit()[3]).toEqual([
+        [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
+        [{ text: '🗑 Скасувати № 0000-1', callback_data: 'del:0000-1' }],
+      ]);
+    });
+
+    it('should draw a completed card with no orders without a number', async () => {
+      orders.numbersByIds.mockResolvedValue([]);
+
+      await service.renderManager(
+        { ...card, completedAt: new Date(), orderIds: [] },
+        view({ status: 'accepted' }),
+      );
+
+      expect(edit()[2]).toMatch(/✅ Оформлено\n📎 Квитанція/);
+    });
+
+    it('should show the line again on a webhook redraw', async () => {
+      orders.numbersByIds.mockResolvedValue(['0000-1']);
+      cards.byRequestId.mockResolvedValue({ ...card, completedAt: new Date(), orderIds: [10] });
+      finance.get.mockResolvedValue({ request: view({ status: 'accepted' }) });
+
+      await service.handle({ type: 'accepted', requestId: 'req1', request: view() });
+
+      const managerEdit = [edit(0), edit(1)].find(([chat]) => chat === 555n)!;
+      expect(managerEdit[2]).toContain('✅ Оформлено: № 0000-1');
+    });
+  });
+
+  describe('renderGroup', () => {
+    it('should edit the group card with FOP buttons and the manager name for a pending request', async () => {
+      finance.fops.mockResolvedValue({
+        limitsEnabled: true,
+        limitsStatus: 'ok',
+        project: null,
+        fops: [{ fopId: 3, label: 'ФОП А', leftMonthWithReserve: '1000' }],
+      });
+      managers.findById.mockResolvedValue({ name: 'Уляна' });
+
+      await service.renderGroup(card, view());
+
+      expect(finance.fops).toHaveBeenCalledWith(555);
+      expect(sender.editMessage).toHaveBeenCalledWith(
+        -1002n,
+        700,
+        expect.stringContaining('Менеджер: Уляна'),
+        expect.arrayContaining([[expect.objectContaining({ callback_data: 'ff:req1:3' })]]),
+      );
+    });
+
+    it('should still edit the card when the FOP list is unavailable, and skip it once closed', async () => {
+      finance.fops.mockRejectedValue(new Error('down'));
+      managers.findById.mockResolvedValue({ name: 'Уляна' });
+
+      await service.renderGroup(card, view());
+      await service.renderGroup(card, view({ status: 'accepted' }));
+
+      expect(sender.editMessage).toHaveBeenCalledTimes(2);
+      expect(finance.fops).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('handle', () => {
+    const event = (patch: Partial<FinanceEvent> = {}): FinanceEvent => ({
+      type: 'accepted',
+      requestId: 'req1',
+      request: view({ status: 'pending' }),
+      ...patch,
+    });
+    const message = {
+      messageId: 'm1',
+      author: 'Олена',
+      body: 'Де <чек>?',
+      fileName: null,
+    };
+
+    beforeEach(() => finance.get.mockResolvedValue({ request: view({ status: 'accepted' }) }));
+
+    it('should do nothing for an unknown request', async () => {
+      cards.byRequestId.mockResolvedValue(null);
+
+      await service.handle(event());
+
+      expect(finance.get).not.toHaveBeenCalled();
+      expect(sender.editMessage).not.toHaveBeenCalled();
+      expect(sender.send).not.toHaveBeenCalled();
+    });
+
+    it('should redraw both cards from the re-read view, not from the event snapshot, then notify', async () => {
+      // the payments carry their date, so «Прийняти» is a plain button
+      cards.byRequestId.mockResolvedValue({
+        ...card,
+        payments: [
+          { payerName: null, account: null, amount: '1.00', paidAt: '2026-11-04T08:15:00Z' },
+        ],
+      });
+      await service.handle(event({ type: 'accepted' }));
+
+      expect(finance.get).toHaveBeenCalledWith('req1');
+      expect(sender.editMessage).toHaveBeenCalledWith(
+        -1002n,
+        700,
+        expect.stringContaining('Прийняв'),
+        undefined,
+      );
+      expect(sender.editMessage).toHaveBeenCalledWith(
+        555n,
+        31,
+        expect.stringContaining('Прийняв'),
+        [
+          [
+            { text: '✅ Прийняти', callback_data: 'mo:req1' },
+            { text: '✖ Скасувати', callback_data: 'fc:req1' },
+          ],
+          [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
+        ],
+      );
+      // the card then moves down: one new message instead of a notice
+      expect(sender.send).toHaveBeenCalledWith(555n, expect.stringContaining('Прийняв'), [
+        [
+          { text: '✅ Прийняти', callback_data: 'mo:req1' },
+          { text: '✖ Скасувати', callback_data: 'fc:req1' },
+        ],
+        [{ text: '📎 Прикріпити файли', callback_data: 'ma:req1' }],
+      ]);
+      expect(sender.deleteMessage).toHaveBeenCalledWith(555n, 31);
+    });
+
+    it('should keep the cancel button on the manager card while the request is pending', async () => {
+      finance.get.mockResolvedValue({ request: view() });
+      finance.fops.mockResolvedValue({ limitsStatus: 'ok', fops: [] });
+
+      await service.handle(event({ type: 'edited' }));
+
+      expect(sender.editMessage).toHaveBeenCalledWith(
+        555n,
+        31,
+        expect.any(String),
+        expect.arrayContaining([[expect.objectContaining({ callback_data: 'fc:req1' })]]),
+      );
+      expect(sender.send).not.toHaveBeenCalled();
+    });
+
+    it('should move the card once for the same accepted event delivered twice', async () => {
+      cards.markNotified.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      await service.handle(event());
+      await service.handle(event());
+
+      expect(sender.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('should stay silent for the echo of our own accept, which already notified', async () => {
+      cards.markNotified.mockResolvedValue(false);
+
+      await service.handle(event());
+
+      expect(sender.send).not.toHaveBeenCalled();
+    });
+
+    it('should let a finance failure through, so the webhook answers 500 and finance retries', async () => {
+      finance.get.mockRejectedValue(new FinanceApiError(0, 'network'));
+
+      await expect(service.handle(event())).rejects.toThrow(FinanceApiError);
+    });
+
+    describe('message events', () => {
+      it('should relay a text message as a reply to the manager card and remember it', async () => {
+        await service.handle(event({ type: 'message', message }));
+
+        expect(cards.markSeen).toHaveBeenCalledWith('m1');
+        expect(sender.send).toHaveBeenCalledWith(
+          555n,
+          '💬 Олена: Де &lt;чек&gt;?',
+          undefined,
+          false,
+          { replyTo: 31 },
+        );
+        expect(cards.rememberChatMessage).toHaveBeenCalledWith(555n, 77, 'req1');
+      });
+
+      it('should deliver the same message once', async () => {
+        cards.markNotified.mockResolvedValue(false);
+        cards.markSeen.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+        await service.handle(event({ type: 'message', message }));
+        await service.handle(event({ type: 'message', message }));
+
+        expect(sender.send).toHaveBeenCalledTimes(1);
+      });
+
+      it('should fetch a file and send it as a document replying to the manager card', async () => {
+        cards.markNotified.mockResolvedValue(false);
+        const data = Buffer.from('pdf');
+        finance.file.mockResolvedValue({ data, filename: 'chek.pdf', mimeType: 'application/pdf' });
+
+        await service.handle(
+          event({ type: 'message', message: { ...message, body: null, fileName: 'chek.pdf' } }),
+        );
+
+        expect(finance.file).toHaveBeenCalledWith('req1', 'm1');
+        expect(sender.sendDocument).toHaveBeenCalledWith(
+          555n,
+          { source: data, filename: 'chek.pdf' },
+          '💬 Олена',
+          31,
+        );
+        expect(sender.send).not.toHaveBeenCalled();
+        expect(cards.rememberChatMessage).toHaveBeenCalledWith(555n, 78, 'req1');
+      });
+
+      it('should forget the message and fail when delivery failed, so finance retries', async () => {
+        cards.markNotified.mockResolvedValue(false);
+        sender.send.mockResolvedValue(null);
+
+        await expect(service.handle(event({ type: 'message', message }))).rejects.toThrow();
+
+        expect(cards.unmarkSeen).toHaveBeenCalledWith('m1');
+      });
+
+      it('should send nothing when a message with text and a file cannot fetch its file', async () => {
+        cards.markNotified.mockResolvedValue(false);
+        finance.file.mockRejectedValue(new FinanceApiError(0, 'timeout'));
+
+        await expect(
+          service.handle(event({ type: 'message', message: { ...message, fileName: 'a.pdf' } })),
+        ).rejects.toThrow(FinanceApiError);
+
+        expect(sender.send).not.toHaveBeenCalled();
+        expect(sender.sendDocument).not.toHaveBeenCalled();
+        expect(cards.unmarkSeen).toHaveBeenCalledWith('m1');
+      });
+
+      it('should not resend the text when only its file failed, and tell the manager', async () => {
+        cards.markNotified.mockResolvedValue(false);
+        finance.file.mockResolvedValue({
+          data: Buffer.from('pdf'),
+          filename: 'a.pdf',
+          mimeType: 'application/pdf',
+        });
+        sender.sendDocument.mockResolvedValue(null);
+
+        await service.handle(
+          event({ type: 'message', message: { ...message, fileName: 'a.pdf' } }),
+        );
+
+        expect(cards.unmarkSeen).not.toHaveBeenCalled();
+        expect(sender.send).toHaveBeenCalledTimes(2);
+        expect(sender.send).toHaveBeenLastCalledWith(
+          555n,
+          expect.stringContaining('a.pdf'),
+          undefined,
+          false,
+          { replyTo: 31 },
+        );
+      });
+
+      it('should forget the message when the file cannot be fetched', async () => {
+        cards.markNotified.mockResolvedValue(false);
+        finance.file.mockRejectedValue(new FinanceApiError(0, 'timeout'));
+
+        await expect(
+          service.handle(
+            event({ type: 'message', message: { ...message, body: null, fileName: 'a.pdf' } }),
+          ),
+        ).rejects.toThrow(FinanceApiError);
+
+        expect(cards.unmarkSeen).toHaveBeenCalledWith('m1');
+      });
+    });
+  });
+});

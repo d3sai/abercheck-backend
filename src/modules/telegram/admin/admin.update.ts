@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Action, Command, Ctx, Next, On, Update } from 'nestjs-telegraf';
 import type { Context } from 'telegraf';
 import { ManagerRole } from '../../../generated/prisma/client';
@@ -12,6 +13,11 @@ import {
   reply,
 } from '../core/telegram-context';
 import { TelegramSender } from '../core/telegram-sender';
+import {
+  OrderVerificationService,
+  type VerifyResult,
+} from '../verification/order-verification.service';
+import { VerifyAction, isProblemCode } from '../verification/verification.messages';
 import { type Admin, AdminAction, AdminFlowService } from './admin-flow.service';
 
 export const ADMIN_HELP =
@@ -27,11 +33,14 @@ type Next = () => Promise<void>;
 
 @Update()
 export class AdminUpdate {
+  private readonly logger = new Logger(AdminUpdate.name);
+
   constructor(
     private readonly flow: AdminFlowService,
     private readonly reports: DailyReportJob,
     private readonly sender: TelegramSender,
     private readonly managers: ManagersService,
+    private readonly verification: OrderVerificationService,
   ) {}
 
   @Command('report')
@@ -119,6 +128,49 @@ export class AdminUpdate {
     await edit(ctx, { html: `Скасовано · ${fullName(ctx)}` });
   }
 
+  @Action(VerifyAction.Ok)
+  async verifyOk(@Ctx() ctx: MatchContext): Promise<void> {
+    if (!(await this.ensureAuthorizedAdmin(ctx))) return;
+    await this.showVerify(
+      ctx,
+      await this.verification.verify(Number(ctx.match[1]), this.admin(ctx)),
+    );
+  }
+
+  @Action(VerifyAction.Undo)
+  async verifyUndo(@Ctx() ctx: MatchContext): Promise<void> {
+    if (!(await this.ensureAuthorizedAdmin(ctx))) return;
+    await this.showVerify(ctx, await this.verification.undo(Number(ctx.match[1])));
+  }
+
+  @Action(VerifyAction.Bad)
+  async verifyBad(@Ctx() ctx: MatchContext): Promise<void> {
+    if (!(await this.ensureAuthorizedAdmin(ctx))) return;
+    await this.showVerify(ctx, await this.verification.reasons(Number(ctx.match[1])));
+  }
+
+  @Action(VerifyAction.Back)
+  async verifyBack(@Ctx() ctx: MatchContext): Promise<void> {
+    if (!(await this.ensureAuthorizedAdmin(ctx))) return;
+    await this.showVerify(ctx, await this.verification.back(Number(ctx.match[1])));
+  }
+
+  @Action(VerifyAction.Reason)
+  async verifyReason(@Ctx() ctx: MatchContext): Promise<void> {
+    if (!(await this.ensureAuthorizedAdmin(ctx))) return;
+    const code = ctx.match[2]!;
+    if (!isProblemCode(code)) {
+      await ctx.answerCbQuery();
+      return;
+    }
+    const result = await this.verification.problem(Number(ctx.match[1]), code, this.admin(ctx));
+    await this.showVerify(
+      ctx,
+      result,
+      result.delivered === false ? 'Менеджеру не доставлено' : undefined,
+    );
+  }
+
   @On('text')
   async answer(@Ctx() ctx: Context, @Next() next: Next): Promise<void> {
     const message = ctx.message;
@@ -135,9 +187,8 @@ export class AdminUpdate {
     const result =
       (await this.flow.answerAttachPrompt(telegramId, ctx.text)) ??
       (await this.flow.answerRefundPrompt(telegramId, ctx.text));
-    if (result) {
-      await reply(ctx, result, message?.message_id);
-    }
+    if (!result) return next();
+    await reply(ctx, result, message?.message_id);
   }
 
   private async finish(ctx: Context, result: BotReply): Promise<void> {
@@ -149,6 +200,21 @@ export class AdminUpdate {
     }
     await ctx.answerCbQuery();
     await edit(ctx, result);
+  }
+
+  private async showVerify(ctx: Context, result: VerifyResult, alert?: string): Promise<void> {
+    if ('error' in result) {
+      await ctx.answerCbQuery(result.error, { show_alert: true });
+      return;
+    }
+    try {
+      await ctx.editMessageReplyMarkup({ inline_keyboard: result.buttons });
+    } catch (error) {
+      if (!(error instanceof Error && /message is not modified/i.test(error.message))) {
+        this.logger.warn('Failed to change the verify buttons', error);
+      }
+    }
+    await (alert ? ctx.answerCbQuery(alert, { show_alert: true }) : ctx.answerCbQuery());
   }
 
   private admin(ctx: Context): Admin {

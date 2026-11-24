@@ -4,6 +4,15 @@ import { type BotReply, button } from '../core/bot-reply';
 import { escapeHtml, formatKyivDate, formatMoney, formatMoneyIn } from '../core/format';
 import { STATUS_LABELS } from './status-labels';
 
+/** «📎 Прикріпити файли» under the reply that made an order: the bot asks for the files as a reply. */
+export const OrderAttachAction = /^oa:(.+)$/;
+export const attachOrderButton = (orderNumber: string) =>
+  button('📎 Прикріпити файли', `oa:${orderNumber}`);
+
+/** «Скасувати № …» under a card: the delete flow (`del:`) of an own, unpaid order. */
+export const cancelOrderButton = (orderNumber: string) =>
+  button(`🗑 Скасувати № ${orderNumber}`, `del:${orderNumber}`);
+
 export const LIST_LIMIT = 20;
 export const UNMATCHED_LIMIT = 10;
 

@@ -12,6 +12,7 @@ const manager = (overrides: Partial<Manager> = {}): Manager => ({
   login: null,
   passwordHash: null,
   sessionVersion: 0,
+  keyboardVersion: 0,
   createdAt: new Date(),
   ...overrides,
 });
@@ -26,7 +27,7 @@ describe('AccessNotifier', () => {
 
   afterEach(() => jest.resetAllMocks());
 
-  it('should notify an approved manager with the menu attached', async () => {
+  it('should notify an approved manager and clear the old keyboard', async () => {
     await notifier.onAccessChanged({
       manager: manager({ status: ManagerStatus.ACTIVE }),
       previousStatus: ManagerStatus.PENDING,
@@ -40,7 +41,7 @@ describe('AccessNotifier', () => {
     );
   });
 
-  it('should notify a rejected manager without the menu', async () => {
+  it('should notify a rejected manager without clearing a keyboard', async () => {
     await notifier.onAccessChanged({
       manager: manager({ status: ManagerStatus.REJECTED }),
       previousStatus: ManagerStatus.PENDING,

@@ -6,13 +6,14 @@ import { OrderNumberTakenError } from '../../../../src/modules/orders/orders.err
 import { OrdersService } from '../../../../src/modules/orders/orders.service';
 import { PaymentsService } from '../../../../src/modules/payments/payments.service';
 import { RequisitesService } from '../../../../src/modules/requisites/requisites.service';
+import { NEW_REQUEST_LABEL } from '../../../../src/modules/telegram/core/menu';
 import { TelegramSender } from '../../../../src/modules/telegram/core/telegram-sender';
 import {
   CashDraftService,
   CashDraftStore,
 } from '../../../../src/modules/telegram/order-draft/cash-draft.service';
-import { ReportedPaymentService } from '../../../../src/modules/telegram/order-draft/reported-payment.service';
 import { DraftAttachmentNotifier } from '../../../../src/modules/telegram/order-draft/draft-attachment-notifier';
+import { OrderVerificationService } from '../../../../src/modules/telegram/verification/order-verification.service';
 import {
   ForeignDraftService,
   ForeignDraftStore,
@@ -47,6 +48,7 @@ describe('OrderDraftService', () => {
     login: null,
     passwordHash: null,
     sessionVersion: 0,
+    keyboardVersion: 0,
     createdAt: new Date(),
   };
   const orders = {
@@ -58,6 +60,8 @@ describe('OrderDraftService', () => {
   const payments = { findByExternalId: jest.fn(), ingest: jest.fn() };
   const attachments = { saveFromTelegram: jest.fn() };
   const sender = { sendToAdmins: jest.fn(), send: jest.fn() };
+  const verification = { attachControls: jest.fn() };
+  const prismaOrder = { update: jest.fn(), updateMany: jest.fn() };
   let service: OrderDraftService;
 
   const file = (filename = 'screenshot.png') => ({
@@ -116,14 +120,14 @@ describe('OrderDraftService', () => {
         CashDraftStore,
         ForeignDraftService,
         ForeignDraftStore,
-        ReportedPaymentService,
         DraftAttachmentNotifier,
         { provide: OrdersService, useValue: orders },
         { provide: RequisitesService, useValue: requisites },
         { provide: PaymentsService, useValue: payments },
         { provide: AttachmentsService, useValue: attachments },
         { provide: TelegramSender, useValue: sender },
-        { provide: PrismaService, useValue: { order: { update: jest.fn() } } },
+        { provide: OrderVerificationService, useValue: verification },
+        { provide: PrismaService, useValue: { order: prismaOrder } },
       ],
     }).compile();
 
@@ -183,7 +187,6 @@ describe('OrderDraftService', () => {
       );
 
       expect(reply?.html).toContain('кілька номерів або чужі реквізити');
-      expect(reply?.html).toContain('💳 Кілька номерів / реквізити');
       expect(reply?.html).toContain('/requisites');
       expect(orders.create).not.toHaveBeenCalled();
     });
@@ -256,6 +259,7 @@ describe('OrderDraftService', () => {
       const reply = await service.handleText(MANAGER, template());
 
       expect(reply?.buttons).toEqual([
+        [{ text: '📎 Прикріпити файли', callback_data: 'oa:0000-066717' }],
         [{ text: '🗑 Скасувати замовлення', callback_data: 'del:0000-066717' }],
       ]);
     });
@@ -344,26 +348,6 @@ describe('OrderDraftService', () => {
       );
       expect(reply.html).toContain('Частину замовлення');
       expect(reply.html).toContain('0000-066717(1)');
-    });
-
-    it('should keep the attached files for the part', async () => {
-      orders.create.mockResolvedValue(partOfNumber());
-      await service.addFile(MANAGER, file());
-      await service.handleText(MANAGER, template());
-
-      await service.addPart(MANAGER);
-
-      expect(orders.create).toHaveBeenCalledWith(MANAGER.id, expect.anything(), {
-        notify: false,
-        addPart: true,
-      });
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ orderNumber: '0000-066717(1)' }),
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нова частина замовлення'),
-      );
     });
 
     it('should add a part only once, however many times the button is pressed', async () => {
@@ -529,33 +513,27 @@ describe('OrderDraftService', () => {
     });
   });
 
-  it('should report a number taken between the check and the creation, keeping files buffered', async () => {
+  it('should report a number taken between the check and the creation, and allow a retry', async () => {
     orders.create.mockRejectedValue(new OrderNumberTakenError('0000-066717'));
 
-    await service.addFile(MANAGER, file());
     const reply = await service.handleText(MANAGER, template());
 
     expect(reply?.html).toContain('вже є в системі');
 
     orders.create.mockResolvedValue(createdOrder());
     const retry = await service.handleText(MANAGER, template());
-    expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-      expect.anything(),
-      [file()],
-      { telegramId: MANAGER.telegramId, name: MANAGER.name },
-      true,
-      expect.any(String),
-    );
     expect(retry?.html).toContain('створено');
   });
 
   it('should drop buffered files on cancel', async () => {
+    service.startRequisites(USER);
     await service.addFile(MANAGER, file());
 
     expect(service.cancel(USER).html).toContain('Скасовано');
 
-    orders.create.mockResolvedValue(createdOrder());
-    await service.handleText(MANAGER, template());
+    service.startRequisites(USER);
+    await service.handleText(MANAGER, '0000-068772 335,58 грн.\n0000-068773 971,83 грн.\n44,9%');
+    expect((await service.confirmRequisites(MANAGER)).html).toBeDefined();
     expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
   });
 
@@ -564,35 +542,33 @@ describe('OrderDraftService', () => {
   });
 
   describe('attaching a file', () => {
+    it('should answer a hint and keep nothing for a file outside a text mode', async () => {
+      const reply = await service.addFile(MANAGER, file(), template());
+
+      expect(reply.html).toContain('«📎 Прикріпити файли»');
+      expect(orders.create).not.toHaveBeenCalled();
+      expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
+      await service.onApplicationShutdown();
+      expect(sender.send).not.toHaveBeenCalled();
+    });
+
     it('should just acknowledge a standalone file with no caption', async () => {
+      service.startRequisites(USER);
       const reply = await service.addFile(MANAGER, file());
 
       expect(reply.html).toContain('Додано');
       expect(reply.html).toContain('1/10');
     });
 
-    it('should create the order from a caption sent together with the file', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-
-      const reply = await service.addFile(MANAGER, file(), template());
-
-      expect(reply.html).toContain('створено');
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.anything(),
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нове замовлення'),
-      );
-    });
-
     it('should reject an unsupported file type', async () => {
+      service.startRequisites(USER);
       const reply = await service.addFile(MANAGER, { ...file(), mimeType: 'application/zip' });
 
       expect(reply.html).toContain('не підтримується');
     });
 
     it('should cap the number of buffered files', async () => {
+      service.startRequisites(USER);
       for (let i = 0; i < 10; i += 1) {
         await service.addFile(MANAGER, file(`f${i}.png`));
       }
@@ -600,75 +576,6 @@ describe('OrderDraftService', () => {
       const reply = await service.addFile(MANAGER, file('overflow.png'));
 
       expect(reply.html).toContain('Максимум 10');
-    });
-
-    it('should nudge instead of the generic fallback when files are waiting for details', async () => {
-      await service.addFile(MANAGER, file());
-
-      const reply = await service.handleText(MANAGER, 'ще не знаю що писати');
-
-      expect(reply?.html).toContain('без даних замовлення');
-    });
-
-    it('should notify admins with a single message merging the order and the file', async () => {
-      const order = createdOrder();
-      orders.create.mockResolvedValue(order);
-
-      await service.addFile(MANAGER, file(), template());
-
-      expect(orders.create).toHaveBeenCalledWith(MANAGER.id, expect.anything(), {
-        notify: false,
-        addPart: false,
-      });
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        order,
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.stringContaining('Нове замовлення'),
-      );
-      expect(sender.sendToAdmins).not.toHaveBeenCalled();
-    });
-
-    it('should fall back to a separate admin message when the merged caption would be too long', async () => {
-      const longComment = 'Дуже '.repeat(200).trim();
-      const order = createdOrder({ comment: longComment });
-      orders.create.mockResolvedValue(order);
-
-      await service.addFile(MANAGER, file(), template({ Коментар: longComment }));
-
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        order,
-        [file()],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        undefined,
-      );
-      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('Нове замовлення'));
-    });
-
-    it('should treat a file sent after a created order as the start of the next order', async () => {
-      orders.create.mockResolvedValue(createdOrder());
-      await service.handleText(MANAGER, template());
-
-      const reply = await service.addFile(MANAGER, file('after.png'));
-
-      expect(reply.html).toContain('Додано');
-      expect(reply.html).toContain('1/10');
-      expect(attachments.saveFromTelegram).not.toHaveBeenCalled();
-
-      orders.create.mockResolvedValue(
-        createdOrder({ id: 2, orderNumber: '0000-066718', baseNumber: '0000-066718' }),
-      );
-      await service.handleText(MANAGER, template({ Номер: '0000-066718' }));
-
-      expect(attachments.saveFromTelegram).toHaveBeenCalledWith(
-        expect.objectContaining({ orderNumber: '0000-066718' }),
-        [file('after.png')],
-        { telegramId: MANAGER.telegramId, name: MANAGER.name },
-        true,
-        expect.any(String),
-      );
     });
   });
 
@@ -775,6 +682,7 @@ UA549358710000067320000088286"`;
 
     it('should create several numbers as one group, as a REGULAR order, with no requisites of their own', async () => {
       orders.createGroup.mockResolvedValue(groupOrders());
+      sender.sendToAdmins.mockResolvedValue(1);
       await begin(GROUP);
 
       const reply = await service.confirmRequisites(MANAGER);
@@ -795,6 +703,11 @@ UA549358710000067320000088286"`;
       );
       expect(requisites.addMany).not.toHaveBeenCalled();
       expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
+      expect(verification.attachControls).toHaveBeenCalledWith(groupOrders(), 1);
+      expect(prismaOrder.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: groupOrders().map((order) => order.id) } },
+        data: { adminMessageId: 1 },
+      });
       expect(sender.sendToAdmins).toHaveBeenCalledWith(
         expect.stringContaining('Разом: 1 912,82 грн'),
       );
@@ -1016,8 +929,10 @@ UA549358710000067320000088286"`;
 
     it('should attach the files to the first order and merge the notice into their caption', async () => {
       orders.createGroup.mockResolvedValue(groupOrders());
+      attachments.saveFromTelegram.mockResolvedValue([{ telegramMessageId: 61 }]);
+      service.startRequisites(USER);
       await service.addFile(MANAGER, file());
-      await begin(GROUP);
+      await service.handleText(MANAGER, GROUP);
 
       await service.confirmRequisites(MANAGER);
 
@@ -1029,6 +944,7 @@ UA549358710000067320000088286"`;
         expect.stringContaining('Разом: 1 912,82 грн'),
       );
       expect(sender.sendToAdmins).not.toHaveBeenCalled();
+      expect(verification.attachControls).toHaveBeenCalledWith(groupOrders(), 61);
     });
 
     describe('when a number is already in the system', () => {
@@ -1183,6 +1099,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
     it('should preview the message in the template, then create the closing with every field', async () => {
       orders.create.mockResolvedValue(closing());
+      sender.sendToAdmins.mockResolvedValue(5);
 
       const preview = await begin(EXAMPLE);
       expect(preview?.html).toContain('Клієнт: <b>Гук Руслан</b> за підрахунком 31 серпня 2026');
@@ -1212,6 +1129,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       const [[notice]] = sender.sendToAdmins.mock.calls as [[string]];
       expect(notice).toContain('Закриття заборгованості клієнта</b>\n№ <b>1789996839638</b>');
       expect(notice).toContain('№ <b>1789996839638</b>');
+      expect(verification.attachControls).toHaveBeenCalledWith([closing()], 5);
     });
 
     it('should store card payments as requisites of the closing', async () => {
@@ -1301,6 +1219,9 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
 
       const reply = await service.confirmKit(MANAGER);
 
+      expect(
+        (reply.buttons ?? []).flat().map((b) => ('callback_data' in b ? b.callback_data : b.text)),
+      ).toEqual(['oa:0000-062265']);
       expect(orders.createGroup).toHaveBeenCalledWith(
         MANAGER.id,
         [
@@ -1342,16 +1263,12 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       return service.handleText(MANAGER, text);
     };
 
-    beforeEach(() => {
-      payments.findByExternalId.mockResolvedValue(null);
-      payments.ingest.mockResolvedValue({ kind: 'recorded', order: createdOrder() });
-    });
-
-    it('should create a new number and record the cash on it', async () => {
+    it('should create the order unpaid, record no payment and tell the admins', async () => {
       orders.createGroup.mockResolvedValue([createdOrder({ orderNumber: '0000-066498' })]);
 
       const preview = await begin();
-      expect(preview?.html).toContain('Створю це замовлення');
+      expect(preview?.html).toContain('Створю замовлення');
+      expect(preview?.html).toContain('Оплату не записую');
 
       const reply = await service.confirmCash(MANAGER);
 
@@ -1364,19 +1281,29 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
           exchangeRate: '44.9',
         }),
       );
-      expect(payments.ingest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          external_transaction_id: 'cash:0000-066498:2026-09-01T12:20:00.000Z:4260.00',
-          order_number: '0000-066498',
-          amount: '4260.00',
-          currency: 'UAH',
-          payer_name: 'Христина Павлів передала готівку Христині Вихопень ( Саджениці)',
-        }),
-      );
-      expect(reply.html).toContain('Оплату готівкою записано');
+      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('0000-066498'));
+      expect(reply.html).toContain('«Оплата готівкою» надіслано адмінам');
+      expect(
+        (reply.buttons ?? []).flat().map((b) => ('callback_data' in b ? b.callback_data : b.text)),
+      ).toEqual(['oa:0000-066498']);
     });
 
-    it('should only record dollars on an existing dollar number', async () => {
+    it('should put «з відсотком» into the comment', async () => {
+      orders.createGroup.mockResolvedValue([createdOrder({ orderNumber: '0000-066498' })]);
+
+      expect((await begin(`${SAMPLE}\nБез відсотка`))?.html).toContain('З відсотком: ні');
+      await service.confirmCash(MANAGER);
+
+      const [, , options] = orders.createGroup.mock.calls[0] as [
+        unknown,
+        unknown,
+        { comment: string },
+      ];
+      expect(options.comment).toContain('з урахуванням %: ні');
+    });
+
+    it('should only tell the admins when a dollar number already exists', async () => {
       orders.findWithBalance.mockResolvedValue({
         order: createdOrder({ orderNumber: '0000-066498', currency: 'USD' }),
         amountPaid: new Prisma.Decimal(0),
@@ -1388,20 +1315,17 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       await service.confirmCash(MANAGER);
 
       expect(orders.createGroup).not.toHaveBeenCalled();
-      expect(payments.ingest).toHaveBeenCalledWith(
-        expect.objectContaining({ amount: '150.00', currency: 'USD' }),
-      );
+      expect(payments.ingest).not.toHaveBeenCalled();
+      expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('0000-066498'));
     });
 
-    it('should refuse hryvnias on a dollar number, and the same cash twice', async () => {
+    it('should refuse hryvnias on a dollar number', async () => {
       orders.findWithBalance.mockResolvedValue({
         order: createdOrder({ orderNumber: '0000-066498', currency: 'USD' }),
         amountPaid: new Prisma.Decimal(0),
       });
-      expect((await begin())?.html).toContain('у доларах, а оплата в гривнях');
 
-      payments.findByExternalId.mockResolvedValue({ id: 1 });
-      expect((await begin())?.html).toContain('Цю оплату вже зареєстровано');
+      expect((await begin())?.html).toContain('у доларах, а оплата в гривнях');
     });
 
     it('should name a euro number in the currency mismatch', async () => {
@@ -1417,7 +1341,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       const reply = await service.handleText(MANAGER, SAMPLE);
 
       expect(reply?.html).toContain('схоже на дату');
-      expect(reply?.html).toContain('/cash');
+      expect(reply?.html).toContain(NEW_REQUEST_LABEL);
       expect(orders.create).not.toHaveBeenCalled();
     });
   });
@@ -1461,6 +1385,9 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(payments.ingest).not.toHaveBeenCalled();
       expect(sender.sendToAdmins).toHaveBeenCalledWith(expect.stringContaining('0000-066498'));
       expect(reply.html).toContain('«Оплата закордонного замовлення» надіслано адмінам · 100 €');
+      expect(
+        (reply.buttons ?? []).flat().map((b) => ('callback_data' in b ? b.callback_data : b.text)),
+      ).toEqual(['oa:0000-066498']);
     });
 
     it('should only tell the admins when the number already exists', async () => {
@@ -1476,15 +1403,17 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       expect(sender.sendToAdmins).toHaveBeenCalledTimes(1);
     });
 
-    it('should point to /foreign when the template comes outside the button', async () => {
+    it('should point to the new-request button when the template comes outside the mode', async () => {
       const reply = await service.handleText(MANAGER, TEMPLATE);
 
-      expect(reply?.html).toContain('/foreign');
+      expect(reply?.html).toContain(NEW_REQUEST_LABEL);
       expect(orders.create).not.toHaveBeenCalled();
       expect(orders.createGroup).not.toHaveBeenCalled();
 
+      // a file with the template outside the mode gets the receipt hint and creates nothing
       const withFile = await service.addFile(MANAGER, file(), TEMPLATE);
-      expect(withFile.html).toContain('/foreign');
+      expect(withFile.html).toContain('«📎 Прикріпити файли»');
+      expect(orders.createGroup).not.toHaveBeenCalled();
     });
 
     it('should create the order in the currency the template names', async () => {
@@ -1503,15 +1432,16 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
       );
     });
 
-    it('should refuse clashing currencies and a missing time instead of creating the order', async () => {
+    it('should refuse clashing currencies and a missing date instead of creating the order', async () => {
       expect((await begin(TEMPLATE.replace('100 EUR', '100 грн')))?.html).toContain('різні валюти');
-      expect((await begin(TEMPLATE.replace('15:20', '')))?.html).toContain('Не вказано дату й час');
+      expect((await begin(TEMPLATE.replace(/Дата.*\n/, '')))?.html).toContain('Не вказано дату');
       expect(orders.createGroup).not.toHaveBeenCalled();
     });
   });
 
   describe('onApplicationShutdown', () => {
     it('should warn a manager with buffered files', async () => {
+      service.startRequisites(USER);
       await service.addFile(MANAGER, file());
 
       await service.onApplicationShutdown();
@@ -1578,6 +1508,7 @@ https://docs.google.com/spreadsheets/d/abc/edit`;
     });
 
     it('should warn each affected manager only once, and leave others alone', async () => {
+      service.startRequisites(USER);
       await service.addFile(MANAGER, file());
       const other = { ...MANAGER, id: 8, telegramId: 6000000000n };
 

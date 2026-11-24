@@ -40,6 +40,8 @@ describe('OrdersService', () => {
     groupBy: jest.fn(),
     count: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
+    aggregate: jest.fn(),
   };
   const payment = { groupBy: jest.fn(), findMany: jest.fn() };
   const refund = { groupBy: jest.fn(), findMany: jest.fn() };
@@ -543,6 +545,77 @@ describe('OrdersService', () => {
     it('should not query anything for an empty list', async () => {
       await expect(service.findGroupsByOrderIds([])).resolves.toEqual([]);
       expect(order.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('numbersByIds', () => {
+    it('should return the order numbers in the order of the given ids', async () => {
+      order.findMany.mockResolvedValue([
+        { id: 1, orderNumber: 'A-1' },
+        { id: 2, orderNumber: 'A-1(1)' },
+        { id: 3, orderNumber: 'B-2' },
+      ]);
+
+      await expect(service.numbersByIds([3, 1, 2])).resolves.toEqual(['B-2', 'A-1', 'A-1(1)']);
+      expect(order.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [3, 1, 2] } },
+        select: { id: true, orderNumber: true },
+      });
+    });
+
+    it('should skip an id that no longer exists and query nothing for an empty list', async () => {
+      order.findMany.mockResolvedValue([{ id: 1, orderNumber: 'A-1' }]);
+
+      await expect(service.numbersByIds([2, 1])).resolves.toEqual(['A-1']);
+      order.findMany.mockClear();
+      await expect(service.numbersByIds([])).resolves.toEqual([]);
+      expect(order.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setPaidAt', () => {
+    it('should stamp the date on every order of the ids', async () => {
+      const paidAt = new Date('2026-11-04T12:30:00.000Z');
+      order.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.setPaidAt([3, 4], paidAt);
+
+      expect(order.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [3, 4] } },
+        data: { paidAt },
+      });
+    });
+  });
+
+  describe('fillPaidAt', () => {
+    it('should stamp the date only on the orders that have none', async () => {
+      const paidAt = new Date('2026-11-04T12:30:00.000Z');
+      order.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.fillPaidAt([3, 4], paidAt);
+
+      expect(order.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [3, 4] }, paidAt: null },
+        data: { paidAt },
+      });
+    });
+  });
+
+  describe('latestPaidAt', () => {
+    it('should return the latest payment date of the orders', async () => {
+      const paidAt = new Date('2026-11-04T12:30:00.000Z');
+      order.aggregate.mockResolvedValue({ _max: { paidAt } });
+
+      await expect(service.latestPaidAt([3, 4])).resolves.toBe(paidAt);
+      expect(order.aggregate).toHaveBeenCalledWith({
+        where: { id: { in: [3, 4] } },
+        _max: { paidAt: true },
+      });
+    });
+
+    it('should return null, without a query, for no ids', async () => {
+      await expect(service.latestPaidAt([])).resolves.toBeNull();
+      expect(order.aggregate).not.toHaveBeenCalled();
     });
   });
 

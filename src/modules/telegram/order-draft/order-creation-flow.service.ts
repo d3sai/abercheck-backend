@@ -12,9 +12,10 @@ import {
 } from '../../orders/orders.service';
 import type { BotReply } from '../core/bot-reply';
 import { button } from '../core/bot-reply';
-import { MENU_LABEL } from '../core/menu';
+import { NEW_REQUEST_LABEL } from '../core/menu';
 import { escapeHtml, formatMoneyIn } from '../core/format';
 import { adminOrderCreatedMessage } from '../notifications/order-templates';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import { DraftAttachmentNotifier } from './draft-attachment-notifier';
 import {
   detectCurrency,
@@ -53,7 +54,7 @@ function parseClientName(input: string): ParseResult {
   return parseDateTime(numericDates(input.trim()))
     ? {
         ok: false,
-        error: `схоже на дату, а не на ФОП чи ТОВ. Якщо це оплата готівкою, натисніть «${MENU_LABEL.Cash}» (/cash).`,
+        error: `схоже на дату, а не на ФОП чи ТОВ. Якщо це оплата готівкою, натисніть «${NEW_REQUEST_LABEL}» і оберіть готівку.`,
       }
     : parseText(255)(input);
 }
@@ -221,7 +222,10 @@ export class OrderCreationFlowService {
         `${label} № <b>${escapeHtml(order.orderNumber)}</b> створено — повідомлю про оплату.`,
         `${escapeHtml(order.clientName)} · ${formatMoneyIn(order.amountDue, order.currency)}`,
       ].join('\n'),
-      buttons: [[button('🗑 Скасувати замовлення', `del:${order.orderNumber}`)]],
+      buttons: [
+        [attachOrderButton(order.orderNumber)],
+        [button('🗑 Скасувати замовлення', `del:${order.orderNumber}`)],
+      ],
     };
   }
 }

@@ -266,6 +266,53 @@ export class OrdersService {
     return this.groupsWithBalance([...new Set(orders.map((order) => order.baseNumber))]);
   }
 
+  /** Order numbers for ids, in the order of `ids`; an id that no longer exists is skipped. */
+  async numbersByIds(ids: number[]): Promise<string[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const found = await this.prisma.order.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, orderNumber: true },
+    });
+    const byId = new Map(found.map((order) => [order.id, order.orderNumber]));
+    return ids.flatMap((id) => byId.get(id) ?? []);
+  }
+
+  findById(id: number): Promise<Order | null> {
+    return this.prisma.order.findUnique({ where: { id } });
+  }
+
+  /** The client paid: stamps the date on every order of `ids`. */
+  async setPaidAt(ids: number[], paidAt: Date): Promise<void> {
+    await this.prisma.order.updateMany({ where: { id: { in: ids } }, data: { paidAt } });
+  }
+
+  /** The first payment dates the orders: later ones leave it as it is. */
+  async fillPaidAt(ids: number[], paidAt: Date): Promise<void> {
+    await this.prisma.order.updateMany({
+      where: { id: { in: ids }, paidAt: null },
+      data: { paidAt },
+    });
+  }
+
+  /** The message of the orders' notice in «Оплати»: deleting an order removes it from the chat. */
+  async setAdminMessageId(ids: number[], adminMessageId: number): Promise<void> {
+    await this.prisma.order.updateMany({ where: { id: { in: ids } }, data: { adminMessageId } });
+  }
+
+  /** The latest payment date among the orders, or null when none has one. */
+  async latestPaidAt(ids: number[]): Promise<Date | null> {
+    if (ids.length === 0) {
+      return null;
+    }
+    const { _max } = await this.prisma.order.aggregate({
+      where: { id: { in: ids } },
+      _max: { paidAt: true },
+    });
+    return _max.paidAt;
+  }
+
   async list(
     { managerId, statuses }: OrderFilter,
     limit: number,

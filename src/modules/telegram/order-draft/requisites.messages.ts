@@ -6,9 +6,16 @@ import {
 } from '../../../generated/prisma/client';
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
-import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
-import { MENU_LABEL } from '../core/menu';
+import {
+  escapeHtml,
+  formatKyivDateTime,
+  formatKyivPaidAt,
+  formatMoneyIn as money,
+} from '../core/format';
+import { NEW_REQUEST_LABEL } from '../core/menu';
 import { formatRate } from '../notifications/order-templates';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
+import type { NumberCheck } from './draft-orders';
 import type { RequisitesPlan } from './requisites.parser';
 
 export const RequisitesAction = {
@@ -22,13 +29,13 @@ export function requisiteBlock(
   account: string | null,
   amount: Prisma.Decimal,
   currency: Currency,
-  paidAt: Date,
+  paidAt: Date | null,
 ): string {
   const fields = [
     payerName,
     ...(account ? [account] : []),
     money(amount, currency),
-    formatKyivDateTime(paidAt),
+    ...(paidAt ? [formatKyivPaidAt(paidAt)] : []),
   ];
   return `<pre>${fields.map(escapeHtml).join('\n')}</pre>`;
 }
@@ -50,9 +57,9 @@ export function requisitesHint(): BotReply {
       "Надішліть одним повідомленням, кожен пункт з нового рядка (* — обов'язково):",
       '• Номер і сума* — кожен номер окремим рядком',
       '• Загальна сума — «сума: 6 667 грн»',
-      '• Реквізити* — ФОП, ТОВ чи картка з іменем, сумою і часом оплати; кілька — кожні з нового рядка',
+      '• Реквізити* — ФОП, ТОВ чи картка з іменем і сумою; кілька — кожні з нового рядка',
       '• Курс',
-      '• Дата*',
+      '• Дата* — час оплати за потреби, якщо відомий',
       '',
       `<pre>${example}</pre>`,
       '',
@@ -68,8 +75,8 @@ export function multipleOrRequisitesGuard(): BotReply {
   return {
     html: [
       '⚠️ Схоже на кілька номерів або чужі реквізити.',
-      `Натисніть «${escapeHtml(MENU_LABEL.Requisites)}» (/requisites) і надішліть це повідомлення ще раз.`,
-      `Якщо це оплата на Кит, натисніть «${escapeHtml(MENU_LABEL.Kit)}» (/kit).`,
+      'Надішліть /requisites і повторіть це повідомлення.',
+      `Якщо це оплата на Кит, натисніть «${NEW_REQUEST_LABEL}».`,
     ].join('\n'),
   };
 }
@@ -180,6 +187,7 @@ export function requisitesCreatedReply(orders: Order[], skipped: string[]): BotR
       : `✅ Оплату зареєстровано: № <b>${escapeHtml(first.orderNumber)}</b> · ${money(total, first.currency)}`;
   return {
     html: [head, 'Повідомлю про оплату.', ...skippedNote].join('\n'),
+    buttons: [[attachOrderButton(first.orderNumber)]],
   };
 }
 
@@ -230,4 +238,20 @@ export function adminRequisitesMessage(
     `Менеджер: ${escapeHtml(managerName)}`,
     `Створено: ${formatKyivDateTime(first.createdAt)}`,
   ].join('\n');
+}
+
+/** The bot's answer when a number of the plan already exists and the plan cannot go on. */
+export function existingNumberReply(check: Exclude<NumberCheck, { ok: true }>): BotReply {
+  switch (check.reason) {
+    case 'in-group':
+      return {
+        html: `⚠️ Номер ${escapeHtml(check.number)} уже є в системі у складі № ${escapeHtml(check.groupNumber)} — додати до нього не можна.`,
+      };
+    case 'other-currency':
+      return {
+        html: `⚠️ Номер ${escapeHtml(check.number)} уже є в системі в іншій валюті — частину в іншій валюті додати не можна.`,
+      };
+    case 'all-taken':
+      return { html: `⚠️ Усі ці номери вже є в системі: ${check.skipped.join(', ')}.` };
+  }
 }

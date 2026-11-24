@@ -1,0 +1,52 @@
+import { Module, forwardRef } from '@nestjs/common';
+import { AttachmentsModule } from '../attachments/attachments.module';
+import { ManagersModule } from '../managers/managers.module';
+import { OrdersModule } from '../orders/orders.module';
+import { RequisitesModule } from '../requisites/requisites.module';
+import { TelegramModule } from '../telegram/telegram.module';
+import { FinanceClient } from './finance.client';
+import { FinancierActionsService } from './financier-actions.service';
+import { FinanceWebhookController } from './finance-webhook.controller';
+import { FinanceWebhookGuard } from './finance-webhook.guard';
+import { FinanceSyncUpdate } from './finance-sync.update';
+import { ManagerActionsService } from './manager-actions.service';
+import { OrderDeletedListener } from './order-deleted.listener';
+import { PendingOrdersRepository } from './pending-orders.repository';
+import { RequestCardsRepository } from './request-cards.repository';
+import { RequestCreateService } from './request-create.service';
+import { RequestReceiptsService } from './request-receipts.service';
+import { RequestSyncService } from './request-sync.service';
+
+@Module({
+  // forwardRef: TelegramModule's telegraf `include` lists this module back
+  imports: [
+    AttachmentsModule,
+    ManagersModule,
+    OrdersModule,
+    RequisitesModule,
+    forwardRef(() => TelegramModule),
+  ],
+  controllers: [FinanceWebhookController],
+  providers: [
+    FinanceClient,
+    FinanceWebhookGuard,
+    RequestCardsRepository,
+    PendingOrdersRepository,
+    RequestCreateService,
+    RequestSyncService,
+    FinancierActionsService,
+    ManagerActionsService,
+    OrderDeletedListener,
+    RequestReceiptsService,
+    FinanceSyncUpdate,
+  ],
+  exports: [
+    FinanceClient,
+    RequestCardsRepository,
+    PendingOrdersRepository,
+    RequestCreateService,
+    RequestReceiptsService,
+    RequestSyncService,
+  ],
+})
+export class FinanceSyncModule {}

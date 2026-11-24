@@ -31,6 +31,16 @@ export class ManagersService {
     return this.prisma.manager.findFirst({ where: { telegramId, status: ManagerStatus.ACTIVE } });
   }
 
+  withOldKeyboard(version: number): Promise<Manager[]> {
+    return this.prisma.manager.findMany({
+      where: { status: ManagerStatus.ACTIVE, keyboardVersion: { lt: version } },
+    });
+  }
+
+  async markKeyboard(id: number, version: number): Promise<void> {
+    await this.prisma.manager.update({ where: { id }, data: { keyboardVersion: version } });
+  }
+
   list(): Promise<Manager[]> {
     return this.prisma.manager.findMany({ orderBy: [{ status: 'asc' }, { createdAt: 'asc' }] });
   }

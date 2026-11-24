@@ -39,4 +39,27 @@ describe('login throttlers', () => {
       limit: 30,
     });
   });
+
+  describe('with CLIENT_IP_TOKEN set', () => {
+    beforeEach(() => {
+      process.env.CLIENT_IP_TOKEN = 'a-shared-secret-16';
+    });
+    afterEach(() => {
+      delete process.env.CLIENT_IP_TOKEN;
+    });
+
+    it('should ignore the client IP header without the matching token', async () => {
+      await expect(trackerOf('ip')(request)).resolves.toBe('10.0.0.1');
+      const wrong = { ...request, headers: { ...request.headers, 'x-client-ip-token': 'nope' } };
+      await expect(trackerOf('ip')(wrong)).resolves.toBe('10.0.0.1');
+    });
+
+    it('should trust the client IP header carrying the matching token', async () => {
+      const trusted = {
+        ...request,
+        headers: { ...request.headers, 'x-client-ip-token': 'a-shared-secret-16' },
+      };
+      await expect(trackerOf('ip')(trusted)).resolves.toBe('203.0.113.5');
+    });
+  });
 });

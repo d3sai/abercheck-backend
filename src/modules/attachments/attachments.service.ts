@@ -4,13 +4,23 @@ import { InjectBot } from 'nestjs-telegraf';
 import { Telegraf } from 'telegraf';
 import type { Convenience, Message } from 'telegraf/types';
 import type { EnvironmentVariables } from '../../common/config/env.validation';
+import { optionalPositiveInt } from '../../common/config/optional-config';
 import type { Order, OrderAttachment } from '../../generated/prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Initiator } from '../refunds/refund.events';
-import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
+import {
+  escapeHtml,
+  formatKyivDateTime,
+  formatKyivPaidAt,
+  formatMoneyIn,
+} from '../telegram/core/format';
+import { formatRate } from '../telegram/notifications/order-templates';
 import { AttachmentNotFoundError, AttachmentStorageError } from './attachments.errors';
 
-type CaptionOrder = Pick<Order, 'orderNumber' | 'clientName' | 'amountDue' | 'currency'>;
+type CaptionOrder = Pick<
+  Order,
+  'orderNumber' | 'clientName' | 'amountDue' | 'currency' | 'exchangeRate' | 'comment' | 'paidAt'
+>;
 
 export interface TelegramFileRef {
   fileId: string;
@@ -26,19 +36,30 @@ function fileIdOf(sent: SentMedia): string {
   return 'document' in sent ? sent.document.file_id : sent.photo[sent.photo.length - 1]!.file_id;
 }
 
+// the whole order, so the file in «Оплати» reads on its own
 function caption(order: CaptionOrder, uploader: Initiator): string {
   return [
     `📎 <b>${escapeHtml(order.clientName)}</b>`,
-    `Замовлення № ${escapeHtml(order.orderNumber)}`,
-    `Сума до оплати: ${formatMoneyIn(order.amountDue, order.currency)}`,
-    `Додав: ${escapeHtml(uploader.name)}`,
+    `№ ${escapeHtml(order.orderNumber)}`,
+    `Сума: ${formatMoneyIn(order.amountDue, order.currency)}`,
+    ...(order.exchangeRate ? [`Курс: ${formatRate(order.exchangeRate)}`] : []),
+    ...(order.paidAt ? [`Дата оплати: ${formatKyivPaidAt(order.paidAt)}`] : []),
+    ...(order.comment ? [`Коментар: ${escapeHtml(order.comment.slice(0, 300))}`] : []),
+    `Завантажено: ${escapeHtml(uploader.name)} · ${formatKyivDateTime(new Date())}`,
   ].join('\n');
 }
+
+const replyTo = (messageId: number | undefined) =>
+  messageId === undefined
+    ? {}
+    : { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } };
 
 @Injectable()
 export class AttachmentsService {
   private readonly logger = new Logger(AttachmentsService.name);
   private readonly storageChatId: number;
+  // files live in the «Оплати» topic next to the order notices, not in the group's general topic
+  private readonly storageThreadId: number | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -46,6 +67,19 @@ export class AttachmentsService {
     config: ConfigService<EnvironmentVariables, true>,
   ) {
     this.storageChatId = config.get('TELEGRAM_ADMIN_CHAT_ID', { infer: true });
+    this.storageThreadId = optionalPositiveInt(config, 'TELEGRAM_TOPIC_PAYMENTS_ID');
+  }
+
+  /** The notice of the order in the chat, or its first file when the notice went with it. */
+  private async anchorOf(orderId: number): Promise<number | undefined> {
+    const row = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        adminMessageId: true,
+        attachments: { orderBy: { id: 'asc' }, take: 1, select: { telegramMessageId: true } },
+      },
+    });
+    return row?.adminMessageId ?? row?.attachments[0]?.telegramMessageId ?? undefined;
   }
 
   async save(
@@ -54,10 +88,11 @@ export class AttachmentsService {
     uploader: Initiator,
     keepMessageOnDelete: boolean,
   ): Promise<OrderAttachment[]> {
-    const attachments: OrderAttachment[] = [];
-    for (const file of files) {
-      attachments.push(
-        await this.store(
+    const anchor = await this.anchorOf(order.id);
+    // in parallel: one by one, a few phone photos outlast the Mini App's wait for the upload
+    return Promise.all(
+      files.map((file) =>
+        this.store(
           order,
           uploader,
           keepMessageOnDelete,
@@ -66,12 +101,16 @@ export class AttachmentsService {
             this.bot.telegram.sendDocument(
               this.storageChatId,
               { source: file.buffer, filename: file.originalname },
-              { caption: caption(order, uploader), parse_mode: 'HTML' },
+              {
+                caption: caption(order, uploader),
+                parse_mode: 'HTML',
+                message_thread_id: this.storageThreadId,
+                ...replyTo(anchor),
+              },
             ),
         ),
-      );
-    }
-    return attachments;
+      ),
+    );
   }
 
   async saveFromTelegram(
@@ -85,6 +124,8 @@ export class AttachmentsService {
       return [];
     }
 
+    // a caption from the caller means the notice goes with the files; otherwise they answer the notice
+    const anchor = groupCaption === undefined ? await this.anchorOf(order.id) : undefined;
     const groups = (['photo', 'document'] as const)
       .map((kind) => ({ kind, files: files.filter((f) => f.kind === kind) }))
       .filter((group) => group.files.length > 0);
@@ -101,6 +142,7 @@ export class AttachmentsService {
           group.kind,
           group.files,
           captionText,
+          anchor,
         )),
       );
     }
@@ -114,6 +156,7 @@ export class AttachmentsService {
     kind: 'photo' | 'document',
     files: TelegramFileRef[],
     captionText: string | undefined,
+    anchor: number | undefined,
   ): Promise<OrderAttachment[]> {
     if (files.length === 1) {
       const file = files[0]!;
@@ -123,10 +166,14 @@ export class AttachmentsService {
             ? this.bot.telegram.sendPhoto(this.storageChatId, file.fileId, {
                 caption: captionText,
                 parse_mode: 'HTML',
+                message_thread_id: this.storageThreadId,
+                ...replyTo(anchor),
               })
             : this.bot.telegram.sendDocument(this.storageChatId, file.fileId, {
                 caption: captionText,
                 parse_mode: 'HTML',
+                message_thread_id: this.storageThreadId,
+                ...replyTo(anchor),
               }),
         ),
       ];
@@ -141,7 +188,10 @@ export class AttachmentsService {
     })) as unknown as Convenience.MediaGroup;
     let sent: SentMedia[];
     try {
-      sent = (await this.bot.telegram.sendMediaGroup(this.storageChatId, media)) as SentMedia[];
+      sent = (await this.bot.telegram.sendMediaGroup(this.storageChatId, media, {
+        message_thread_id: this.storageThreadId,
+        ...replyTo(anchor),
+      })) as SentMedia[];
     } catch (error) {
       this.logger.error(`Failed to store attachments for order #${order.id} in Telegram`, error);
       throw new AttachmentStorageError(error);

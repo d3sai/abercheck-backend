@@ -22,6 +22,12 @@ export function formatKyivDateTime(date: Date): string {
   return `${p.hour}:${p.minute} ${p.day}.${p.month}.${p.year}`;
 }
 
+/** The time of a payment the manager gave only a day for is Kyiv midnight: show the day alone. */
+export function formatKyivPaidAt(date: Date): string {
+  const p = kyivParts(date);
+  return p.hour === '00' && p.minute === '00' ? formatKyivDate(date) : formatKyivDateTime(date);
+}
+
 export function formatKyivDate(date: Date): string {
   const p = kyivParts(date);
   return `${p.day}.${p.month}.${p.year}`;

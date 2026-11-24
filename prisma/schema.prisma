@@ -65,47 +65,57 @@ enum ManagerRole {
 }
 
 model Manager {
-  id             Int           @id @default(autoincrement())
-  telegramId     BigInt        @unique @map("telegram_id")
-  name           String
-  username       String?
-  status         ManagerStatus @default(PENDING)
-  role           ManagerRole   @default(MANAGER)
-  login          String?       @unique
-  passwordHash   String?       @map("password_hash")
-  sessionVersion Int           @default(0) @map("session_version")
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  id              Int           @id @default(autoincrement())
+  telegramId      BigInt        @unique @map("telegram_id")
+  name            String
+  username        String?
+  status          ManagerStatus @default(PENDING)
+  role            ManagerRole   @default(MANAGER)
+  login           String?       @unique
+  passwordHash    String?       @map("password_hash")
+  sessionVersion  Int           @default(0) @map("session_version")
+  keyboardVersion Int           @default(0) @map("keyboard_version")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  orders Order[]
+  orders        Order[]
+  requestCards  FinanceRequestCard[]
+  pendingOrders PendingOrder[]
 
   @@map("managers")
 }
 
 model Order {
-  id             Int         @id @default(autoincrement())
-  orderNumber    String      @unique @map("order_number")
-  baseNumber     String      @map("base_number")
-  clientName     String      @map("client_name")
-  amountDue      Decimal     @map("amount_due") @db.Decimal(14, 2)
-  currency       Currency    @default(UAH)
-  exchangeRate   Decimal?    @map("exchange_rate") @db.Decimal(8, 4)
-  comment        String?
+  id              Int         @id @default(autoincrement())
+  orderNumber     String      @unique @map("order_number")
+  baseNumber      String      @map("base_number")
+  clientName      String      @map("client_name")
+  amountDue       Decimal     @map("amount_due") @db.Decimal(14, 2)
+  currency        Currency    @default(UAH)
+  exchangeRate    Decimal?    @map("exchange_rate") @db.Decimal(8, 4)
+  comment         String?
   // Retired: was free text for a "payment to other requisites" order type. No longer written by the
   // app; kept only because it may already exist as a column in some environments. See OrderRequisite.
-  requisites     String?
-  orderType      OrderType   @default(REGULAR) @map("order_type")
-  // Minus closing only: when the client paid, which of our FOPs received it, the period the debt
-  // was calculated for, and the reconciliation spreadsheet.
-  paidAt         DateTime?   @map("paid_at") @db.Timestamptz(3)
-  ourFop         String?     @map("our_fop")
-  period         String?
-  sheetUrl       String?     @map("sheet_url")
-  status         OrderStatus @default(AWAITING_PAYMENT)
-  managerId      Int         @map("manager_id")
+  requisites      String?
+  orderType       OrderType   @default(REGULAR) @map("order_type")
+  // When the client paid (empty until known; the first payment that arrives fills it in); minus closing
+  // only: which of our FOPs received it, the period the debt was calculated for, and the reconciliation
+  // spreadsheet.
+  paidAt          DateTime?   @map("paid_at") @db.Timestamptz(3)
+  ourFop          String?     @map("our_fop")
+  period          String?
+  sheetUrl        String?     @map("sheet_url")
+  status          OrderStatus @default(AWAITING_PAYMENT)
+  managerId       Int         @map("manager_id")
   // The "new order" message in the admin chat, kept so it can be removed along with the order.
-  adminMessageId Int?        @map("admin_message_id")
-  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  adminMessageId  Int?        @map("admin_message_id")
+  verifiedAt      DateTime?   @map("verified_at") @db.Timestamptz(3)
+  verifiedByName  String?     @map("verified_by_name")
+  problem         String?
+  problemAt       DateTime?   @map("problem_at") @db.Timestamptz(3)
+  problemByName   String?     @map("problem_by_name")
+  verifyMessageId Int?        @map("verify_message_id")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   manager        Manager             @relation(fields: [managerId], references: [id], onDelete: Restrict)
   payments       Payment[]
@@ -125,15 +135,16 @@ model Order {
 // paid, through which requisites, how much, and when. Purely supporting evidence for reconciliation —
 // the order itself is created and paid exactly like any other.
 model OrderRequisite {
-  id                Int      @id @default(autoincrement())
-  orderId           Int      @map("order_id")
-  payerName         String   @map("payer_name")
+  id                Int       @id @default(autoincrement())
+  orderId           Int       @map("order_id")
+  payerName         String    @map("payer_name")
   account           String?
-  amount            Decimal  @db.Decimal(14, 2)
-  paidAt            DateTime @map("paid_at") @db.Timestamptz(3)
-  addedByTelegramId BigInt   @map("added_by_telegram_id")
-  addedByName       String   @map("added_by_name")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  amount            Decimal   @db.Decimal(14, 2)
+  // Empty until the payment arrives: the manager does not know the time when he enters the order.
+  paidAt            DateTime? @map("paid_at") @db.Timestamptz(3)
+  addedByTelegramId BigInt    @map("added_by_telegram_id")
+  addedByName       String    @map("added_by_name")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
@@ -218,4 +229,96 @@ model TelegramLoginHash {
 
   @@index([expiresAt])
   @@map("telegram_login_hashes")
+}
+
+model FinanceRequestCard {
+  requestId        String    @id @map("request_id")
+  number           String
+  managerId        Int       @map("manager_id")
+  managerChatId    BigInt    @map("manager_chat_id")
+  managerMessageId Int?      @map("manager_message_id")
+  groupChatId      BigInt    @map("group_chat_id")
+  groupMessageId   Int       @map("group_message_id")
+  notifiedStatus   String?   @map("notified_status")
+  // Set atomically when the manager completes the request; orderIds are the orders it created.
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz(3)
+  orderIds         Int[]     @default([]) @map("order_ids")
+  // The payments the manager gave when creating the request (foreign_fop, card, minus):
+  // { payerName, account, amount, paidAt (ISO) }[]. Null for our_fop and for older cards.
+  payments         Json?
+  // The task is done: set with completedAt for foreign_fop, card and minus; for our_fop when the
+  // manager marks it paid.
+  closedAt         DateTime? @map("closed_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  manager Manager              @relation(fields: [managerId], references: [id])
+  files   FinanceRequestFile[]
+
+  @@unique([groupChatId, groupMessageId])
+  @@index([managerChatId, managerMessageId])
+  @@map("finance_request_cards")
+}
+
+// A receipt the manager sent in the bot chat before completing the request; it is attached to the
+// created order at completion and the row is deleted.
+model FinanceRequestFile {
+  id        Int      @id @default(autoincrement())
+  requestId String   @map("request_id")
+  fileId    String   @map("file_id")
+  filename  String
+  mimeType  String   @map("mime_type")
+  size      Int
+  kind      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  request FinanceRequestCard @relation(fields: [requestId], references: [requestId], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("finance_request_files")
+}
+
+// A Kit, cash or foreign order from the Mini App form that waits in the manager's chat for files and
+// «Прийняти». plan is the OrderPlan as JSON; files are the receipts' Telegram file refs. No order exists yet.
+model PendingOrder {
+  id               String   @id @default(uuid())
+  managerId        Int      @map("manager_id")
+  managerChatId    BigInt   @map("manager_chat_id")
+  managerMessageId Int?     @map("manager_message_id")
+  plan             Json
+  files            Json     @default("[]")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  manager Manager @relation(fields: [managerId], references: [id])
+
+  @@index([managerId])
+  @@index([managerChatId, managerMessageId])
+  @@map("pending_orders")
+}
+
+model GuideVideo {
+  key       String   @id
+  fileId    String   @map("file_id")
+  fileSize  Int      @map("file_size")
+  fileMtime DateTime @map("file_mtime") @db.Timestamptz(3)
+
+  @@map("guide_videos")
+}
+
+model FinanceMessageSeen {
+  messageId String   @id @map("message_id")
+  seenAt    DateTime @default(now()) @map("seen_at") @db.Timestamptz(3)
+
+  @@map("finance_messages_seen")
+}
+
+// Bot messages the manager can reply to: telegram does not nest `reply_to_message`, so the request must be remembered.
+model FinanceChatMessage {
+  chatId    BigInt   @map("chat_id")
+  messageId Int      @map("message_id")
+  requestId String   @map("request_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([chatId, messageId])
+  @@map("finance_chat_messages")
 }

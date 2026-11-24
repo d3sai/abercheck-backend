@@ -10,12 +10,15 @@ import { PaymentsModule } from '../payments/payments.module';
 import { RefundsModule } from '../refunds/refunds.module';
 import { RequisitesModule } from '../requisites/requisites.module';
 import { ReportsModule } from '../reports/reports.module';
+import { FinanceSyncModule } from '../finance-sync/finance-sync.module';
+import { MiniappModule } from '../miniapp/miniapp.module';
 import { AccessNotifier } from './access/access-notifier';
 import { AdminFlowService } from './admin/admin-flow.service';
 import { AdminUpdate } from './admin/admin.update';
 import { BotLauncher } from './core/bot-launcher';
 import { BotUpdate } from './core/bot.update';
 import { DailyReportJob } from './reports/daily-report.job';
+import { OrderVerificationService } from './verification/order-verification.service';
 import { OrderNotifier } from './notifications/order-notifier';
 import { PaymentNotifier } from './notifications/payment-notifier';
 import { CashDraftService, CashDraftStore } from './order-draft/cash-draft.service';
@@ -30,11 +33,11 @@ import { OrderCreationFlowService } from './order-draft/order-creation-flow.serv
 import { OrderDraftService } from './order-draft/order-draft.service';
 import { PartOfferStore } from './order-draft/part-offer.store';
 import { PendingFilesStore } from './order-draft/pending-files.store';
-import { ReportedPaymentService } from './order-draft/reported-payment.service';
 import { RequisitesDraftService } from './order-draft/requisites-draft.service';
 import { RequisitesDraftStore } from './order-draft/requisites-draft.store';
 import { OrderDeleteService } from './orders-list/order-delete.service';
 import { OrderListService } from './orders-list/order-list.service';
+import { GuideService } from './guides/guide.service';
 import { TelegramSender } from './core/telegram-sender';
 
 @Module({
@@ -43,7 +46,7 @@ import { TelegramSender } from './core/telegram-sender';
       inject: [ConfigService],
       useFactory: (config: ConfigService<EnvironmentVariables, true>) => ({
         token: config.get('TELEGRAM_BOT_TOKEN', { infer: true }),
-        include: [TelegramModule],
+        include: [TelegramModule, FinanceSyncModule, MiniappModule],
         launchOptions: false,
       }),
     }),
@@ -75,15 +78,24 @@ import { TelegramSender } from './core/telegram-sender';
     OrderCreationFlowService,
     RequisitesDraftService,
     MinusClosingDraftService,
-    ReportedPaymentService,
     KitDraftService,
     CashDraftService,
     ForeignDraftService,
     OrderDraftService,
     OrderListService,
     OrderDeleteService,
+    GuideService,
     AdminFlowService,
     DailyReportJob,
+    OrderVerificationService,
+  ],
+  exports: [
+    TelegramSender,
+    OrderVerificationService,
+    KitDraftService,
+    CashDraftService,
+    ForeignDraftService,
+    OrderDraftService,
   ],
 })
 export class TelegramModule {}

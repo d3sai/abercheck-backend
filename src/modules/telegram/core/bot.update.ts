@@ -6,9 +6,17 @@ import type { Manager } from '../../../generated/prisma/client';
 import { ManagersService } from '../../managers/managers.service';
 import { HELP, NOT_A_MANAGER, newManagerNotice, startReply } from '../access/access.messages';
 import { ADMIN_HELP } from '../admin/admin.update';
-import { MENU_LABEL } from './menu';
+import {
+  GUIDES_LABEL,
+  KEYBOARD_NOTICE,
+  KEYBOARD_VERSION,
+  MENU_LABEL,
+  NEW_REQUEST_LABEL,
+} from './menu';
 import { DeleteAction, OrderDeleteService } from '../orders-list/order-delete.service';
 import { OrderListService } from '../orders-list/order-list.service';
+import { GuideService } from '../guides/guide.service';
+import { GuideAction, GUIDES_MENU } from '../guides/guides';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
 import { CashAction } from '../order-draft/cash.messages';
 import { ForeignAction } from '../order-draft/foreign.messages';
@@ -27,6 +35,8 @@ import { TelegramSender } from './telegram-sender';
 
 type Next = () => Promise<void>;
 
+const LEGACY_BUTTONS: ReadonlySet<string> = new Set(Object.values(MENU_LABEL));
+
 @Update()
 export class BotUpdate implements OnApplicationBootstrap {
   constructor(
@@ -35,6 +45,7 @@ export class BotUpdate implements OnApplicationBootstrap {
     private readonly lists: OrderListService,
     private readonly deletions: OrderDeleteService,
     private readonly sender: TelegramSender,
+    private readonly guides: GuideService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -43,11 +54,8 @@ export class BotUpdate implements OnApplicationBootstrap {
         { command: 'new', description: 'Нове замовлення' },
         { command: 'newminus', description: 'Закрити мінус' },
         { command: 'requisites', description: 'Кілька номерів або чужі реквізити' },
-        { command: 'kit', description: 'Оплата на Кит' },
-        { command: 'cash', description: 'Оплата готівкою' },
-        { command: 'foreign', description: 'Оплата закордонного замовлення' },
-        { command: 'list', description: 'Мої відкриті замовлення' },
         { command: 'cancel', description: 'Скасувати' },
+        { command: 'video', description: 'Відео-інструкції' },
         { command: 'help', description: 'Що вміє бот' },
       ],
       { type: 'all_private_chats' },
@@ -62,6 +70,15 @@ export class BotUpdate implements OnApplicationBootstrap {
       ],
       { type: 'chat', chat_id: this.sender.adminChatId },
     );
+    // Always set: the menu button is stored by Telegram, so unsetting MINI_APP_URL must reset it.
+    await this.sender.setDefaultMenuButton(
+      this.sender.miniAppUrl ? { text: NEW_REQUEST_LABEL, url: this.sender.miniAppUrl } : null,
+    );
+    for (const manager of await this.managers.withOldKeyboard(KEYBOARD_VERSION)) {
+      if (await this.sender.send(manager.telegramId, KEYBOARD_NOTICE, undefined, true)) {
+        await this.managers.markKeyboard(manager.id, KEYBOARD_VERSION);
+      }
+    }
   }
 
   @Start()
@@ -85,7 +102,22 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (ctx.chat?.id === this.sender.adminChatId) {
       await reply(ctx, { html: ADMIN_HELP });
     } else if (isPrivate(ctx)) {
-      await reply(ctx, { html: HELP, menu: true });
+      await reply(ctx, { html: HELP, keyboard: true });
+    }
+  }
+
+  @Command('video')
+  async video(@Ctx() ctx: Context): Promise<void> {
+    if (await this.activeManager(ctx)) {
+      await reply(ctx, GUIDES_MENU);
+    }
+  }
+
+  @Action(GuideAction.Send)
+  async guide(@Ctx() ctx: MatchContext): Promise<void> {
+    if (await this.activeManager(ctx)) {
+      await ctx.answerCbQuery();
+      await this.guides.send(ctx, ctx.match[1]!);
     }
   }
 
@@ -103,10 +135,7 @@ export class BotUpdate implements OnApplicationBootstrap {
       await reply(ctx, await this.lists.forAdmins(all));
       return;
     }
-    const manager = await this.activeManager(ctx);
-    if (manager) {
-      await reply(ctx, await this.lists.forManager(manager.id, all));
-    }
+    // managers have no list: their requests and orders live in the Mini App
   }
 
   @Action(DeleteAction.Ask)
@@ -316,30 +345,19 @@ export class BotUpdate implements OnApplicationBootstrap {
     if (!isPrivate(ctx) || !ctx.from || !ctx.text || ctx.text.startsWith('/')) {
       return next();
     }
-    switch (ctx.text) {
-      case MENU_LABEL.NewOrder:
-        return this.newOrder(ctx);
-      case MENU_LABEL.NewMinus:
-        return this.newMinusOrder(ctx);
-      case MENU_LABEL.Requisites:
-        return this.requisites(ctx);
-      case MENU_LABEL.Kit:
-        return this.kit(ctx);
-      case MENU_LABEL.Cash:
-        return this.cash(ctx);
-      case MENU_LABEL.Foreign:
-        return this.foreign(ctx);
-      case MENU_LABEL.List:
-        return this.list(ctx);
-      case MENU_LABEL.Cancel:
-        return this.cancel(ctx);
-    }
     const manager = await this.activeManager(ctx);
     if (!manager) {
       return;
     }
-    const answer = await this.drafts.handleText(manager, ctx.text);
-    await reply(ctx, answer ?? { html: HELP, menu: true });
+    if (ctx.text === GUIDES_LABEL) {
+      await reply(ctx, GUIDES_MENU);
+      return;
+    }
+    // a press of a button from the old reply keyboard: clear the keyboard and point at the new one
+    const answer = LEGACY_BUTTONS.has(ctx.text)
+      ? null
+      : await this.drafts.handleText(manager, ctx.text);
+    await reply(ctx, answer ?? { html: HELP, keyboard: true });
   }
 
   @On('document')

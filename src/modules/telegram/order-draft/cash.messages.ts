@@ -1,5 +1,6 @@
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
 import { type BotReply, button } from '../core/bot-reply';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import { escapeHtml, formatKyivDateTime, formatMoneyIn as money } from '../core/format';
 import type { CashPlan } from './cash.parser';
 
@@ -15,6 +16,7 @@ function cashLines(plan: CashPlan, exists: boolean): string[] {
     `Дата: ${plan.paidAt ? formatKyivDateTime(plan.paidAt) : '—'}`,
     `Сума: <b>${money(plan.amount, plan.currency)}</b>`,
     ...(plan.rate ? [`Курс: ${escapeHtml(plan.rate.replace('.', ','))}`] : []),
+    ...(plan.withPercent === null ? [] : [`З відсотком: ${plan.withPercent ? 'так' : 'ні'}`]),
     `Ким передано: ${plan.handedBy ? escapeHtml(plan.handedBy) : '—'}`,
   ];
 }
@@ -25,6 +27,7 @@ export function cashHint(): BotReply {
     'Дата: 01.09.2026 15:20',
     'Сума: 4260 грн',
     'Курс: 44,9',
+    'З відсотком',
     'Ким передано: Христина Павлів передала готівку Христині Вихопень (Саджениці)',
   ].join('\n');
   return {
@@ -45,8 +48,8 @@ export function cashPreview(plan: CashPlan, exists: boolean, files: number): Bot
     ...cashLines(plan, exists),
     '',
     exists
-      ? 'Запишу оплату до цього замовлення.'
-      : 'Створю це замовлення й одразу запишу на нього оплату.',
+      ? 'Замовлення вже є в системі. Надішлю шаблон адмінам.'
+      : 'Створю замовлення й надішлю шаблон адмінам. Оплату не записую.',
     ...(files > 0 ? ['', `Файлів: ${files}`] : []),
     ...(plan.warnings.length > 0 ? ['', ...plan.warnings.map((w) => `⚠️ ${escapeHtml(w)}`)] : []),
   ];
@@ -56,9 +59,13 @@ export function cashPreview(plan: CashPlan, exists: boolean, files: number): Bot
   };
 }
 
-export function cashCreatedReply(plan: CashPlan): BotReply {
+export function cashCreatedReply(plan: CashPlan, orderNumber?: string): BotReply {
   return {
-    html: `💰 Оплату готівкою записано: № <b>${escapeHtml(plan.number)}</b> · ${money(plan.amount, plan.currency)}`,
+    html: [
+      `✅ «Оплата готівкою» надіслано адмінам · ${money(plan.amount, plan.currency)}`,
+      `Замовлення: № <b>${escapeHtml(plan.number)}</b>`,
+    ].join('\n'),
+    ...(orderNumber && { buttons: [[attachOrderButton(orderNumber)]] }),
   };
 }
 

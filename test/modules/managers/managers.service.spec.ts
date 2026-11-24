@@ -131,4 +131,25 @@ describe('ManagersService', () => {
       await expect(service.resetCredentials(404)).resolves.toBeNull();
     });
   });
+
+  describe('keyboard version', () => {
+    it('should find active managers whose keyboard is older than the given version', async () => {
+      manager.findMany.mockResolvedValue([]);
+
+      await service.withOldKeyboard(2);
+
+      expect(manager.findMany).toHaveBeenCalledWith({
+        where: { status: ManagerStatus.ACTIVE, keyboardVersion: { lt: 2 } },
+      });
+    });
+
+    it('should remember the keyboard version a manager received', async () => {
+      await service.markKeyboard(7, 2);
+
+      expect(manager.update).toHaveBeenCalledWith({
+        where: { id: 7 },
+        data: { keyboardVersion: 2 },
+      });
+    });
+  });
 });

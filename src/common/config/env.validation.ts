@@ -3,9 +3,12 @@ import {
   IsEnum,
   IsInt,
   IsOptional,
+  IsPositive,
   IsString,
+  IsUrl,
   Matches,
   MinLength,
+  ValidateIf,
   validateSync,
 } from 'class-validator';
 
@@ -14,6 +17,14 @@ export enum NodeEnv {
   Production = 'production',
   Test = 'test',
 }
+
+// Blank values in .env mean "unset".
+const blankToUndefined = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() || undefined : value;
+const topicId = ({ value }: { value: unknown }) => {
+  const trimmed = blankToUndefined({ value });
+  return trimmed === undefined || trimmed === null ? undefined : Number(trimmed);
+};
 
 export class EnvironmentVariables {
   @IsEnum(NodeEnv)
@@ -58,6 +69,63 @@ export class EnvironmentVariables {
   @IsString()
   @MinLength(32)
   WEB_JWT_SECRET!: string;
+
+  // With the table empty, only this Telegram id may become the first admin; unset, the first login wins.
+  @Transform(topicId)
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  BOOTSTRAP_ADMIN_TELEGRAM_ID?: number;
+
+  // Shared with the cabinet: only a login request carrying it may name the visitor's address (X-Client-IP).
+  @Transform(blankToUndefined)
+  @IsOptional()
+  @IsString()
+  @MinLength(16)
+  CLIENT_IP_TOKEN?: string;
+
+  // Finance sync is off unless the URL is set; then both tokens are required.
+  @Transform(blankToUndefined)
+  @IsOptional()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
+  FINANCE_API_URL?: string;
+
+  @Transform(blankToUndefined)
+  @ValidateIf((env: EnvironmentVariables) => env.FINANCE_API_URL !== undefined)
+  @IsString()
+  @MinLength(16)
+  FINANCE_API_TOKEN?: string;
+
+  @Transform(blankToUndefined)
+  @ValidateIf((env: EnvironmentVariables) => env.FINANCE_API_URL !== undefined)
+  @IsString()
+  @MinLength(16)
+  FINANCE_WEBHOOK_TOKEN?: string;
+
+  // The Mini App request form (Telegram opens web apps over https only); unset hides its buttons.
+  @Transform(blankToUndefined)
+  @IsOptional()
+  @IsUrl({ require_tld: false, require_protocol: true, protocols: ['https'] })
+  MINI_APP_URL?: string;
+
+  // Forum topics (message_thread_id) of the admin group; unset means the plain chat.
+  @Transform(topicId)
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  TELEGRAM_TOPIC_REQUESTS_ID?: number;
+
+  @Transform(topicId)
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  TELEGRAM_TOPIC_PAYMENTS_ID?: number;
+
+  @Transform(topicId)
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  TELEGRAM_TOPIC_REPORTS_ID?: number;
 }
 
 export function listenTarget({

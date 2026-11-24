@@ -327,21 +327,23 @@ describe('parseMinusClosing', () => {
     expect(plan.warnings).toContain('«javascript:alert(1)» не схоже на посилання, пропускаю.');
   });
 
+  it('should take a date without a time: the day starts at Kyiv midnight', () => {
+    const plan = planOf('Клієнт: Гук\nСума: 100 грн\nФОП Берчатов\nДата: 05.09.2026');
+
+    expect(plan.paidAt?.toISOString()).toBe('2026-09-04T21:00:00.000Z');
+  });
+
   it.each([
     ['27 409 грн\nФОП Берчатов', 'Не знайшов клієнта'],
     ['Закриття мінусу Гук Руслан\nФОП Берчатов', 'Не знайшов суму'],
-    ['Клієнт: Гук\nСума: 100 грн\nФОП Берчатов', 'Не вказано дату й час'],
-    ['Клієнт: Гук\nСума: 100 грн\nФОП Берчатов\nДата: 05.09.2026', 'Не вказано дату й час'],
+    ['Клієнт: Гук\nСума: 100 грн\nФОП Берчатов', 'Не вказано дату оплати'],
     ['Клієнт: Гук\nСума: 100 грн\nДата: 05.09.2026 12:36', 'Не вказано ФОП'],
-  ])(
-    'should refuse a message without a client, an amount, a date with time or a FOP',
-    (text, error) => {
-      const result = parseMinusClosing(text);
+  ])('should refuse a message without a client, an amount, a date or a FOP', (text, error) => {
+    const result = parseMinusClosing(text);
 
-      expect(result.ok).toBe(false);
-      expect(!result.ok && result.errors.join(' ')).toContain(error);
-    },
-  );
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.errors.join(' ')).toContain(error);
+  });
 
   describe('dollars', () => {
     it('should read a closing in dollars, with the "$" before the sum', () => {

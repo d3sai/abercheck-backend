@@ -3,6 +3,7 @@ import { Currency, type Prisma } from '../../../generated/prisma/client';
 import { parseExchangeRate, parseOrderNumber } from './order-draft.parsers';
 import {
   AMOUNT_SRC,
+  DATE_HINT,
   DATE_TIME_HINT,
   LABEL_ONLY,
   REQUISITES_MAX_LENGTH,
@@ -122,8 +123,8 @@ export function parseForeign(raw: string): ForeignResult {
   }
 
   const paidAt = fields.date ? parseDateTime(numericDates(fields.date)) : null;
-  if (!fields.date || !/\d:\d{2}/.test(fields.date)) {
-    errors.push(`Не вказано дату й час. Напишіть ${DATE_TIME_HINT}.`);
+  if (!fields.date) {
+    errors.push(`Не вказано дату оплати. Напишіть ${DATE_HINT}.`);
   } else if (!paidAt) {
     errors.push(`Не розібрав дату «${fields.date}». Напишіть ${DATE_TIME_HINT}.`);
   }

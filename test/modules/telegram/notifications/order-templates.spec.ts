@@ -24,6 +24,12 @@ const order = (overrides: Partial<Order> = {}): Order => ({
   period: null,
   sheetUrl: null,
   adminMessageId: null,
+  verifiedAt: null,
+  verifiedByName: null,
+  problem: null,
+  problemAt: null,
+  problemByName: null,
+  verifyMessageId: null,
   orderType: OrderType.REGULAR,
   status: 'AWAITING_PAYMENT',
   managerId: 7,
@@ -42,6 +48,7 @@ const manager: Manager = {
   login: null,
   passwordHash: null,
   sessionVersion: 0,
+  keyboardVersion: 0,
   createdAt: new Date(),
 };
 
@@ -52,6 +59,21 @@ describe('adminOrderCreatedMessage', () => {
     expect(message).toContain('➕ <b>Нова частина замовлення</b>');
     expect(message).toContain('№ 0000-067968(1)');
     expect(message).not.toContain('Нове замовлення');
+  });
+
+  it('should show the date of payment, and the day alone when the time is not known', () => {
+    const timed = adminOrderCreatedMessage(
+      order({ paidAt: new Date('2026-11-04T12:30:00.000Z') }),
+      manager,
+    );
+    const dayOnly = adminOrderCreatedMessage(
+      order({ paidAt: new Date('2026-11-03T22:00:00.000Z') }),
+      manager,
+    );
+
+    expect(timed).toContain('Дата оплати: 14:30 04.11.2026');
+    expect(dayOnly).toContain('Дата оплати: 04.11.2026');
+    expect(dayOnly).not.toContain('00:00');
   });
 
   it('should show the essentials for a bare order', () => {

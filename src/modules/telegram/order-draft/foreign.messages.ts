@@ -1,7 +1,9 @@
 import { MAX_FILES_PER_UPLOAD } from '../../attachments/attachments.constants';
+import { webApp } from '../../finance-sync/request-card.messages';
 import { type BotReply, button } from '../core/bot-reply';
-import { escapeHtml, formatKyivDateTime, formatMoneyIn } from '../core/format';
-import { MENU_LABEL } from '../core/menu';
+import { escapeHtml, formatKyivDateTime, formatKyivPaidAt, formatMoneyIn } from '../core/format';
+import { NEW_REQUEST_LABEL } from '../core/menu';
+import { attachOrderButton } from '../orders-list/orders-list.messages';
 import type { ForeignPlan } from './foreign.parser';
 
 export const ForeignAction = {
@@ -15,7 +17,7 @@ function foreignLines(plan: ForeignPlan, exists: boolean): string[] {
     `На кого: ${plan.recipient ? escapeHtml(plan.recipient) : '—'}`,
     `Замовлення: № <b>${escapeHtml(plan.number)}</b>${exists ? ' (уже є в системі)' : ''}`,
     `Сума: <b>${formatMoneyIn(plan.amount, plan.currency)}</b>`,
-    `Дата: ${plan.paidAt ? formatKyivDateTime(plan.paidAt) : '—'}`,
+    `Дата: ${plan.paidAt ? formatKyivPaidAt(plan.paidAt) : '—'}`,
     ...(plan.rate ? [`Курс: ${escapeHtml(plan.rate.replace('.', ','))}`] : []),
     ...(plan.comment ? [`Коментар: ${escapeHtml(plan.comment)}`] : []),
   ];
@@ -37,7 +39,7 @@ export function foreignHint(): BotReply {
       'Надішліть одним повідомленням, кожне поле з нового рядка:',
       '',
       `<pre>${escapeHtml(example)}</pre>`,
-      'Валюта: UAH, USD або EUR. «Курс» і «Коментар» можна не писати.',
+      'Валюта: UAH, USD або EUR. «Курс» і «Коментар» можна не писати; час у даті — якщо відомий.',
       '',
       `Файли (до ${MAX_FILES_PER_UPLOAD}) додавайте разом із текстом або перед ним.`,
     ].join('\n'),
@@ -48,7 +50,7 @@ export function foreignGuard(): BotReply {
   return {
     html: [
       '⚠️ Схоже на оплату закордонного замовлення.',
-      `Натисніть «${escapeHtml(MENU_LABEL.Foreign)}» (/foreign) і надішліть це повідомлення ще раз.`,
+      `Створіть її кнопкою «${NEW_REQUEST_LABEL}» біля поля введення.`,
     ].join('\n'),
   };
 }
@@ -71,12 +73,24 @@ export function foreignPreview(plan: ForeignPlan, exists: boolean, files: number
   };
 }
 
-export function foreignCreatedReply(plan: ForeignPlan): BotReply {
+/** `miniAppUrl` adds «💰 Оплачено», where the manager gives the date and time the client paid. */
+export function foreignCreatedReply(
+  plan: ForeignPlan,
+  miniAppUrl?: string,
+  orderNumber?: string,
+): BotReply {
+  const rows = [
+    ...(miniAppUrl && !plan.paidAt
+      ? [[webApp('💰 Оплачено', miniAppUrl, 'orderpaid', plan.number)]]
+      : []),
+    ...(orderNumber ? [[attachOrderButton(orderNumber)]] : []),
+  ];
   return {
     html: [
       `✅ «Оплата закордонного замовлення» надіслано адмінам · ${formatMoneyIn(plan.amount, plan.currency)}`,
       `Замовлення: № <b>${escapeHtml(plan.number)}</b>`,
     ].join('\n'),
+    ...(rows.length > 0 && { buttons: rows }),
   };
 }
 
