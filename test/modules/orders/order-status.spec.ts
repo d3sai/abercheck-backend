@@ -1,5 +1,5 @@
 import { OrderStatus, Prisma } from '../../../src/generated/prisma/client';
-import { calculateOrderStatus } from '../../../src/modules/orders/order-status';
+import { calculateOrderStatus, coversDue } from '../../../src/modules/orders/order-status';
 
 const d = (value: string) => new Prisma.Decimal(value);
 
@@ -36,5 +36,23 @@ describe('calculateOrderStatus', () => {
 
   it('should keep a cancelled order cancelled', () => {
     expect(calculateOrderStatus(due, due, OrderStatus.CANCELLED)).toBe(OrderStatus.CANCELLED);
+  });
+});
+
+describe('coversDue', () => {
+  const d = (value: string) => new Prisma.Decimal(value);
+
+  it('should cover the due sum when the gap is within the tolerance', () => {
+    expect(coversDue(d('47796.64'), d('47796.71'))).toBe(true);
+  });
+
+  it('should cover the due sum when it is paid in full or overpaid', () => {
+    expect(coversDue(d('100'), d('100'))).toBe(true);
+    expect(coversDue(d('150'), d('100'))).toBe(true);
+  });
+
+  it('should not cover the due sum when the gap is above the tolerance', () => {
+    expect(coversDue(d('98.9'), d('100'))).toBe(false);
+    expect(coversDue(d('0'), d('100'))).toBe(false);
   });
 });

@@ -19,6 +19,12 @@ describe('paymentProgressLine', () => {
     expect(paymentProgressLine(d('200000'), d('200000'))).toBe('✅ Оплачено повністю: 200 000 грн');
   });
 
+  it('should say fully paid when a rounding gap stays within the tolerance', () => {
+    expect(paymentProgressLine(d('47796.64'), d('47796.71'))).toBe(
+      '✅ Оплачено повністю: 47 796,71 грн',
+    );
+  });
+
   it('should show the overpayment', () => {
     expect(paymentProgressLine(d('205000'), d('200000'))).toBe(
       '✅ Оплачено 205 000 грн з 200 000 грн · переплата 5 000 грн',

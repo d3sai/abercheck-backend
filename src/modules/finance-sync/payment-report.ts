@@ -1,4 +1,5 @@
 import type { Prisma } from '../../generated/prisma/client';
+import { coversDue, withinTolerance } from '../orders/order-status';
 import { escapeHtml, formatKyivPaidAt, formatMoneyIn } from '../telegram/core/format';
 
 /** Stored when the manager gives no payer: the requisites and minus parsers use the same words. */
@@ -13,10 +14,10 @@ export interface ReportedPayment {
 const uah = (value: Prisma.Decimal): string => formatMoneyIn(value, 'UAH');
 
 export function paymentProgressLine(paid: Prisma.Decimal, due: Prisma.Decimal): string {
-  if (paid.lessThan(due)) {
+  if (!coversDue(paid, due)) {
     return `💰 Оплачено ${uah(paid)} з ${uah(due)} · залишок ${uah(due.minus(paid))}`;
   }
-  if (paid.equals(due)) return `✅ Оплачено повністю: ${uah(due)}`;
+  if (withinTolerance(paid, due)) return `✅ Оплачено повністю: ${uah(due)}`;
   return `✅ Оплачено ${uah(paid)} з ${uah(due)} · переплата ${uah(paid.minus(due))}`;
 }
 

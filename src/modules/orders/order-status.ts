@@ -10,6 +10,12 @@ export const UNPAID_STATUSES: OrderStatus[] = [
 // UAH amount in the bot drifts by about a percent.
 export const PAYMENT_TOLERANCE = new Prisma.Decimal('0.01');
 
+export const withinTolerance = (paid: Prisma.Decimal, due: Prisma.Decimal): boolean =>
+  paid.minus(due).abs().lessThanOrEqualTo(due.times(PAYMENT_TOLERANCE));
+
+export const coversDue = (paid: Prisma.Decimal, due: Prisma.Decimal): boolean =>
+  !paid.lessThan(due) || withinTolerance(paid, due);
+
 export function calculateOrderStatus(
   amountDue: Prisma.Decimal,
   amountPaid: Prisma.Decimal,
@@ -22,9 +28,8 @@ export function calculateOrderStatus(
     return OrderStatus.AWAITING_PAYMENT;
   }
 
-  const diff = amountPaid.minus(amountDue);
-  if (diff.abs().lessThanOrEqualTo(amountDue.times(PAYMENT_TOLERANCE))) {
+  if (withinTolerance(amountPaid, amountDue)) {
     return OrderStatus.PAID;
   }
-  return diff.greaterThan(0) ? OrderStatus.OVERPAID : OrderStatus.PARTIALLY_PAID;
+  return amountPaid.greaterThan(amountDue) ? OrderStatus.OVERPAID : OrderStatus.PARTIALLY_PAID;
 }

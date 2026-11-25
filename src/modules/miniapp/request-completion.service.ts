@@ -28,6 +28,7 @@ import { RequestCardsRepository } from '../finance-sync/request-cards.repository
 import { RequestReceiptsService } from '../finance-sync/request-receipts.service';
 import { storedPayments } from '../finance-sync/stored-payments';
 import { OrderNumberTakenError } from '../orders/orders.errors';
+import { coversDue } from '../orders/order-status';
 import { type OrderWithManager, type OrderWithPaid, OrdersService } from '../orders/orders.service';
 import { RequisitesService } from '../requisites/requisites.service';
 import { TelegramSender } from '../telegram/core/telegram-sender';
@@ -319,14 +320,14 @@ export class RequestCompletionService {
       throw apiError(HttpStatus.BAD_REQUEST, 'invalid-request', 'Додайте хоча б один платіж.');
     }
     const before = await this.requisites.progress(card.orderIds);
-    if (!before.paid.lessThan(before.due)) {
+    if (coversDue(before.paid, before.due)) {
       throw apiError(HttpStatus.CONFLICT, 'fully-paid', 'Запит уже оплачено повністю');
     }
 
     await this.requisites.addMany(firstId, payments.map(requisiteOf), initiatorOf(manager));
     await this.orders.fillPaidAt(card.orderIds, earliest(payments)!);
     const { paid, due } = await this.requisites.progress(card.orderIds);
-    const reached = !paid.lessThan(due);
+    const reached = coversDue(paid, due);
     if (reached)
       await this.safely(requestId, 'closing', () => this.cards.claimClosing(requestId, new Date()));
 
@@ -414,7 +415,7 @@ export class RequestCompletionService {
             due: sumOf(live.items.map((item) => item.amount)),
           }
         : null;
-    const close = !sums?.paid.lessThan(sums.due);
+    const close = !sums || coversDue(sums.paid, sums.due);
 
     // atomic: of two parallel completions only one may create orders
     if (!(await this.cards.claimCompletion(requestId, new Date(), close))) {
