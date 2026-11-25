@@ -108,11 +108,6 @@ export class EnvironmentVariables {
   @IsUrl({ require_tld: false, require_protocol: true, protocols: ['https'] })
   MINI_APP_URL?: string;
 
-  @Transform(blankToUndefined)
-  @IsOptional()
-  @IsString()
-  DOCS_PROJECT?: string;
-
   // Forum topics (message_thread_id) of the admin group; unset means the plain chat.
   @Transform(topicId)
   @IsOptional()

@@ -5,7 +5,6 @@ import { ManagersModule } from '../managers/managers.module';
 import { OrdersModule } from '../orders/orders.module';
 import { RequisitesModule } from '../requisites/requisites.module';
 import { TelegramModule } from '../telegram/telegram.module';
-import { AsksDocsService } from './asks-docs.service';
 import { DirectOrdersService } from './direct-orders.service';
 import { MiniappAuthGuard } from './miniapp-auth.guard';
 import { MiniappController } from './miniapp.controller';
@@ -32,7 +31,6 @@ import { RequestCompletionService } from './request-completion.service';
     DirectOrdersService,
     PendingOrdersService,
     MiniappUpdate,
-    AsksDocsService,
   ],
 })
 export class MiniappModule {}

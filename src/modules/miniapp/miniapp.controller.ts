@@ -33,7 +33,6 @@ import {
   type DirectOrderView,
   DirectOrdersService,
 } from './direct-orders.service';
-import { AsksDocsService } from './asks-docs.service';
 import { MiniappManager, MiniappAuthGuard } from './miniapp-auth.guard';
 import {
   CompleteMiniappRequestDto,
@@ -66,7 +65,6 @@ interface RequestResponse {
   }[];
   /** A completed our_fop or foreign_fop: what its payments add up to against the orders' sum. */
   progress: { paid: string; due: string } | null;
-  asksDocs: boolean;
 }
 
 const CREATE_STATUS = {
@@ -89,13 +87,7 @@ export class MiniappController {
     private readonly completion: RequestCompletionService,
     private readonly directOrders: DirectOrdersService,
     private readonly pendingOrders: PendingOrdersService,
-    private readonly docs: AsksDocsService,
   ) {}
-
-  @Get('form')
-  async form(@MiniappManager() manager: Manager): Promise<{ asksDocs: boolean }> {
-    return { asksDocs: await this.docs.forManager(manager.telegramId) };
-  }
 
   @Post('requests')
   @HttpCode(HttpStatus.OK)
@@ -232,12 +224,10 @@ export class MiniappController {
     card: FinanceRequestCard,
     request: FinanceRequestView,
   ): Promise<RequestResponse> {
-    const [progress, asksDocs] = await Promise.all([
+    const progress =
       card.completedAt != null && paysAfterConfirm(request.kind)
-        ? this.completion.progress(card.orderIds)
-        : null,
-      this.docs.forManager(manager.telegramId),
-    ]);
+        ? await this.completion.progress(card.orderIds)
+        : null;
     return {
       request,
       managerName: manager.name,
@@ -257,7 +247,6 @@ export class MiniappController {
         return { ...base, date: kyivDate(paidAt), time: `${hour}:${minute}` };
       }),
       progress: progress && { paid: progress.paid.toFixed(2), due: progress.due.toFixed(2) },
-      asksDocs,
     };
   }
 }

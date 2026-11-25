@@ -19,7 +19,6 @@ import type { PendingOrdersService } from '../../../src/modules/miniapp/pending-
 import type { DirectOrdersService } from '../../../src/modules/miniapp/direct-orders.service';
 import type { RequestCompletionService } from '../../../src/modules/miniapp/request-completion.service';
 import type { RequestSyncService } from '../../../src/modules/finance-sync/request-sync.service';
-import type { AsksDocsService } from '../../../src/modules/miniapp/asks-docs.service';
 import { MiniappController } from '../../../src/modules/miniapp/miniapp.controller';
 import type {
   CreateMiniappOrderDto,
@@ -58,7 +57,6 @@ describe('MiniappController', () => {
   };
   const directOrders = {};
   const pendingOrders = { submit: jest.fn() };
-  const docs = { forManager: jest.fn() };
   const controller = new MiniappController(
     requests as unknown as RequestCreateService,
     finance as unknown as FinanceClient,
@@ -67,7 +65,6 @@ describe('MiniappController', () => {
     completion as unknown as RequestCompletionService,
     directOrders as unknown as DirectOrdersService,
     pendingOrders as unknown as PendingOrdersService,
-    docs as unknown as AsksDocsService,
   );
 
   beforeEach(() => {
@@ -75,7 +72,6 @@ describe('MiniappController', () => {
     cards.byRequestId.mockResolvedValue(card);
     finance.get.mockResolvedValue({ request: view });
     finance.edit.mockResolvedValue(view);
-    docs.forManager.mockResolvedValue(true);
   });
 
   afterEach(() => jest.resetAllMocks());
@@ -394,14 +390,6 @@ describe('MiniappController', () => {
     );
   });
 
-  describe('form', () => {
-    it('should tell whether to ask the documents and the percent', async () => {
-      docs.forManager.mockResolvedValue(false);
-      await expect(controller.form(manager)).resolves.toEqual({ asksDocs: false });
-      expect(docs.forManager).toHaveBeenCalledWith(555n);
-    });
-  });
-
   describe('get', () => {
     it('should return the view, the manager name, completed, closed and no payments', async () => {
       await expect(controller.get(manager, 'req1')).resolves.toEqual({
@@ -411,7 +399,6 @@ describe('MiniappController', () => {
         closed: false,
         payments: [],
         progress: null,
-        asksDocs: true,
       });
       expect(finance.get).toHaveBeenCalledWith('req1');
       expect(completion.progress).not.toHaveBeenCalled();
@@ -827,7 +814,6 @@ describe('MiniappController', () => {
         closed: false,
         payments: [],
         progress: null,
-        asksDocs: true,
       });
     });
 
