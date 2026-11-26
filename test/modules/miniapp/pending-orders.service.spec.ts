@@ -247,14 +247,15 @@ describe('PendingOrdersService', () => {
 
   describe('askFiles', () => {
     it('should ask for the files as a reply and remember the prompt', async () => {
-      const c = press();
+      const c = { ...press(), msgId: 31 };
 
       await service.askFiles(c as never);
 
       const [text, options] = c.reply.mock.calls[0] as [
         string,
-        { reply_markup: { force_reply: boolean } },
+        { reply_markup: { force_reply: boolean }; reply_parameters: { message_id: number } },
       ];
+      expect(options.reply_parameters.message_id).toBe(31);
       expect(text).toContain('відповіддю');
       expect(options.reply_markup.force_reply).toBe(true);
       expect(repo.remember).toHaveBeenCalledWith(555n, 90, 'p1');

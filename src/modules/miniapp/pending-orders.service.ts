@@ -137,6 +137,7 @@ export class PendingOrdersService {
     if (!found) return;
     await ctx.answerCbQuery();
     const prompt = await ctx.reply(ATTACH_PROMPT, {
+      reply_parameters: { message_id: ctx.msgId!, allow_sending_without_reply: true },
       reply_markup: { force_reply: true, input_field_placeholder: 'Фото або файл квитанції' },
     });
     await this.drafts.remember(found.draft.managerChatId, prompt.message_id, found.draft.id);

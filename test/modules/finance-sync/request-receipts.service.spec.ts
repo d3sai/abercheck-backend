@@ -820,7 +820,7 @@ describe('RequestReceiptsService', () => {
     });
 
     it('should ask for the files as a reply and remember the prompt for the order', async () => {
-      const c = press();
+      const c = { ...press(), msgId: 31 };
 
       await service.askOrderFiles(c as never);
 
@@ -829,8 +829,9 @@ describe('RequestReceiptsService', () => {
       });
       const [text, options] = c.reply.mock.calls[0] as [
         string,
-        { reply_markup: { force_reply: boolean } },
+        { reply_markup: { force_reply: boolean }; reply_parameters: { message_id: number } },
       ];
+      expect(options.reply_parameters.message_id).toBe(31);
       expect(text).toContain('0000-070217');
       expect(options.reply_markup.force_reply).toBe(true);
       expect(cards.rememberChatMessage).toHaveBeenCalledWith(555n, 90, 'order:0000-070217');

@@ -3,6 +3,7 @@ import type { InlineKeyboardButton } from 'telegraf/types';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { type Order, OrderStatus, type Prisma } from '../../../generated/prisma/client';
 import type { Initiator } from '../../refunds/refund.events';
+import { escapeHtml } from '../core/format';
 import { TelegramSender } from '../core/telegram-sender';
 import {
   type DigestItem,
@@ -72,14 +73,23 @@ export class OrderVerificationService {
             buttons,
             messageId === null ? {} : { replyTo: messageId },
           );
-      if (holder === null) return;
+      if (holder === null) return await this.warnNoControls(orders);
       await this.prisma.order.updateMany({
         where: { id: { in: orders.map((order) => order.id) } },
         data: { verifyMessageId: holder },
       });
     } catch (error) {
       this.logger.error(`Failed to attach the verify buttons of order #${first.id}`, error);
+      await this.warnNoControls(orders);
     }
+  }
+
+  /** Without a stored holder the order never reaches the digest: the admins must hear of it. */
+  private async warnNoControls(orders: Pick<Order, 'orderNumber'>[]): Promise<void> {
+    await this.sender.sendToTopic(
+      'payments',
+      `⚠️ Кнопки звірки не додано: № ${escapeHtml(orders.map((order) => order.orderNumber).join(', '))}`,
+    );
   }
 
   async verify(orderId: number, admin: Initiator): Promise<VerifyResult> {
@@ -129,7 +139,17 @@ export class OrderVerificationService {
       verifiedByName: null,
     };
     await this.prisma.order.updateMany({ where: groupOf(order), data });
-    const sent = await this.sender.send(order.manager.telegramId, problemNotice(order, codes));
+    const card = await this.prisma.financeRequestCard.findFirst({
+      where: { orderIds: { has: orderId }, managerChatId: order.manager.telegramId },
+      select: { managerMessageId: true },
+    });
+    const sent = await this.sender.send(
+      order.manager.telegramId,
+      problemNotice(order, codes),
+      undefined,
+      false,
+      card?.managerMessageId ? { replyTo: card.managerMessageId } : {},
+    );
     return { buttons: verifyButtons({ ...order, ...data }), delivered: sent !== null };
   }
 

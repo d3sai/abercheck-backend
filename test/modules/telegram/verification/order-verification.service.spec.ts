@@ -24,6 +24,7 @@ const fresh = (id: number) => ({
 describe('OrderVerificationService', () => {
   const prisma = {
     order: { findUnique: jest.fn(), findMany: jest.fn(), updateMany: jest.fn() },
+    financeRequestCard: { findFirst: jest.fn() },
   };
   const sender = {
     adminChatId: ADMIN_CHAT,
@@ -117,6 +118,10 @@ describe('OrderVerificationService', () => {
         undefined,
       );
       expect(prisma.order.updateMany).not.toHaveBeenCalled();
+      expect(sender.sendToTopic).toHaveBeenLastCalledWith(
+        'payments',
+        '⚠️ Кнопки звірки не додано: № A',
+      );
     });
 
     it('should not throw when the database fails', async () => {
@@ -125,6 +130,10 @@ describe('OrderVerificationService', () => {
 
       await expect(service.attachControls([{ id: 7, orderNumber: 'A' }], 500)).resolves.toBe(
         undefined,
+      );
+      expect(sender.sendToTopic).toHaveBeenCalledWith(
+        'payments',
+        '⚠️ Кнопки звірки не додано: № A',
       );
     });
 
@@ -225,6 +234,9 @@ describe('OrderVerificationService', () => {
       expect(sender.send).toHaveBeenCalledWith(
         9n,
         '⚠️ Фінансист: № 0000-076454 (Берчатова Л.О., 13 309 грн): квитанція в обробці',
+        undefined,
+        false,
+        {},
       );
       expect(result).toMatchObject({
         delivered: true,
@@ -232,6 +244,23 @@ describe('OrderVerificationService', () => {
           [expect.objectContaining({ callback_data: 'vf:bad:7' })],
           [expect.objectContaining({ callback_data: 'vf:ok:7' })],
         ],
+      });
+    });
+
+    it('should answer the request card of the manager when there is one', async () => {
+      prisma.order.findUnique.mockResolvedValue(stored());
+      prisma.financeRequestCard.findFirst.mockResolvedValue({ managerMessageId: 31 });
+      sender.send.mockResolvedValue(1);
+
+      await service.problem(7, ['sum'], admin);
+
+      expect(prisma.financeRequestCard.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { orderIds: { has: 7 }, managerChatId: 9n },
+        }),
+      );
+      expect(sender.send).toHaveBeenCalledWith(9n, expect.any(String), undefined, false, {
+        replyTo: 31,
       });
     });
 
