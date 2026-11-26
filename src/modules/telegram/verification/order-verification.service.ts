@@ -9,8 +9,9 @@ import {
   type ProblemCode,
   type VerifyState,
   controlsMessage,
-  isProblemCode,
+  maskOf,
   problemNotice,
+  problemsOf,
   reasonButtons,
   verifyButtons,
 } from './verification.messages';
@@ -105,7 +106,7 @@ export class OrderVerificationService {
 
   async problem(
     orderId: number,
-    code: ProblemCode,
+    codes: ProblemCode[],
     admin: Initiator,
   ): Promise<VerifyResult & { delivered?: boolean }> {
     const order = await this.prisma.order.findUnique({
@@ -121,20 +122,22 @@ export class OrderVerificationService {
     });
     if (!order) return NOT_FOUND;
     const data = {
-      problem: code,
+      problem: codes.join(','),
       problemAt: new Date(),
       problemByName: admin.name,
       verifiedAt: null,
       verifiedByName: null,
     };
     await this.prisma.order.updateMany({ where: groupOf(order), data });
-    const sent = await this.sender.send(order.manager.telegramId, problemNotice(order, code));
+    const sent = await this.sender.send(order.manager.telegramId, problemNotice(order, codes));
     return { buttons: verifyButtons({ ...order, ...data }), delivered: sent !== null };
   }
 
-  async reasons(orderId: number): Promise<VerifyResult> {
+  async reasons(orderId: number, mask?: number): Promise<VerifyResult> {
     const order = await this.stored(orderId);
-    return order ? { buttons: reasonButtons(order.id) } : NOT_FOUND;
+    return order
+      ? { buttons: reasonButtons(order.id, mask ?? maskOf(problemsOf(order.problem))) }
+      : NOT_FOUND;
   }
 
   async back(orderId: number): Promise<VerifyResult> {
@@ -169,7 +172,7 @@ export class OrderVerificationService {
       currency: order.currency,
       managerName: order.manager.name,
       createdAt: order.createdAt,
-      problem: order.problem !== null && isProblemCode(order.problem) ? order.problem : null,
+      problems: problemsOf(order.problem),
       verifyMessageId: order.verifyMessageId!,
     }));
   }

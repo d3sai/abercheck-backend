@@ -17,7 +17,7 @@ import {
   OrderVerificationService,
   type VerifyResult,
 } from '../verification/order-verification.service';
-import { VerifyAction, isProblemCode } from '../verification/verification.messages';
+import { VerifyAction, codesOf } from '../verification/verification.messages';
 import { type Admin, AdminAction, AdminFlowService } from './admin-flow.service';
 
 export const ADMIN_HELP =
@@ -158,12 +158,21 @@ export class AdminUpdate {
   @Action(VerifyAction.Reason)
   async verifyReason(@Ctx() ctx: MatchContext): Promise<void> {
     if (!(await this.ensureAuthorizedAdmin(ctx))) return;
-    const code = ctx.match[2]!;
-    if (!isProblemCode(code)) {
+    await this.showVerify(
+      ctx,
+      await this.verification.reasons(Number(ctx.match[1]), Number(ctx.match[2])),
+    );
+  }
+
+  @Action(VerifyAction.Send)
+  async verifySend(@Ctx() ctx: MatchContext): Promise<void> {
+    if (!(await this.ensureAuthorizedAdmin(ctx))) return;
+    const codes = codesOf(Number(ctx.match[2]));
+    if (codes.length === 0) {
       await ctx.answerCbQuery();
       return;
     }
-    const result = await this.verification.problem(Number(ctx.match[1]), code, this.admin(ctx));
+    const result = await this.verification.problem(Number(ctx.match[1]), codes, this.admin(ctx));
     await this.showVerify(
       ctx,
       result,

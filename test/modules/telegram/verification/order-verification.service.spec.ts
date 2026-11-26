@@ -210,7 +210,7 @@ describe('OrderVerificationService', () => {
       prisma.order.findUnique.mockResolvedValue(stored());
       sender.send.mockResolvedValue(1);
 
-      const result = await service.problem(7, 'processing', admin);
+      const result = await service.problem(7, ['processing'], admin);
 
       expect(prisma.order.updateMany).toHaveBeenCalledWith({
         where: { verifyMessageId: 500 },
@@ -239,7 +239,7 @@ describe('OrderVerificationService', () => {
       prisma.order.findUnique.mockResolvedValue(stored());
       sender.send.mockResolvedValue(null);
 
-      const result = await service.problem(7, 'sum', admin);
+      const result = await service.problem(7, ['sum'], admin);
 
       expect(result).toMatchObject({ delivered: false });
       expect(result).toHaveProperty('buttons');
@@ -248,7 +248,7 @@ describe('OrderVerificationService', () => {
     it('should refuse an order that is gone', async () => {
       prisma.order.findUnique.mockResolvedValue(null);
 
-      expect(await service.problem(7, 'sum', admin)).toEqual({
+      expect(await service.problem(7, ['sum'], admin)).toEqual({
         error: '⚠️ Замовлення не знайдено',
       });
       expect(sender.send).not.toHaveBeenCalled();
@@ -259,7 +259,8 @@ describe('OrderVerificationService', () => {
     it('should list the reasons', async () => {
       prisma.order.findUnique.mockResolvedValue(stored());
 
-      expect(await service.reasons(7)).toEqual({ buttons: reasonButtons(7) });
+      expect(await service.reasons(7)).toEqual({ buttons: reasonButtons(7, 0) });
+      expect(await service.reasons(7, 3)).toEqual({ buttons: reasonButtons(7, 3) });
     });
 
     it('should go back to the stored state', async () => {
@@ -297,7 +298,7 @@ describe('OrderVerificationService', () => {
           },
         }),
       );
-      expect(items.map((item) => item.problem)).toEqual(['sum', null]);
+      expect(items.map((item) => item.problems)).toEqual([['sum'], []]);
       expect(items[0]).toMatchObject({ managerName: 'Діана', verifyMessageId: 500 });
     });
   });

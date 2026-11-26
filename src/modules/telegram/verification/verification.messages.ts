@@ -18,13 +18,25 @@ export const PROBLEMS = {
 
 export type ProblemCode = keyof typeof PROBLEMS;
 
-export const isProblemCode = (value: string): value is ProblemCode =>
-  Object.hasOwn(PROBLEMS, value);
+const CODES = Object.keys(PROBLEMS) as ProblemCode[];
+
+export const problemsOf = (raw: string | null): ProblemCode[] =>
+  CODES.filter((code) => raw?.split(',').includes(code));
+
+export const maskOf = (codes: ProblemCode[]): number =>
+  codes.reduce((mask, code) => mask | (1 << CODES.indexOf(code)), 0);
+
+export const codesOf = (mask: number): ProblemCode[] =>
+  CODES.filter((_, index) => mask & (1 << index));
+
+const textOf = (codes: ProblemCode[]): string =>
+  codes.map((code) => lower(PROBLEMS[code])).join('; ');
 
 export const VerifyAction = {
   Ok: /^vf:ok:(\d+)$/,
   Bad: /^vf:bad:(\d+)$/,
-  Reason: /^vf:r:(\d+):([a-z]+)$/,
+  Reason: /^vf:r:(\d+):(\d+)$/,
+  Send: /^vf:s:(\d+):(\d+)$/,
   Undo: /^vf:undo:(\d+)$/,
   Back: /^vf:back:(\d+)$/,
 } as const;
@@ -45,7 +57,7 @@ export interface DigestItem {
   currency: Currency;
   managerName: string;
   createdAt: Date;
-  problem: ProblemCode | null;
+  problems: ProblemCode[];
   verifyMessageId: number;
 }
 
@@ -68,11 +80,13 @@ export function verifyButtons(state: VerifyState): InlineKeyboardButton[][] {
       ],
     ];
   }
-  if (state.problem && isProblemCode(state.problem)) {
+  const problems = problemsOf(state.problem);
+  if (problems.length > 0) {
+    const label = problems.length === 1 ? PROBLEMS[problems[0]!] : `Проблем: ${problems.length}`;
     return [
       [
         button(
-          `⚠️ ${PROBLEMS[state.problem]} · ${stamp(state.problemByName, state.problemAt)}`,
+          `⚠️ ${label} · ${stamp(state.problemByName, state.problemAt)}`,
           `vf:bad:${state.id}`,
         ),
       ],
@@ -82,14 +96,21 @@ export function verifyButtons(state: VerifyState): InlineKeyboardButton[][] {
   return [[verify, button('⚠️ Проблема', `vf:bad:${state.id}`)]];
 }
 
-export function reasonButtons(orderId: number): InlineKeyboardButton[][] {
-  const reasons = Object.entries(PROBLEMS).map(([code, text]) =>
-    button(text, `vf:r:${orderId}:${code}`),
+export function reasonButtons(orderId: number, mask: number): InlineKeyboardButton[][] {
+  const reasons = CODES.map((code, index) =>
+    button(
+      `${mask & (1 << index) ? '✅ ' : ''}${PROBLEMS[code]}`,
+      `vf:r:${orderId}:${mask ^ (1 << index)}`,
+    ),
   );
   const rows: InlineKeyboardButton[][] = [];
   for (let index = 0; index < reasons.length; index += 2)
     rows.push(reasons.slice(index, index + 2));
-  return [...rows, [button('↩️ Назад', `vf:back:${orderId}`)]];
+  const send =
+    mask === 0
+      ? []
+      : [[button(`📨 Надіслати (${codesOf(mask).length})`, `vf:s:${orderId}:${mask}`)]];
+  return [...rows, ...send, [button('↩️ Назад', `vf:back:${orderId}`)]];
 }
 
 export const controlsMessage = (orderNumbers: string[]): string =>
@@ -97,9 +118,9 @@ export const controlsMessage = (orderNumbers: string[]): string =>
 
 export function problemNotice(
   order: Pick<Order, 'orderNumber' | 'clientName' | 'amountDue' | 'currency'>,
-  code: ProblemCode,
+  codes: ProblemCode[],
 ): string {
-  return `⚠️ Фінансист: № ${escapeHtml(order.orderNumber)} (${escapeHtml(order.clientName)}, ${formatMoneyIn(order.amountDue, order.currency)}): ${lower(PROBLEMS[code])}`;
+  return `⚠️ Фінансист: № ${escapeHtml(order.orderNumber)} (${escapeHtml(order.clientName)}, ${formatMoneyIn(order.amountDue, order.currency)}): ${textOf(codes)}`;
 }
 
 function digestLine(item: DigestItem, chatPath: string): string {
@@ -110,7 +131,7 @@ function digestLine(item: DigestItem, chatPath: string): string {
       client.length > CLIENT_LIMIT ? `${client.slice(0, CLIENT_LIMIT).join('')}…` : item.clientName,
     ),
     formatMoneyIn(item.amountDue, item.currency),
-    ...(item.problem ? [lower(PROBLEMS[item.problem])] : []),
+    ...(item.problems.length > 0 ? [textOf(item.problems)] : []),
     escapeHtml(item.managerName),
     formatKyivDate(item.createdAt),
   ];
@@ -120,8 +141,8 @@ function digestLine(item: DigestItem, chatPath: string): string {
 export function digestMessage(items: DigestItem[], chatId: number): string | null {
   if (items.length === 0) return null;
   const chatPath = String(chatId).replace(/^-100/, '');
-  const problems = items.filter((item) => item.problem !== null);
-  const unverified = items.filter((item) => item.problem === null);
+  const problems = items.filter((item) => item.problems.length > 0);
+  const unverified = items.filter((item) => item.problems.length === 0);
   const sections: [string, DigestItem[]][] = [
     [`⚠️ Проблеми: ${problems.length}`, problems],
     [`🕓 Незвірені: ${unverified.length}`, unverified],

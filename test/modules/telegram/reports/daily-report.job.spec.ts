@@ -120,7 +120,7 @@ describe('DailyReportJob', () => {
       currency: 'UAH',
       managerName: 'Діана',
       createdAt: new Date('2026-09-10T10:00:00Z'),
-      problem: 'processing',
+      problems: ['processing'],
       verifyMessageId: 55,
     };
 

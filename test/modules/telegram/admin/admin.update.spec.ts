@@ -172,7 +172,8 @@ describe('AdminUpdate', () => {
       const match = [
         /^vf:ok:(\d+)$/,
         /^vf:bad:(\d+)$/,
-        /^vf:r:(\d+):([a-z]+)$/,
+        /^vf:r:(\d+):(\d+)$/,
+        /^vf:s:(\d+):(\d+)$/,
         /^vf:undo:(\d+)$/,
         /^vf:back:(\d+)$/,
       ]
@@ -235,16 +236,28 @@ describe('AdminUpdate', () => {
       expect(verification.back).toHaveBeenCalledWith(7);
     });
 
-    it('should store the reason', async () => {
+    it('should toggle a reason without storing it', async () => {
       asAdmin();
-      verification.problem.mockResolvedValue({ buttons, delivered: true });
-      const c = press('vf:r:7:processing');
+      verification.reasons.mockResolvedValue({ buttons });
+      const c = press('vf:r:7:5');
 
       await update.verifyReason(c as never);
 
+      expect(verification.reasons).toHaveBeenCalledWith(7, 5);
+      expect(verification.problem).not.toHaveBeenCalled();
+      expect(c.editMessageReplyMarkup).toHaveBeenCalledWith({ inline_keyboard: buttons });
+    });
+
+    it('should store the chosen reasons', async () => {
+      asAdmin();
+      verification.problem.mockResolvedValue({ buttons, delivered: true });
+      const c = press('vf:s:7:9');
+
+      await update.verifySend(c as never);
+
       expect(verification.problem).toHaveBeenCalledWith(
         7,
-        'processing',
+        ['date', 'processing'],
         expect.objectContaining({ telegramId: 555n, name: 'Уляна' }),
       );
       expect(c.editMessageReplyMarkup).toHaveBeenCalledWith({ inline_keyboard: buttons });
@@ -254,19 +267,19 @@ describe('AdminUpdate', () => {
     it('should say when the manager was not reached', async () => {
       asAdmin();
       verification.problem.mockResolvedValue({ buttons, delivered: false });
-      const c = press('vf:r:7:sum');
+      const c = press('vf:s:7:64');
 
-      await update.verifyReason(c as never);
+      await update.verifySend(c as never);
 
       expect(c.answerCbQuery).toHaveBeenCalledWith('Менеджеру не доставлено', { show_alert: true });
       expect(c.editMessageReplyMarkup).toHaveBeenCalled();
     });
 
-    it('should ignore an unknown reason code', async () => {
+    it('should send nothing when no reason is chosen', async () => {
       asAdmin();
-      const c = press('vf:r:7:xyz');
+      const c = press('vf:s:7:0');
 
-      await update.verifyReason(c as never);
+      await update.verifySend(c as never);
 
       expect(verification.problem).not.toHaveBeenCalled();
       expect(c.answerCbQuery).toHaveBeenCalledWith();

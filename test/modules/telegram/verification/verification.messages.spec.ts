@@ -4,9 +4,11 @@ import { button } from '../../../../src/modules/telegram/core/bot-reply';
 import {
   type DigestItem,
   type VerifyState,
+  codesOf,
   digestMessage,
-  isProblemCode,
+  maskOf,
   problemNotice,
+  problemsOf,
   reasonButtons,
   verifyButtons,
 } from '../../../../src/modules/telegram/verification/verification.messages';
@@ -28,7 +30,7 @@ const item = (patch: Partial<DigestItem> = {}): DigestItem => ({
   currency: Currency.UAH,
   managerName: 'Христина',
   createdAt: kyivDateTime(2026, 11, 23, 16, 14),
-  problem: null,
+  problems: [],
   verifyMessageId: 50,
   ...patch,
 });
@@ -68,32 +70,51 @@ describe('verifyButtons', () => {
 
 describe('reasonButtons', () => {
   it('should list the ten reasons two per row and a way back', () => {
-    const rows = reasonButtons(7);
+    const rows = reasonButtons(7, 0);
     expect(rows.flat()).toHaveLength(11);
     expect(rows.slice(0, -1).every((row) => row.length <= 2)).toBe(true);
     expect(rows.at(-1)).toEqual([button('↩️ Назад', 'vf:back:7')]);
-    expect(rows[0]).toEqual([
-      button('Немає дати', 'vf:r:7:date'),
-      button('Немає часу', 'vf:r:7:time'),
-    ]);
+    expect(rows[0]).toEqual([button('Немає дати', 'vf:r:7:1'), button('Немає часу', 'vf:r:7:2')]);
+  });
+
+  it('should tick the chosen reasons, toggle them off and offer to send', () => {
+    const rows = reasonButtons(7, 0b101);
+    expect(rows[0]![0]).toEqual(button('✅ Немає дати', 'vf:r:7:4'));
+    expect(rows[0]![1]).toEqual(button('Немає часу', 'vf:r:7:7'));
+    expect(rows.at(-2)).toEqual([button('📨 Надіслати (2)', 'vf:s:7:5')]);
   });
 
   it('should keep callback data within 64 bytes for a large id', () => {
-    const data = reasonButtons(2147483647)
+    const data = reasonButtons(2147483647, 1023)
       .flat()
       .map((b) => (b as { callback_data: string }).callback_data);
     expect(data.every((d) => Buffer.byteLength(d) <= 64)).toBe(true);
   });
 });
 
-describe('isProblemCode', () => {
-  it('should know the codes and nothing else', () => {
-    expect(isProblemCode('cash')).toBe(true);
-    expect(isProblemCode('xyz')).toBe(false);
+describe('problem codes and masks', () => {
+  it('should round-trip the stored codes through a mask, skipping unknown ones', () => {
+    expect(problemsOf('sum,xyz,date')).toEqual(['date', 'sum']);
+    expect(codesOf(maskOf(['sum', 'date']))).toEqual(['date', 'sum']);
+    expect(problemsOf(null)).toEqual([]);
   });
 });
 
 describe('problemNotice', () => {
+  it('should list several reasons', () => {
+    expect(
+      problemNotice(
+        {
+          orderNumber: '1',
+          clientName: 'К',
+          amountDue: new Prisma.Decimal('1'),
+          currency: Currency.UAH,
+        },
+        ['date', 'sum'],
+      ),
+    ).toContain(': немає дати; сума не збігається');
+  });
+
   it('should tell the manager the order, client, sum and reason', () => {
     expect(
       problemNotice(
@@ -103,7 +124,7 @@ describe('problemNotice', () => {
           amountDue: new Prisma.Decimal('13309'),
           currency: Currency.UAH,
         },
-        'processing',
+        ['processing'],
       ),
     ).toBe('⚠️ Фінансист: № 0000-076454 (Берчатова Л.О., 13 309 грн): квитанція в обробці');
   });
@@ -117,7 +138,7 @@ describe('problemNotice', () => {
           amountDue: new Prisma.Decimal('1'),
           currency: Currency.UAH,
         },
-        'sum',
+        ['sum'],
       ),
     ).toContain('A &lt;b&gt;');
   });
@@ -132,7 +153,7 @@ describe('digestMessage', () => {
     const text = digestMessage(
       [
         item({ orderNumber: '0000-000002' }),
-        item({ orderNumber: '0000-000001', problem: 'sum', verifyMessageId: 55 }),
+        item({ orderNumber: '0000-000001', problems: ['sum'], verifyMessageId: 55 }),
       ],
       CHAT,
     )!;
