@@ -29,6 +29,7 @@ describe('ManagerActionsService', () => {
     byRequestId: jest.fn(),
     byManagerMessage: jest.fn(),
     requestOfChatMessage: jest.fn(),
+    rememberChatMessage: jest.fn(),
   };
   const sync = { renderGroup: jest.fn(), renderManager: jest.fn(), notifyManager: jest.fn() };
   const managers = { findActiveByTelegramId: jest.fn() };
@@ -50,6 +51,21 @@ describe('ManagerActionsService', () => {
     from: { id: 555, first_name: 'Іван', last_name: 'Петренко' },
     match: ['fc:req1', 'req1'],
     answerCbQuery: jest.fn(),
+  });
+
+  describe('askFiles', () => {
+    it('should send the prompt as a reply to the request card', async () => {
+      const c = { ...press(), msgId: 31, reply: jest.fn().mockResolvedValue({ message_id: 90 }) };
+
+      await service.askFiles(c as never);
+
+      expect(c.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Запит #42'),
+        expect.objectContaining({
+          reply_parameters: { message_id: 31, allow_sending_without_reply: true },
+        }),
+      );
+    });
   });
 
   describe('cancel', () => {

@@ -42,6 +42,7 @@ export class ManagerActionsService {
     const prompt = await ctx.reply(
       `📎 Запит #${card.number}: надішліть фото або файл відповіддю на це повідомлення.`,
       {
+        reply_parameters: { message_id: ctx.msgId!, allow_sending_without_reply: true },
         reply_markup: { force_reply: true, input_field_placeholder: 'Фото або файл квитанції' },
       },
     );
