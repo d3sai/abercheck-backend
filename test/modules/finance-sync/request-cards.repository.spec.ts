@@ -48,7 +48,7 @@ describe('RequestCardsRepository', () => {
         OR: [{ notifiedStatus: null }, { notifiedStatus: { not: 'cancelled' } }],
       },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: 100,
     });
   });
 

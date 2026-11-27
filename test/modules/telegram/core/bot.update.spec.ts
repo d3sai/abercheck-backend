@@ -88,6 +88,7 @@ const openOrder = {
 
 const ordersMock = {
   list: () => Promise.resolve({ items: [openOrder], total: 1 }),
+  search: () => Promise.resolve({ items: [openOrder], total: 1 }),
   findWithBalance: jest.fn(),
   create: jest.fn(),
   createGroup: jest.fn(),
@@ -385,6 +386,14 @@ describe('BotUpdate', () => {
       expect(replies).toHaveLength(1);
       expect(replies[0]!.text).toContain('Мої відкриті замовлення');
       expect(replies[0]!.text).toContain('0000-066717');
+    });
+
+    it('should redraw the orders list in place on a page arrow', async () => {
+      await press('mol:1');
+
+      expect(sent).toEqual([]);
+      expect(edited).toHaveLength(1);
+      expect(edited[0]!.text).toContain('0000-066717');
     });
 
     it('should still answer /list in the admin group', async () => {

@@ -15,12 +15,13 @@ const OPEN_STATUSES = [
 ];
 
 describe('OrderListService', () => {
-  const orders = { list: jest.fn() };
+  const orders = { list: jest.fn(), search: jest.fn() };
   const payments = { findUnmatched: jest.fn() };
   const service = new OrderListService(orders as never, payments as never);
 
   beforeEach(() => {
     orders.list.mockResolvedValue({ items: [], total: 0 });
+    orders.search.mockResolvedValue({ items: [], total: 0 });
     payments.findUnmatched.mockResolvedValue({ payments: [], total: 0 });
   });
 
@@ -39,7 +40,7 @@ describe('OrderListService', () => {
         },
         amountPaid: d(paid),
       });
-      orders.list.mockResolvedValue({
+      orders.search.mockResolvedValue({
         items: [
           item('1111-111111', OrderStatus.AWAITING_PAYMENT, '0'),
           item('2222-222222', OrderStatus.PARTIALLY_PAID, '40'),
@@ -47,35 +48,36 @@ describe('OrderListService', () => {
         total: 2,
       });
 
-      const reply = await service.forManager(7, false);
+      const reply = await service.forManager(7, 0);
 
       expect(reply.buttons).toEqual([
         [{ text: '🗑 Видалити 1111-111111', callback_data: 'del:1111-111111' }],
       ]);
     });
 
-    it("should filter to this manager's open orders by default", async () => {
-      const reply = await service.forManager(7, false);
+    it("should show a page of this manager's open orders, newest first", async () => {
+      orders.search.mockResolvedValue({ items: [], total: 12 });
 
-      expect(orders.list).toHaveBeenCalledWith(
-        { managerId: 7, statuses: OPEN_STATUSES },
-        LIST_LIMIT,
-      );
+      const reply = await service.forManager(7, 1);
+
+      expect(orders.search).toHaveBeenCalledWith({
+        managerId: 7,
+        statuses: OPEN_STATUSES,
+        sort: 'createdAt',
+        direction: 'desc',
+        skip: 5,
+        take: 5,
+      });
       expect(reply.html).toContain('Мої відкриті замовлення');
+      expect(reply.html).toContain('стор. 2/3');
     });
 
-    it('should drop the status filter when asked for all orders', async () => {
-      await service.forManager(7, true);
+    it('should fall back to the last page when the asked one is gone', async () => {
+      orders.search.mockResolvedValueOnce({ items: [], total: 3 });
 
-      expect(orders.list).toHaveBeenCalledWith({ managerId: 7, statuses: undefined }, LIST_LIMIT);
-    });
+      await service.forManager(7, 4);
 
-    it('should title the reply for "all" and not include unmatched payments', async () => {
-      const reply = await service.forManager(7, true);
-
-      expect(reply.html).toContain('Мої замовлення');
-      expect(reply.html).not.toContain('Невідомі платежі');
-      expect(payments.findUnmatched).not.toHaveBeenCalled();
+      expect(orders.search).toHaveBeenLastCalledWith(expect.objectContaining({ skip: 0 }));
     });
   });
 

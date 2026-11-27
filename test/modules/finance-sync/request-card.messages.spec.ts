@@ -701,24 +701,59 @@ describe('managerRequestList', () => {
       ...patch,
     }) as FinanceRequestCard;
 
-  it('gives one button per request, with its state, that brings its card down', () => {
-    const reply = managerRequestList([
-      row(),
-      row({ requestId: 'r2', number: '43', notifiedStatus: 'accepted' }),
-      row({ requestId: 'r3', number: '44', notifiedStatus: 'accepted', completedAt: at }),
-    ]);
+  it('groups the requests by who acts next, the manager first', () => {
+    const reply = managerRequestList(
+      [
+        row(),
+        row({ requestId: 'r2', number: '43', notifiedStatus: 'accepted' }),
+        row({ requestId: 'r3', number: '44', notifiedStatus: 'accepted', completedAt: at }),
+      ],
+      0,
+    );
 
-    expect(reply.html).toContain('Мої відкриті запити');
-    expect(flat(reply).map((b) => b.text)).toEqual([
-      '#42 · 25.11 · 🕓 на розгляді',
-      '#43 · 25.11 · ✅ погоджено, прийміть',
-      '#44 · 25.11 · ⏳ очікує оплату',
+    expect(reply.html).toBe(
+      [
+        '<b>🗂 Мої запити</b> · відкритих: 3',
+        '',
+        '✅ <b>Погоджено — натисніть «Прийняти»</b>',
+        '#43 · 25.11',
+        '⏳ <b>Очікують оплату</b>',
+        '#44 · 25.11',
+        '🕓 <b>На розгляді у фінансистів</b>',
+        '#42 · 25.11',
+        '',
+        'Натисніть номер — картка запиту зʼявиться внизу чату.',
+      ].join('\n'),
+    );
+    expect(reply.buttons).toEqual([
+      [
+        { text: '#43', callback_data: 'mq:r2' },
+        { text: '#44', callback_data: 'mq:r3' },
+        { text: '#42', callback_data: `mq:${ID}` },
+      ],
     ]);
-    expect(FinanceAction.Show.exec(flat(reply)[0]!.callback_data)?.[1]).toBe(ID);
+    expect(FinanceAction.Show.exec(`mq:${ID}`)?.[1]).toBe(ID);
+  });
+
+  it('shows five requests per page, with arrows between the pages', () => {
+    const many = Array.from({ length: 7 }, (_, i) =>
+      row({ requestId: `r${i}`, number: String(50 - i) }),
+    );
+
+    const first = managerRequestList(many, 0);
+    expect(first.html).toContain('відкритих: 7 · стор. 1/2');
+    expect(first.buttons![0]).toHaveLength(5);
+    expect(first.buttons![1]).toEqual([{ text: 'Далі ▶️', callback_data: 'mql:1' }]);
+
+    const last = managerRequestList(many, 9);
+    expect(last.html).toContain('стор. 2/2');
+    expect(last.buttons![0]!.map((b) => b.text)).toEqual(['#45', '#44']);
+    expect(last.buttons![1]).toEqual([{ text: '◀️ Назад', callback_data: 'mql:0' }]);
+    expect(FinanceAction.Page.exec('mql:1')?.[1]).toBe('1');
   });
 
   it('says so when there are none', () => {
-    const reply = managerRequestList([]);
+    const reply = managerRequestList([], 0);
 
     expect(reply.html).toContain('Відкритих запитів немає');
     expect(reply.buttons).toBeUndefined();

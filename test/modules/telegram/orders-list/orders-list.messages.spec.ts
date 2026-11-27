@@ -92,6 +92,24 @@ describe('orderList', () => {
     expect(buttons).toEqual([[{ text: "🔗 Прив'язати #15", callback_data: 'attach:15' }]]);
   });
 
+  it('should add the page to the title and arrows to move between pages', () => {
+    const { html, buttons } = orderList({
+      title: 'Мої відкриті замовлення',
+      items: items.slice(0, 1),
+      total: 12,
+      withManager: false,
+      page: { index: 1, pages: 3, prefix: 'mol' },
+    });
+
+    expect(html.split('\n')[0]).toBe('<b>Мої відкриті замовлення</b> · 12 · стор. 2/3');
+    expect(buttons).toEqual([
+      [
+        { text: '◀️ Назад', callback_data: 'mol:0' },
+        { text: 'Далі ▶️', callback_data: 'mol:2' },
+      ],
+    ]);
+  });
+
   it('should say so when there is nothing to show', () => {
     expect(
       orderList({ title: 'Мої замовлення', items: [], total: 0, withManager: false }).html,

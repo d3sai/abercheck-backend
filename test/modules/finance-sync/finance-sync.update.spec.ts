@@ -82,6 +82,7 @@ describe('FinanceSyncUpdate', () => {
     onText: jest.fn(),
     show: jest.fn(),
     listRequests: jest.fn(),
+    pageRequests: jest.fn(),
   };
   const receipts = { onFile: jest.fn() };
   const update = new FinanceSyncUpdate(
@@ -102,11 +103,13 @@ describe('FinanceSyncUpdate', () => {
     await update.refresh(c as never);
     await update.cancel(c as never);
     await update.show(c as never);
+    await update.pageRequests(c as never);
 
     expect(actions.pressFop).toHaveBeenCalledWith(c);
     expect(actions.refresh).toHaveBeenCalledWith(c);
     expect(managerActions.cancel).toHaveBeenCalledWith(c);
     expect(managerActions.show).toHaveBeenCalledWith(c);
+    expect(managerActions.pageRequests).toHaveBeenCalledWith(c);
   });
 
   describe('text', () => {

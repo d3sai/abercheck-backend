@@ -2,7 +2,13 @@ import { Injectable } from '@nestjs/common';
 import type { Context } from 'telegraf';
 import type { FinanceRequestCard } from '../../generated/prisma/client';
 import { NOT_A_MANAGER } from '../telegram/access/access.messages';
-import { fullName, isPrivate, type MatchContext, reply } from '../telegram/core/telegram-context';
+import {
+  edit,
+  fullName,
+  isPrivate,
+  type MatchContext,
+  reply,
+} from '../telegram/core/telegram-context';
 import { ManagersService } from '../managers/managers.service';
 import { FinanceClient } from './finance.client';
 import { FinanceApiError } from './finance.types';
@@ -57,7 +63,19 @@ export class ManagerActionsService {
       await reply(ctx, { html: NOT_A_MANAGER });
       return;
     }
-    await reply(ctx, managerRequestList(await this.cards.activeOfManager(manager.id)));
+    await reply(ctx, managerRequestList(await this.cards.activeOfManager(manager.id), 0));
+  }
+
+  async pageRequests(ctx: MatchContext): Promise<void> {
+    if (!isPrivate(ctx) || !ctx.from) return;
+    const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from.id));
+    if (!manager) {
+      await ctx.answerCbQuery(NOT_A_MANAGER, { show_alert: true });
+      return;
+    }
+    await ctx.answerCbQuery();
+    const cards = await this.cards.activeOfManager(manager.id);
+    await edit(ctx, managerRequestList(cards, Number(ctx.match[1])));
   }
 
   async show(ctx: MatchContext): Promise<void> {

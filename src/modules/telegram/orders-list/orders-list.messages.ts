@@ -1,6 +1,6 @@
 import type { Currency, Payment, Prisma } from '../../../generated/prisma/client';
 import type { OrderWithManager, OrderWithPaid } from '../../orders/orders.service';
-import { type BotReply, button } from '../core/bot-reply';
+import { type BotReply, button, pageNav } from '../core/bot-reply';
 import { escapeHtml, formatKyivDate, formatMoney, formatMoneyIn } from '../core/format';
 import { STATUS_LABELS } from './status-labels';
 
@@ -12,6 +12,9 @@ export const attachOrderButton = (orderNumber: string) =>
 /** «Скасувати № …» under a card: the delete flow (`del:`) of an own, unpaid order. */
 export const cancelOrderButton = (orderNumber: string) =>
   button(`🗑 Скасувати № ${orderNumber}`, `del:${orderNumber}`);
+
+/** «◀️ Назад» / «Далі ▶️» under «📋 Мої замовлення». */
+export const OrderListAction = { Page: /^mol:(\d+)$/ } as const;
 
 export const LIST_LIMIT = 20;
 export const UNMATCHED_LIMIT = 10;
@@ -53,6 +56,7 @@ export interface OrderListInput {
   withManager: boolean;
   unmatched?: { payments: Payment[]; total: number };
   deletable?: string[];
+  page?: { index: number; pages: number; prefix: string };
 }
 
 export function orderList({
@@ -62,8 +66,13 @@ export function orderList({
   withManager,
   unmatched,
   deletable = [],
+  page,
 }: OrderListInput): BotReply {
-  const shown = total > items.length ? ` · показано ${items.length} з ${total}` : ` · ${total}`;
+  const shown = page
+    ? ` · ${total}${page.pages > 1 ? ` · стор. ${page.index + 1}/${page.pages}` : ''}`
+    : total > items.length
+      ? ` · показано ${items.length} з ${total}`
+      : ` · ${total}`;
   const sections = [
     `<b>${title}</b>${shown}`,
     items.length > 0
@@ -90,6 +99,9 @@ export function orderList({
       ...unmatched.payments.map((p) => [button(`🔗 Прив'язати #${p.id}`, `attach:${p.id}`)]),
     );
   }
+
+  const nav = page ? pageNav(page.prefix, page.index, page.pages) : [];
+  if (nav.length > 0) buttons.push(nav);
 
   return { html: sections.join('\n\n'), buttons: buttons.length > 0 ? buttons : undefined };
 }

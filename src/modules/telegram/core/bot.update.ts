@@ -16,6 +16,7 @@ import {
 } from './menu';
 import { DeleteAction, OrderDeleteService } from '../orders-list/order-delete.service';
 import { OrderListService } from '../orders-list/order-list.service';
+import { OrderListAction } from '../orders-list/orders-list.messages';
 import { GuideService } from '../guides/guide.service';
 import { GuideAction, GUIDES_MENU } from '../guides/guides';
 import { DraftAction, OrderDraftService } from '../order-draft/order-draft.service';
@@ -137,6 +138,15 @@ export class BotUpdate implements OnApplicationBootstrap {
       return;
     }
     // managers have no list: their requests and orders live in the Mini App
+  }
+
+  @Action(OrderListAction.Page)
+  async pageOrders(@Ctx() ctx: MatchContext): Promise<void> {
+    const manager = await this.activeManager(ctx);
+    if (manager) {
+      await ctx.answerCbQuery();
+      await edit(ctx, await this.lists.forManager(manager.id, Number(ctx.match[1])));
+    }
   }
 
   @Action(DeleteAction.Ask)
@@ -355,7 +365,7 @@ export class BotUpdate implements OnApplicationBootstrap {
       return;
     }
     if (ctx.text === MY_ORDERS_LABEL) {
-      await reply(ctx, await this.lists.forManager(manager.id, false));
+      await reply(ctx, await this.lists.forManager(manager.id, 0));
       return;
     }
     // a press of a button from the old reply keyboard: clear the keyboard and point at the new one

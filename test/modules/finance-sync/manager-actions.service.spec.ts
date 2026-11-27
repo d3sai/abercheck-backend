@@ -85,7 +85,7 @@ describe('ManagerActionsService', () => {
 
       expect(cards.activeOfManager).toHaveBeenCalledWith(4);
       expect(c.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Мої відкриті запити'),
+        expect.stringContaining('Мої запити'),
         expect.objectContaining({
           reply_markup: {
             inline_keyboard: [[expect.objectContaining({ callback_data: 'mq:req1' })]],
@@ -102,6 +102,41 @@ describe('ManagerActionsService', () => {
 
       expect(cards.activeOfManager).not.toHaveBeenCalled();
       expect(c.reply).toHaveBeenCalledWith(NOT_A_MANAGER, expect.anything());
+    });
+  });
+
+  describe('pageRequests', () => {
+    it('should redraw the list at the asked page', async () => {
+      cards.activeOfManager.mockResolvedValue(
+        Array.from({ length: 6 }, (_, i) => ({
+          ...card,
+          requestId: `r${i}`,
+          number: String(i),
+          createdAt: new Date(),
+          completedAt: null,
+          notifiedStatus: null,
+        })),
+      );
+      const c = { ...press(), match: ['mql:1', '1'], editMessageText: jest.fn() };
+
+      await service.pageRequests(c as never);
+
+      expect(cards.activeOfManager).toHaveBeenCalledWith(4);
+      expect(c.answerCbQuery).toHaveBeenCalledWith();
+      expect(c.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('стор. 2/2'),
+        expect.anything(),
+      );
+    });
+
+    it('should refuse someone who is not an active manager', async () => {
+      managers.findActiveByTelegramId.mockResolvedValue(null);
+      const c = { ...press(), match: ['mql:1', '1'], editMessageText: jest.fn() };
+
+      await service.pageRequests(c as never);
+
+      expect(c.answerCbQuery).toHaveBeenCalledWith(NOT_A_MANAGER, { show_alert: true });
+      expect(c.editMessageText).not.toHaveBeenCalled();
     });
   });
 

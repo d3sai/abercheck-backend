@@ -18,3 +18,13 @@ export const button = (text: string, callbackData: string): InlineKeyboardButton
 
 export const mention = (userId: number | bigint, htmlName: string): string =>
   `<a href="tg://user?id=${userId}">${htmlName}</a>`;
+
+export const PAGE_SIZE = 5;
+
+/** Pages of a list in one message: «◀️ Назад» / «Далі ▶️» edit it in place via `${prefix}:<page>`. */
+export const pageCount = (total: number) => Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+export const pageNav = (prefix: string, index: number, pages: number): InlineKeyboardButton[] => [
+  ...(index > 0 ? [button('◀️ Назад', `${prefix}:${index - 1}`)] : []),
+  ...(index < pages - 1 ? [button('Далі ▶️', `${prefix}:${index + 1}`)] : []),
+];

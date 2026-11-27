@@ -4,7 +4,7 @@ import {
   type FinanceRequestCard,
   type OrderRequisite,
 } from '../../generated/prisma/client';
-import { type BotReply, button } from '../telegram/core/bot-reply';
+import { type BotReply, button, PAGE_SIZE, pageCount, pageNav } from '../telegram/core/bot-reply';
 import { escapeHtml, formatKyivDate, formatMoneyIn } from '../telegram/core/format';
 import { formatRate } from '../telegram/notifications/order-templates';
 import { cancelOrderButton } from '../telegram/orders-list/orders-list.messages';
@@ -33,6 +33,8 @@ export const FinanceAction = {
   Payment: /^mp:(\d+)$/,
   /** A row of «🗂 Мої запити»: brings the request's card down to the bottom of the chat. */
   Show: /^mq:([\w-]+)$/,
+  /** «◀️ Назад» / «Далі ▶️» under «🗂 Мої запити». */
+  Page: /^mql:(\d+)$/,
 } as const;
 
 const attachButton = (id: string) => button('📎 Прикріпити файли', `ma:${id}`);
@@ -364,22 +366,44 @@ export function acceptRefusal(
   return text.slice(0, 200);
 }
 
-const listState = (card: FinanceRequestCard): string =>
-  card.completedAt
-    ? '⏳ очікує оплату'
-    : card.notifiedStatus === 'accepted'
-      ? '✅ погоджено, прийміть'
-      : '🕓 на розгляді';
+// who acts next: the manager's own step comes first
+const LIST_GROUPS: { title: string; has: (card: FinanceRequestCard) => boolean }[] = [
+  {
+    title: '✅ <b>Погоджено — натисніть «Прийняти»</b>',
+    has: (card) => !card.completedAt && card.notifiedStatus === 'accepted',
+  },
+  { title: '⏳ <b>Очікують оплату</b>', has: (card) => card.completedAt != null },
+  {
+    title: '🕓 <b>На розгляді у фінансистів</b>',
+    has: (card) => !card.completedAt && card.notifiedStatus !== 'accepted',
+  },
+];
 
-export function managerRequestList(cards: FinanceRequestCard[]): BotReply {
+export function managerRequestList(cards: FinanceRequestCard[], page: number): BotReply {
   if (cards.length === 0) return { html: 'Відкритих запитів немає.' };
+  const pages = pageCount(cards.length);
+  const index = Math.min(Math.max(page, 0), pages - 1);
+  const grouped = LIST_GROUPS.map((group) => ({ ...group, cards: cards.filter(group.has) }));
+  const shown = grouped
+    .flatMap((group) => group.cards.map((card) => ({ group, card })))
+    .slice(index * PAGE_SIZE, (index + 1) * PAGE_SIZE);
+
+  const lines = [
+    `<b>🗂 Мої запити</b> · відкритих: ${cards.length}${pages > 1 ? ` · стор. ${index + 1}/${pages}` : ''}`,
+    '',
+  ];
+  shown.forEach(({ group, card }, i) => {
+    if (shown[i - 1]?.group !== group) lines.push(group.title);
+    lines.push(`#${escapeHtml(card.number)} · ${formatKyivDate(card.createdAt).slice(0, 5)}`);
+  });
+  lines.push('', 'Натисніть номер — картка запиту зʼявиться внизу чату.');
+
+  const nav = pageNav('mql', index, pages);
   return {
-    html: '<b>Мої відкриті запити</b>\nНатисніть запит — його картка зʼявиться внизу чату.',
-    buttons: cards.map((card) => [
-      button(
-        `#${card.number} · ${formatKyivDate(card.createdAt).slice(0, 5)} · ${listState(card)}`,
-        `mq:${card.requestId}`,
-      ),
-    ]),
+    html: lines.join('\n'),
+    buttons: [
+      shown.map(({ card }) => button(`#${card.number}`, `mq:${card.requestId}`)),
+      ...(nav.length > 0 ? [nav] : []),
+    ],
   };
 }

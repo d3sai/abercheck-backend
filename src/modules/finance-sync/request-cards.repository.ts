@@ -52,7 +52,8 @@ export class RequestCardsRepository {
         OR: [{ notifiedStatus: null }, { notifiedStatus: { not: 'cancelled' } }],
       },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      // shortcut: paged in memory to group by state, fine while a manager has few open requests; page in SQL if it grows
+      take: 100,
     });
   }
 

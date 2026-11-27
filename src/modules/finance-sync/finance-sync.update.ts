@@ -51,6 +51,11 @@ export class FinanceSyncUpdate {
     return this.managerActions.show(ctx);
   }
 
+  @Action(FinanceAction.Page)
+  pageRequests(@Ctx() ctx: MatchContext): Promise<void> {
+    return this.managerActions.pageRequests(ctx);
+  }
+
   @Action(FinanceAction.Cancel)
   cancel(@Ctx() ctx: MatchContext): Promise<void> {
     return this.managerActions.cancel(ctx);
