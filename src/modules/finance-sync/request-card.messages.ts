@@ -396,7 +396,6 @@ export function managerRequestList(cards: FinanceRequestCard[], page: number): B
     if (shown[i - 1]?.group !== group) lines.push(group.title);
     lines.push(`#${escapeHtml(card.number)} · ${formatKyivDate(card.createdAt).slice(0, 5)}`);
   });
-  lines.push('', 'Натисніть номер — картка запиту зʼявиться внизу чату.');
 
   const nav = pageNav('mql', index, pages);
   return {
