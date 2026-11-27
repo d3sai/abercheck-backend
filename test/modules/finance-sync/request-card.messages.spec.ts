@@ -8,8 +8,10 @@ import {
   acceptRefusal,
   groupCard,
   managerCard,
+  managerRequestList,
   receiptCaption,
 } from '../../../src/modules/finance-sync/request-card.messages';
+import type { FinanceRequestCard } from '../../../src/generated/prisma/client';
 
 const ID = 'cmabcdefghij0123456789xyz';
 
@@ -684,5 +686,41 @@ describe('receiptCaption', () => {
 
     expect(caption).toContain('Дата оплати: 21.11.2026 01:30');
     expect(caption).toMatch(/Завантажено: Христина · \d\d\.\d\d\.\d{4} \d\d:\d\d/);
+  });
+});
+
+describe('managerRequestList', () => {
+  const at = new Date('2026-11-25T10:00:00Z');
+  const row = (patch: Partial<FinanceRequestCard> = {}) =>
+    ({
+      requestId: ID,
+      number: '42',
+      createdAt: at,
+      completedAt: null,
+      notifiedStatus: null,
+      ...patch,
+    }) as FinanceRequestCard;
+
+  it('gives one button per request, with its state, that brings its card down', () => {
+    const reply = managerRequestList([
+      row(),
+      row({ requestId: 'r2', number: '43', notifiedStatus: 'accepted' }),
+      row({ requestId: 'r3', number: '44', notifiedStatus: 'accepted', completedAt: at }),
+    ]);
+
+    expect(reply.html).toContain('Мої відкриті запити');
+    expect(flat(reply).map((b) => b.text)).toEqual([
+      '#42 · 25.11 · 🕓 на розгляді',
+      '#43 · 25.11 · ✅ погоджено, прийміть',
+      '#44 · 25.11 · ⏳ очікує оплату',
+    ]);
+    expect(FinanceAction.Show.exec(flat(reply)[0]!.callback_data)?.[1]).toBe(ID);
+  });
+
+  it('says so when there are none', () => {
+    const reply = managerRequestList([]);
+
+    expect(reply.html).toContain('Відкритих запитів немає');
+    expect(reply.buttons).toBeUndefined();
   });
 });

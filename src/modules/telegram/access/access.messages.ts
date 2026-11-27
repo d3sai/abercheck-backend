@@ -1,7 +1,7 @@
 import { type Manager, ManagerStatus } from '../../../generated/prisma/client';
 import type { BotReply } from '../core/bot-reply';
 import { escapeHtml } from '../core/format';
-import { NEW_REQUEST_LABEL } from '../core/menu';
+import { MY_ORDERS_LABEL, MY_REQUESTS_LABEL, NEW_REQUEST_LABEL } from '../core/menu';
 
 export function newManagerNotice(manager: Manager): string {
   return [
@@ -14,6 +14,7 @@ export function newManagerNotice(manager: Manager): string {
 
 export const HELP = [
   `Оплати створюються кнопкою «${NEW_REQUEST_LABEL}» біля поля введення повідомлення.`,
+  `Свої запити й замовлення — кнопки «${MY_REQUESTS_LABEL}» і «${MY_ORDERS_LABEL}».`,
   '',
   '/cancel — скасувати незавершену дію',
   '/video — відео-інструкції',

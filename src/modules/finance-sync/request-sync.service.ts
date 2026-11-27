@@ -100,20 +100,31 @@ export class RequestSyncService {
     const card = await this.cards.byRequestId(view.id);
     if (!card || !(await this.cards.markNotified(view.id, status))) return;
     if (status === 'paid') return;
+    // not delivered: let the next event try again; the old card is still there and up to date
+    if (!(await this.moveManagerCard(card, view))) await this.cards.resetNotified(view.id, status);
+  }
+
+  /** «🗂 Мої запити»: the card, redrawn from finance, moves to the bottom of the manager's chat. */
+  async showToManager(card: FinanceRequestCard): Promise<boolean> {
+    const { request: view } = await this.finance.get(card.requestId);
+    return this.moveManagerCard(card, view);
+  }
+
+  private async moveManagerCard(
+    card: FinanceRequestCard,
+    view: FinanceRequestView,
+  ): Promise<boolean> {
     const { html, buttons } = await this.managerReply(card, view);
     const sent = await this.sender.send(card.managerChatId, html, buttons);
-    // not delivered: let the next event try again; the old card is still there and up to date
-    if (sent === null) {
-      await this.cards.resetNotified(view.id, status);
-      return;
-    }
+    if (sent === null) return false;
     await this.cards.setManagerMessage(view.id, sent);
     const old = card.managerMessageId;
-    if (old === null) return;
+    if (old === null) return true;
     // a reply to the old message still reaches the request, should Telegram keep it
     await this.cards.rememberChatMessage(card.managerChatId, old, view.id);
     await this.sender.editMessage(card.managerChatId, old, movedStub(view), []);
     await this.sender.deleteMessage(card.managerChatId, old);
+    return true;
   }
 
   /** Finance marks the message `sent` once we answer, so a failed delivery must fail the webhook. */

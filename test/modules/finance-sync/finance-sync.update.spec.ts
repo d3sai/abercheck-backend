@@ -77,7 +77,12 @@ describe('FinanceSyncUpdate', () => {
     refresh: jest.fn(),
     onText: jest.fn(),
   };
-  const managerActions = { cancel: jest.fn(), onText: jest.fn() };
+  const managerActions = {
+    cancel: jest.fn(),
+    onText: jest.fn(),
+    show: jest.fn(),
+    listRequests: jest.fn(),
+  };
   const receipts = { onFile: jest.fn() };
   const update = new FinanceSyncUpdate(
     actions as unknown as FinancierActionsService,
@@ -96,10 +101,12 @@ describe('FinanceSyncUpdate', () => {
     await update.fop(c as never);
     await update.refresh(c as never);
     await update.cancel(c as never);
+    await update.show(c as never);
 
     expect(actions.pressFop).toHaveBeenCalledWith(c);
     expect(actions.refresh).toHaveBeenCalledWith(c);
     expect(managerActions.cancel).toHaveBeenCalledWith(c);
+    expect(managerActions.show).toHaveBeenCalledWith(c);
   });
 
   describe('text', () => {
@@ -114,6 +121,17 @@ describe('FinanceSyncUpdate', () => {
       expect(actions.onText).toHaveBeenCalledWith(c, expect.any(Function));
       expect(managerActions.onText).toHaveBeenCalledWith(c, next);
       expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it('should list the manager requests on «🗂 Мої запити», before anyone else', async () => {
+      const c = { text: '🗂 Мої запити' };
+      const next = jest.fn();
+
+      await update.text(c as never, next);
+
+      expect(managerActions.listRequests).toHaveBeenCalledWith(c);
+      expect(actions.onText).not.toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
     });
 
     it('should not call the manager handler or next when the financiers handled the text', async () => {

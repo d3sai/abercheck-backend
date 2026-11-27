@@ -75,7 +75,10 @@ describe('reply', () => {
     const [, options] = replyFn.mock.calls[0]!;
     expect(options.reply_markup).not.toEqual({ inline_keyboard: buttons });
     expect(options.reply_markup).toEqual({
-      keyboard: [[{ text: '🎬 Відео-інструкції' }]],
+      keyboard: [
+        [{ text: '🗂 Мої запити' }, { text: '📋 Мої замовлення' }],
+        [{ text: '🎬 Відео-інструкції' }],
+      ],
       resize_keyboard: true,
       is_persistent: false,
     });

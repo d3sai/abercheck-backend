@@ -11,6 +11,7 @@ import {
   KEYBOARD_NOTICE,
   KEYBOARD_VERSION,
   MENU_LABEL,
+  MY_ORDERS_LABEL,
   NEW_REQUEST_LABEL,
 } from './menu';
 import { DeleteAction, OrderDeleteService } from '../orders-list/order-delete.service';
@@ -351,6 +352,10 @@ export class BotUpdate implements OnApplicationBootstrap {
     }
     if (ctx.text === GUIDES_LABEL) {
       await reply(ctx, GUIDES_MENU);
+      return;
+    }
+    if (ctx.text === MY_ORDERS_LABEL) {
+      await reply(ctx, await this.lists.forManager(manager.id, false));
       return;
     }
     // a press of a button from the old reply keyboard: clear the keyboard and point at the new one

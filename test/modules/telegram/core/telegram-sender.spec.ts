@@ -80,7 +80,10 @@ describe('TelegramSender', () => {
 
       const [, , options] = bot.telegram.sendMessage.mock.calls[0]!;
       expect(options.reply_markup).toEqual({
-        keyboard: [[{ text: '🎬 Відео-інструкції' }]],
+        keyboard: [
+          [{ text: '🗂 Мої запити' }, { text: '📋 Мої замовлення' }],
+          [{ text: '🎬 Відео-інструкції' }],
+        ],
         resize_keyboard: true,
         is_persistent: false,
       });
@@ -304,7 +307,10 @@ describe('TelegramSender', () => {
 
       const options = bot.telegram.sendMessage.mock.calls[0]?.[2];
       expect(options?.reply_markup).toEqual({
-        keyboard: [[{ text: '🎬 Відео-інструкції' }]],
+        keyboard: [
+          [{ text: '🗂 Мої запити' }, { text: '📋 Мої замовлення' }],
+          [{ text: '🎬 Відео-інструкції' }],
+        ],
         resize_keyboard: true,
         is_persistent: false,
       });

@@ -27,6 +27,7 @@ import {
   KEYBOARD_NOTICE,
   KEYBOARD_VERSION,
   MENU_LABEL,
+  MY_ORDERS_LABEL,
   NEW_REQUEST_LABEL,
   mainKeyboard,
 } from '../../../../src/modules/telegram/core/menu';
@@ -376,6 +377,14 @@ describe('BotUpdate', () => {
     it('should not answer /list in a private chat', async () => {
       expect(await say('/list')).toEqual([]);
       expect(await say('/list all')).toEqual([]);
+    });
+
+    it('should list the open orders of this manager from the keyboard button', async () => {
+      const replies = await say(MY_ORDERS_LABEL);
+
+      expect(replies).toHaveLength(1);
+      expect(replies[0]!.text).toContain('Мої відкриті замовлення');
+      expect(replies[0]!.text).toContain('0000-066717');
     });
 
     it('should still answer /list in the admin group', async () => {

@@ -6,6 +6,7 @@ import { fullName, isPrivate, type MatchContext, reply } from '../telegram/core/
 import { ManagersService } from '../managers/managers.service';
 import { FinanceClient } from './finance.client';
 import { FinanceApiError } from './finance.types';
+import { managerRequestList } from './request-card.messages';
 import { RequestCardsRepository } from './request-cards.repository';
 import { RequestSyncService } from './request-sync.service';
 
@@ -47,6 +48,36 @@ export class ManagerActionsService {
       },
     );
     await this.cards.rememberChatMessage(card.managerChatId, prompt.message_id, card.requestId);
+  }
+
+  async listRequests(ctx: Context): Promise<void> {
+    if (!isPrivate(ctx) || !ctx.from) return;
+    const manager = await this.managers.findActiveByTelegramId(BigInt(ctx.from.id));
+    if (!manager) {
+      await reply(ctx, { html: NOT_A_MANAGER });
+      return;
+    }
+    await reply(ctx, managerRequestList(await this.cards.activeOfManager(manager.id)));
+  }
+
+  async show(ctx: MatchContext): Promise<void> {
+    if (!isPrivate(ctx) || !ctx.from) return;
+    if (!(await this.managers.findActiveByTelegramId(BigInt(ctx.from.id)))) {
+      await ctx.answerCbQuery(NOT_A_MANAGER, { show_alert: true });
+      return;
+    }
+    const card = await this.cards.byRequestId(ctx.match[1]!);
+    if (card?.managerChatId !== BigInt(ctx.chat!.id)) {
+      await ctx.answerCbQuery('Запит не знайдено', { show_alert: true });
+      return;
+    }
+    try {
+      await this.sync.showToManager(card);
+      await ctx.answerCbQuery();
+    } catch (error) {
+      if (!(error instanceof FinanceApiError)) throw error;
+      await ctx.answerCbQuery(NOT_ANSWERED, { show_alert: true });
+    }
   }
 
   async cancel(ctx: MatchContext): Promise<void> {

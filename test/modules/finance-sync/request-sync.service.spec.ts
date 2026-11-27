@@ -144,6 +144,32 @@ describe('RequestSyncService', () => {
     });
   });
 
+  describe('showToManager', () => {
+    it('should move the card down with a fresh view, without touching the notified status', async () => {
+      finance.get.mockResolvedValue({ request: view({ status: 'accepted' }) });
+
+      await expect(service.showToManager(card)).resolves.toBe(true);
+
+      expect(finance.get).toHaveBeenCalledWith('req1');
+      const [chat, html] = sender.send.mock.calls[0] as [bigint, string];
+      expect(chat).toBe(555n);
+      expect(html).toContain('#42');
+      expect(cards.setManagerMessage).toHaveBeenCalledWith('req1', 77);
+      expect(sender.deleteMessage).toHaveBeenCalledWith(555n, 31);
+      expect(cards.markNotified).not.toHaveBeenCalled();
+    });
+
+    it('should keep the old card when the new one could not be sent', async () => {
+      finance.get.mockResolvedValue({ request: view() });
+      sender.send.mockResolvedValue(null);
+
+      await expect(service.showToManager(card)).resolves.toBe(false);
+
+      expect(cards.setManagerMessage).not.toHaveBeenCalled();
+      expect(sender.deleteMessage).not.toHaveBeenCalled();
+    });
+  });
+
   describe('renderManager', () => {
     const URL_ = 'https://cab.example.ua/tg/request';
     type Edit = [bigint, number, string, { text: string }[][] | undefined];

@@ -1,7 +1,11 @@
 import { kyivParts } from '../../common/kyiv-time';
-import { Prisma, type OrderRequisite } from '../../generated/prisma/client';
+import {
+  Prisma,
+  type FinanceRequestCard,
+  type OrderRequisite,
+} from '../../generated/prisma/client';
 import { type BotReply, button } from '../telegram/core/bot-reply';
-import { escapeHtml, formatMoneyIn } from '../telegram/core/format';
+import { escapeHtml, formatKyivDate, formatMoneyIn } from '../telegram/core/format';
 import { formatRate } from '../telegram/notifications/order-templates';
 import { cancelOrderButton } from '../telegram/orders-list/orders-list.messages';
 import {
@@ -27,6 +31,8 @@ export const FinanceAction = {
   Route: /^mr:([\w-]+)$/,
   /** «Платник · сума» under «До якого платежу?»: the waiting receipts go with that payment. */
   Payment: /^mp:(\d+)$/,
+  /** A row of «🗂 Мої запити»: brings the request's card down to the bottom of the chat. */
+  Show: /^mq:([\w-]+)$/,
 } as const;
 
 const attachButton = (id: string) => button('📎 Прикріпити файли', `ma:${id}`);
@@ -356,4 +362,24 @@ export function acceptRefusal(
       ? `Фінанси відхилили запит (${code})`
       : 'Фінанси не відповіли, спробуйте ще раз');
   return text.slice(0, 200);
+}
+
+const listState = (card: FinanceRequestCard): string =>
+  card.completedAt
+    ? '⏳ очікує оплату'
+    : card.notifiedStatus === 'accepted'
+      ? '✅ погоджено, прийміть'
+      : '🕓 на розгляді';
+
+export function managerRequestList(cards: FinanceRequestCard[]): BotReply {
+  if (cards.length === 0) return { html: 'Відкритих запитів немає.' };
+  return {
+    html: '<b>Мої відкриті запити</b>\nНатисніть запит — його картка зʼявиться внизу чату.',
+    buttons: cards.map((card) => [
+      button(
+        `#${card.number} · ${formatKyivDate(card.createdAt).slice(0, 5)} · ${listState(card)}`,
+        `mq:${card.requestId}`,
+      ),
+    ]),
+  };
 }

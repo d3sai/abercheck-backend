@@ -38,6 +38,20 @@ describe('RequestCardsRepository', () => {
 
   afterEach(() => jest.resetAllMocks());
 
+  it('should list the open requests of a manager, newest first, never cancelled ones', async () => {
+    await repository.activeOfManager(4);
+
+    expect(financeRequestCard.findMany).toHaveBeenCalledWith({
+      where: {
+        managerId: 4,
+        closedAt: null,
+        OR: [{ notifiedStatus: null }, { notifiedStatus: { not: 'cancelled' } }],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+  });
+
   it('should offer open requests and those closed since the given date, never cancelled ones', async () => {
     const since = new Date('2026-10-17T00:00:00Z');
     const closedSince = new Date('2026-11-13T00:00:00Z');

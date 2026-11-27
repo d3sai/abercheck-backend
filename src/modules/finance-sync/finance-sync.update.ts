@@ -1,5 +1,6 @@
 import { Action, Ctx, Next, On, Update } from 'nestjs-telegraf';
 import type { Context } from 'telegraf';
+import { MY_REQUESTS_LABEL } from '../telegram/core/menu';
 import type { MatchContext } from '../telegram/core/telegram-context';
 import { FinancierActionsService } from './financier-actions.service';
 import { ManagerActionsService } from './manager-actions.service';
@@ -45,6 +46,11 @@ export class FinanceSyncUpdate {
     return this.receipts.askOrderFiles(ctx);
   }
 
+  @Action(FinanceAction.Show)
+  show(@Ctx() ctx: MatchContext): Promise<void> {
+    return this.managerActions.show(ctx);
+  }
+
   @Action(FinanceAction.Cancel)
   cancel(@Ctx() ctx: MatchContext): Promise<void> {
     return this.managerActions.cancel(ctx);
@@ -53,6 +59,7 @@ export class FinanceSyncUpdate {
   // Each handler claims only replies to its own cards and calls `next` otherwise, ending in BotUpdate.text.
   @On('text')
   text(@Ctx() ctx: Context, @Next() next: () => Promise<void>): Promise<void> {
+    if (ctx.text === MY_REQUESTS_LABEL) return this.managerActions.listRequests(ctx);
     return this.actions.onText(ctx, () => this.managerActions.onText(ctx, next));
   }
 

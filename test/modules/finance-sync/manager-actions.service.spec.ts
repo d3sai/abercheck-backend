@@ -30,8 +30,14 @@ describe('ManagerActionsService', () => {
     byManagerMessage: jest.fn(),
     requestOfChatMessage: jest.fn(),
     rememberChatMessage: jest.fn(),
+    activeOfManager: jest.fn(),
   };
-  const sync = { renderGroup: jest.fn(), renderManager: jest.fn(), notifyManager: jest.fn() };
+  const sync = {
+    renderGroup: jest.fn(),
+    renderManager: jest.fn(),
+    notifyManager: jest.fn(),
+    showToManager: jest.fn(),
+  };
   const managers = { findActiveByTelegramId: jest.fn() };
   const service = new ManagerActionsService(
     finance as unknown as FinanceClient,
@@ -65,6 +71,69 @@ describe('ManagerActionsService', () => {
           reply_parameters: { message_id: 31, allow_sending_without_reply: true },
         }),
       );
+    });
+  });
+
+  describe('listRequests', () => {
+    it('should reply with the open requests of this manager', async () => {
+      cards.activeOfManager.mockResolvedValue([
+        { ...card, createdAt: new Date(), completedAt: null, notifiedStatus: null },
+      ]);
+      const c = { ...press(), reply: jest.fn() };
+
+      await service.listRequests(c as never);
+
+      expect(cards.activeOfManager).toHaveBeenCalledWith(4);
+      expect(c.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Мої відкриті запити'),
+        expect.objectContaining({
+          reply_markup: {
+            inline_keyboard: [[expect.objectContaining({ callback_data: 'mq:req1' })]],
+          },
+        }),
+      );
+    });
+
+    it('should refuse someone who is not an active manager', async () => {
+      managers.findActiveByTelegramId.mockResolvedValue(null);
+      const c = { ...press(), reply: jest.fn() };
+
+      await service.listRequests(c as never);
+
+      expect(cards.activeOfManager).not.toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith(NOT_A_MANAGER, expect.anything());
+    });
+  });
+
+  describe('show', () => {
+    it('should bring the card of the request down', async () => {
+      sync.showToManager.mockResolvedValue(true);
+      const c = press();
+
+      await service.show(c as never);
+
+      expect(sync.showToManager).toHaveBeenCalledWith(card);
+      expect(c.answerCbQuery).toHaveBeenCalledWith();
+    });
+
+    it('should refuse a request of another chat', async () => {
+      const c = press(777);
+
+      await service.show(c as never);
+
+      expect(sync.showToManager).not.toHaveBeenCalled();
+      expect(c.answerCbQuery).toHaveBeenCalledWith('Запит не знайдено', { show_alert: true });
+    });
+
+    it('should say so when finance did not answer', async () => {
+      sync.showToManager.mockRejectedValue(new FinanceApiError(0, 'timeout'));
+      const c = press();
+
+      await service.show(c as never);
+
+      expect(c.answerCbQuery).toHaveBeenCalledWith('Фінанси не відповіли, спробуйте ще раз', {
+        show_alert: true,
+      });
     });
   });
 

@@ -44,6 +44,18 @@ export class RequestCardsRepository {
     });
   }
 
+  activeOfManager(managerId: number): Promise<FinanceRequestCard[]> {
+    return this.prisma.financeRequestCard.findMany({
+      where: {
+        managerId,
+        closedAt: null,
+        OR: [{ notifiedStatus: null }, { notifiedStatus: { not: 'cancelled' } }],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+  }
+
   latestOfManager(managerId: number): Promise<FinanceRequestCard | null> {
     return this.prisma.financeRequestCard.findFirst({
       where: { managerId },
